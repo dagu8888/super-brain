@@ -15,6 +15,7 @@ Super-agent 的全部运行配置放在这里，纳入版本管理，改动即�
 ├── 权限与同步规则.md     ✅ 权限矩阵 + 署名提交 + 分区写入
 ├── 接入授权-Grok-Maus.md ✅ 两个 bot 的 Deploy Key / PAT 授权步骤
 ├── 事件驱动机制.md       ✅ 快过滤→慢判断→直通全流程 + 路由表 + 场景走查
-└── 待生成：
-    └── watchdog.yaml           # 看门狗巡检（第五步）
+└── watchdog.yaml         ✅ 看门狗：心跳/队列积压/同步状态/回写审计 + 告警
 ```
+
+配套运维脚本在 `90-System/`：`watchdog/watchdog.sh`（巡检自愈）、`sop/强制回写SOP.md`（完成定义与催办升级）。
