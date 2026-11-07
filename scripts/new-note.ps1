@@ -1,4 +1,4 @@
-# new-note.ps1 — 从模板建笔记（占位符自动填充）
+﻿# new-note.ps1 — 从模板建笔记（占位符自动填充）
 # 用法：new-note.ps1 -Template 技能 -Title "xxx方法论" [-Folder 50-Skills/子目录]
 param(
   [Parameter(Mandatory = $true)][ValidateSet('笔记','项目','领域','资源','日记','复盘','技能')]

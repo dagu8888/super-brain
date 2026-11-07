@@ -1,4 +1,4 @@
-# sync.ps1 — 强制同步脚本（pull --rebase + push，云端优先）
+﻿# sync.ps1 — 强制同步脚本（pull --rebase + push，云端优先）
 # 规则全文见 99-Meta/同步规则.md
 param(
   [string]$Message = '',

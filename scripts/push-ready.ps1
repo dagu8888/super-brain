@@ -1,4 +1,4 @@
-# push-ready.ps1 — 一键云端就绪：验证凭据 → 建仓 → 配远端 → 首推
+﻿# push-ready.ps1 — 一键云端就绪：验证凭据 → 建仓 → 配远端 → 首推
 # 用法：
 #   push-ready.ps1                    # 用凭据管理器现有凭据
 #   push-ready.ps1 -BrowserLogin      # 弹浏览器重新授权（推荐：凭据过期时）

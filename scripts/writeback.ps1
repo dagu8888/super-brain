@@ -1,4 +1,4 @@
-# writeback.ps1 — 成果回写唯一入口（自动 frontmatter + 同步）
+﻿# writeback.ps1 — 成果回写唯一入口（自动 frontmatter + 同步）
 # 用法示例：
 #   writeback.ps1 -Category 00-Inbox -Title "标题" -Source "chat:微信" -Tags 回写,聊天记录 -Content "内容"
 #   writeback.ps1 -Category 50-Skills -Title "方法论" -BodyFile D:\tmp\x.md -Project "项目名" -Related "笔记A","笔记B"

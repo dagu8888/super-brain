@@ -1,4 +1,4 @@
-# setup-task.ps1 — 注册/卸载每日与每周自动索引计划任务
+﻿# setup-task.ps1 — 注册/卸载每日与每周自动索引计划任务
 # 用法：setup-task.ps1（注册）  setup-task.ps1 -Remove（卸载）
 param([switch]$Remove)
 $ErrorActionPreference = 'Stop'
