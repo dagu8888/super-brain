@@ -1,0 +1,14 @@
+{
+  "colorGroups": [
+    { "query": "path:10-Knowledge", "color": { "a": 1, "rgb": 8153581 } },
+    { "query": "path:20-Skills", "color": { "a": 1, "rgb": 2448363 } },
+    { "query": "path:30-Reviews", "color": { "a": 1, "rgb": 1483594 } },
+    { "query": "path:00-Inbox", "color": { "a": 1, "rgb": 8421504 } }
+  ],
+  "showTags": true,
+  "showAttachments": false,
+  "hideUnresolved": false,
+  "showOrphans": true,
+  "lineSizeMultiplier": 1,
+  "nodeSizeMultiplier": 1
+}
