@@ -1,0 +1,10 @@
+# Obsidian 工作区状态不进仓库
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache
+.trash/
+*.tmp
+~$*
+.DS_Store
+Thumbs.db
+scripts/*.log

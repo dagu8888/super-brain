@@ -1,0 +1,10 @@
+{
+  "attachmentFolderPath": "99-Meta/附件",
+  "newFileLocation": "folder",
+  "newFileFolderPath": "00-Inbox",
+  "alwaysUpdateLinks": true,
+  "newLinkFormat": "shortest",
+  "showLineNumber": true,
+  "promptDelete": false,
+  "useMarkdownLinks": false
+}
