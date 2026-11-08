@@ -306,7 +306,9 @@ def chief_execute(conn, chief_id, cmd, args):
                           (target,)).fetchone()
         if not ag or not ag[2] == "active" or not ag[1]:
             return {"ok": False, "error": f"{target} 未通过验证或未激活，按铁律不能派单"}
-        new_type = json.loads(ag[0] or "[]")[0]
+        ttypes = json.loads(ag[0] or "[]")
+        cur = conn.execute("SELECT type FROM tasks WHERE id=?", (tid,)).fetchone()
+        new_type = cur[0] if cur and cur[0] in ttypes else ttypes[0]   # 类型兼容则保留
         cur = conn.execute(
             "UPDATE tasks SET type=?, status='pending', lease_owner=NULL, lease_expires_at=NULL, "
             "not_before=NULL, retry_count=0 WHERE id=? AND status IN ('pending','failed','dead')",
@@ -496,13 +498,14 @@ def claim_task(conn, worker_id, types):
 
 def worker_loop(worker_id):
     conn = db()
-    row = conn.execute("SELECT task_types,verified FROM agents "
-                       "WHERE agent_id=? AND kind='worker' AND status='active'", (worker_id,)).fetchone()
-    types = json.loads(row[0]) if row and row[0] else []
-    if row and not row[1]:
-        types = [t for t in types if t == "probe"]     # 铁律：未验证 Agent 只能领 probe
     while not stop.is_set():
         heartbeat(conn, worker_id, "idle")
+        # 每轮重读注册信息：verified/task_types 可能已被探针或管理员更新
+        row = conn.execute("SELECT task_types,verified FROM agents "
+                           "WHERE agent_id=? AND kind='worker' AND status='active'", (worker_id,)).fetchone()
+        types = json.loads(row[0]) if row and row[0] else []
+        if row and not row[1]:
+            types = [t for t in types if t == "probe"]  # 铁律：未验证 Agent 只能领 probe
         task = claim_task(conn, worker_id, types)
         if not task:
             stop.wait(WORKER_IDLE_WAIT)
