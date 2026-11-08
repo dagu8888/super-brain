@@ -22,7 +22,7 @@ import runtime  # noqa: E402
 def main():
     ap = argparse.ArgumentParser(description="Super-Brain chief 指令接口")
     ap.add_argument("--as", dest="chief", default="trae-chief",
-                    help="入口身份：grok-chief|deepseek-chief|maus-chief|dsh-chief|trae-chief")
+                    help="入口身份：grok-chief|deepseek-chief|maus-chief|dsh-chief|trae-chief|maus2-chief|dsh2-chief|muse-chief（入口随增随减，以 agents 表真实注册为准）")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("submit"); p.add_argument("text"); p.add_argument("--priority", type=int, default=0)
     p.add_argument("--dedupe", dest="dedupe_key", default=None)
