@@ -16,7 +16,7 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from migrate_v2 import migrate, CANONICAL_USER          # noqa: E402
+from migrate_v2 import migrate, CANONICAL_USER, CHIEF_CAPS as CHIEF_CAPS_DEFAULT  # noqa: E402
 from path_guard import PathGuard, PermissionDenied      # noqa: E402
 
 try:
@@ -385,6 +385,62 @@ def chief_execute(conn, chief_id, cmd, args):
         log_event("assist_reported", by=chief_id, task=tid)
         return {"ok": True, "task_id": tid}
 
+    # ---- 组织管理：Agent 可随时增减（以注册表为准，代码不写死名单） ----
+    if cmd in ("add-agent", "disable-agent", "enable-agent"):
+        aid = str(args.get("id", "")).strip()
+        if not re.match(r"^[a-z0-9][a-z0-9._-]{1,40}$", aid):
+            return {"ok": False, "error": "id 必填：小写字母/数字/. _ -，长度 2-41"}
+        row = conn.execute("SELECT kind,status FROM agents WHERE agent_id=?", (aid,)).fetchone()
+
+        if cmd == "add-agent":
+            if row:
+                return {"ok": False, "error": f"{aid} 已存在（当前 {row[1]}），用 enable-agent 恢复"}
+            kind = str(args.get("kind", "worker"))
+            if kind not in ("worker", "chief"):
+                return {"ok": False, "error": "kind 只能是 worker 或 chief"}
+            caps = args.get("capabilities") or (["chat"] if kind == "worker" else CHIEF_CAPS_DEFAULT)
+            if not isinstance(caps, list) or not all(isinstance(x, str) for x in caps):
+                return {"ok": False, "error": "capabilities 必须是字符串数组"}
+            ttypes = args.get("task_types")
+            ttypes = ttypes if isinstance(ttypes, list) else (caps if kind == "worker" else [])
+            verified = 1 if args.get("verified") in (1, True, "1", "true") else (1 if kind == "chief" else 0)
+            perms = args.get("permissions") if isinstance(args.get("permissions"), dict) else \
+                {"write": [], "exec": False, "llm": False}
+            conn.execute(
+                """INSERT INTO agents
+                   (agent_id,kind,capabilities,task_types,permissions,verified,status,registered_at,last_seen)
+                   VALUES(?,?,?,?,?,?,'active',?,?)""",
+                (aid, kind, json.dumps(caps), json.dumps(ttypes), json.dumps(perms),
+                 verified, int(time.time()), int(time.time())))
+            conn.commit()
+            emit_event(conn, chief_id, "agent.created",
+                       {"agent_id": aid, "kind": kind, "capabilities": caps}, source_user=chief_id)
+            return {"ok": True, "agent_id": aid, "kind": kind, "status": "active",
+                    "verified": verified,
+                    "note": "已注册，执行线程将在 30 秒内自动拉起" if kind == "worker" else
+                            "已注册，口令需在 api_tokens.json 单独配置后可使用"}
+
+        if not row:
+            return {"ok": False, "error": f"{aid} 不存在"}
+        if aid == chief_id and cmd == "disable-agent":
+            return {"ok": False, "error": "不能停用自己"}
+        new_status = "active" if cmd == "enable-agent" else "disabled"
+        if row[1] == new_status:
+            return {"ok": True, "agent_id": aid, "status": new_status, "note": "已是该状态"}
+        if new_status == "disabled":            # 保护：每类至少留一个 active
+            n = conn.execute("SELECT COUNT(*) FROM agents WHERE kind=? AND status='active' AND agent_id<>?",
+                             (row[0], aid)).fetchone()[0]
+            if n == 0:
+                return {"ok": False, "error": f"不能停用最后一个 active {row[0]}"}
+        conn.execute("UPDATE agents SET status=? WHERE agent_id=?", (new_status, aid))
+        conn.commit()
+        emit_event(conn, chief_id, "agent.status_changed",
+                   {"agent_id": aid, "status": new_status}, source_user=chief_id)
+        log_event("agent_status_changed", agent=aid, status=new_status, by=chief_id)
+        return {"ok": True, "agent_id": aid, "status": new_status,
+                "note": "执行线程将在 30 秒内自动回收" if new_status == "disabled" else
+                        "执行线程将在 30 秒内自动拉起"}
+
     return {"ok": False, "error": f"未知指令 {cmd}"}
 
 
@@ -553,9 +609,9 @@ def claim_task(conn, worker_id, types):
             "payload": json.loads(row[3]), "retry_count": row[4], "event_id": row[5]}
 
 
-def worker_loop(worker_id):
+def worker_loop(worker_id, agent_stop=None):
     conn = db()
-    while not stop.is_set():
+    while not stop.is_set() and not (agent_stop and agent_stop.is_set()):
         heartbeat(conn, worker_id, "idle")
         # 每轮重读注册信息：verified/task_types 可能已被探针或管理员更新
         row = conn.execute("SELECT task_types,verified FROM agents "
@@ -898,9 +954,10 @@ HANDLERS = {
     "code-test": handle_code,
 }
 
-WORKER_IDS = ["knowledge-worker", "chat-worker", "code-worker", "research-worker", "trae-developer",
-              # 2026-11-08 大古老师口径「7 入口 + 7 执行 agent」：新增两个执行者，复用已验证处理器
-              "analysis-worker", "archive-worker"]
+def active_worker_ids(conn):
+    """以注册表为准：谁 active 谁就该有执行线程（代码不写死名单，Agent 可随时增减）"""
+    return [r[0] for r in conn.execute(
+        "SELECT agent_id FROM agents WHERE kind='worker' AND status='active' ORDER BY agent_id")]
 
 
 # ---------- Supervisor（E3：线程崩溃检测重启） ----------
@@ -916,30 +973,63 @@ def main():
     conn = db()
     migrate(conn)                                # 幂等：确保 v2 表与注册存在
     conn.close()
-    targets = {"router": router_loop, "reaper": reaper_loop}
-    targets.update({w: (lambda w=w: worker_loop(w)) for w in WORKER_IDS})
-    threads = {n: threading.Thread(target=guard_run, args=(f, n), name=n, daemon=True)
-               for n, f in targets.items()}
-    for t in threads.values():
+    threads, agent_stops = {}, {}
+
+    def start_worker(wid):
+        ev = threading.Event()
+        agent_stops[wid] = ev
+        t = threading.Thread(target=guard_run,
+                             args=(lambda w=wid, e=ev: worker_loop(w, e), wid),
+                             name=wid, daemon=True)
         t.start()
+        threads[wid] = t
+
+    targets = {"router": router_loop, "reaper": reaper_loop}
+    for n, f in targets.items():
+        t = threading.Thread(target=guard_run, args=(f, n), name=n, daemon=True)
+        t.start()
+        threads[n] = t
+    conn = db()
+    for wid in active_worker_ids(conn):          # 启动时按注册表拉起执行线程
+        start_worker(wid)
+    conn.close()
     # 批示#5：五入口在线接入——api_tokens.json 存在才启动 HTTP API（缺失不影响主干）
     try:
         import api_server
         api_server.maybe_start(stop, log_event, db, chief_execute)
     except Exception as e:                                  # noqa
         log_event("api_start_failed", error=str(e)[:200])
-    log_event("runtime_started", version="v2", agents=list(targets), pid=os.getpid())
+    log_event("runtime_started", version="v2", agents=list(threads), pid=os.getpid())
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     conn = db()
     while not stop.is_set():
         heartbeat(conn, "supervisor", "watching")
         for name, t in list(threads.items()):
-            if not t.is_alive():
+            if t.is_alive():
+                continue
+            if name in agent_stops:              # worker：按注册表决定是否复活
+                st = conn.execute("SELECT status FROM agents WHERE agent_id=?", (name,)).fetchone()
+                if st and st[0] == "active":
+                    start_worker(name)
+                else:
+                    threads.pop(name, None)
+                    agent_stops.pop(name, None)
+                    log_event("worker_removed", worker=name)
+            else:                                # router/reaper：直接重启
                 threads[name] = threading.Thread(target=guard_run, args=(targets[name], name),
                                                  name=name, daemon=True)
                 threads[name].start()
                 log_event("worker_restarted", thread=name)
+        # 注册表对账：新增 active worker 自动拉起；停用的自动回收（无需重启、无需改代码）
+        active = set(active_worker_ids(conn))
+        for wid in active - set(threads):
+            start_worker(wid)
+            log_event("worker_spawned", worker=wid)
+        for wid in set(threads) & set(agent_stops) - active:
+            if not agent_stops[wid].is_set():
+                agent_stops[wid].set()
+                log_event("worker_stopping", worker=wid)
         stop.wait(SUPERVISOR_INTERVAL)
     log_event("runtime_stopped", pid=os.getpid())
 

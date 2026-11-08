@@ -8,26 +8,30 @@ const DEMO = {
   generatedAt: "2026-11-08 12:40（演示快照）",
 
   metrics: {
-    agentsOnline: 10,
+    chiefs: 7,
+    workers: 7,
     tasksRunning: 2,
     tasksPending: 0,
-    alerts: 0,
     eventsToday: 12,
   },
 
-  /* kind: chief=指挥入口（非常驻） / worker=执行者（常驻线程）
+  /* kind: chief=指挥入口（非常驻，空闲可 pull 拉活） / worker=执行者（常驻线程）
      status 取值对应 Agent 7 态：idle/working/collaborating/waiting/completed/error/offline */
   agents: [
-    { id: "trae-chief",      name: "TRAE",            role: "幕僚长入口", kind: "chief",  status: "working",       currentTask: "指挥 V3.0 原型开发",   lastActive: "刚刚",     x: 80,  y: 36 },
-    { id: "dsh-chief",       name: "DSH",             role: "多智能体入口", kind: "chief", status: "idle",          currentTask: null,                   lastActive: "12 分钟前", x: 300, y: 36 },
-    { id: "grok-chief",      name: "Grok",            role: "外脑入口",   kind: "chief",   status: "idle",          currentTask: null,                   lastActive: "34 分钟前", x: 520, y: 36 },
-    { id: "deepseek-chief",  name: "DeepSeek",        role: "外脑入口",   kind: "chief",   status: "idle",          currentTask: null,                   lastActive: "1 小时前",  x: 740, y: 36 },
-    { id: "maus-chief",      name: "MAUS",            role: "外脑入口",   kind: "chief",   status: "idle",          currentTask: null,                   lastActive: "2 小时前",  x: 960, y: 36 },
-    { id: "research-worker", name: "research-worker", role: "情报研究",   kind: "worker",  status: "working",       currentTask: "多智能体记忆机制研究",  lastActive: "1 分钟前",  x: 80,  y: 330 },
-    { id: "knowledge-worker",name: "knowledge-worker",role: "知识整理",   kind: "worker",  status: "collaborating", currentTask: "归档设计系统 Decision", lastActive: "刚刚",     x: 300, y: 330 },
-    { id: "chat-worker",     name: "chat-worker",     role: "对话应答",   kind: "worker",  status: "idle",          currentTask: null,                   lastActive: "20 分钟前", x: 520, y: 330 },
-    { id: "code-worker",     name: "code-worker",     role: "代码执行",   kind: "worker",  status: "waiting",       currentTask: "等待研究结论交接",      lastActive: "6 分钟前",  x: 740, y: 330 },
-    { id: "trae-developer",  name: "trae-developer",  role: "开发执行",   kind: "worker",  status: "working",       currentTask: "开发 Phase 3 高保真原型", lastActive: "刚刚",    x: 960, y: 330 },
+    { id: "trae-chief",      name: "TRAE",            role: "幕僚长入口", kind: "chief",  status: "working",       currentTask: "指挥 V3.0 原型开发",   lastActive: "刚刚", },
+    { id: "dsh-chief",       name: "DSH",             role: "多智能体入口", kind: "chief", status: "idle",          currentTask: null,                   lastActive: "12 分钟前" },
+    { id: "dsh2-chief",      name: "DSH2",            role: "多智能体入口", kind: "chief", status: "working",       currentTask: "拉活：整理备忘录归档",  lastActive: "刚刚", },
+    { id: "maus-chief",      name: "MAUS",            role: "外脑入口",   kind: "chief",   status: "idle",          currentTask: null,                   lastActive: "2 小时前", },
+    { id: "maus2-chief",     name: "MAUS2",           role: "外脑入口",   kind: "chief",   status: "working",       currentTask: "拉活：协作池任务",      lastActive: "刚刚", },
+    { id: "grok-chief",      name: "Grok",            role: "外脑入口",   kind: "chief",   status: "idle",          currentTask: null,                   lastActive: "34 分钟前" },
+    { id: "deepseek-chief",  name: "DeepSeek",        role: "外脑入口",   kind: "chief",   status: "idle",          currentTask: null,                   lastActive: "1 小时前", },
+    { id: "research-worker", name: "research-worker", role: "情报研究",   kind: "worker",  status: "working",       currentTask: "多智能体记忆机制研究",  lastActive: "1 分钟前", },
+    { id: "analysis-worker", name: "analysis-worker", role: "情报研究·并行", kind: "worker", status: "working",    currentTask: "记忆机制补充调研",      lastActive: "刚刚", },
+    { id: "knowledge-worker",name: "knowledge-worker",role: "知识整理",   kind: "worker",  status: "collaborating", currentTask: "归档设计系统 Decision", lastActive: "刚刚", },
+    { id: "archive-worker",  name: "archive-worker",  role: "知识整理·并行", kind: "worker", status: "working",    currentTask: "处理备忘录归档积压",    lastActive: "刚刚", },
+    { id: "chat-worker",     name: "chat-worker",     role: "对话应答",   kind: "worker",  status: "idle",          currentTask: null,                   lastActive: "20 分钟前" },
+    { id: "code-worker",     name: "code-worker",     role: "代码执行",   kind: "worker",  status: "waiting",       currentTask: "等待研究结论交接",      lastActive: "6 分钟前", },
+    { id: "trae-developer",  name: "trae-developer",  role: "开发执行",   kind: "worker",  status: "working",       currentTask: "开发 Phase 3 高保真原型", lastActive: "刚刚", },
   ],
 
   /* type: delegation 委派 / message 消息 / handoff 交接 / feedback 反馈 / shared_context 共享上下文
@@ -40,6 +44,8 @@ const DEMO = {
     { id: "e5", from: "chat-worker",     to: "knowledge-worker",type: "feedback",       taskId: "task_016", time: "09:52", state: "recent", summary: "会话要点回流知识库" },
     { id: "e6", from: "deepseek-chief",  to: "code-worker",     type: "delegation",     taskId: "task_014", time: "09:10", state: "recent", summary: "脚本修复委派" },
     { id: "e7", from: "knowledge-worker",to: "code-worker",     type: "shared_context", taskId: "task_020", time: "11:20", state: "recent", summary: "共享检索片段 5 条" },
+    { id: "e8", from: "dsh2-chief",      to: "archive-worker",  type: "delegation",     taskId: "task_025", time: "12:35", state: "active", summary: "拉活：委派备忘录归档积压" },
+    { id: "e9", from: "maus2-chief",     to: "analysis-worker", type: "delegation",     taskId: "task_026", time: "12:36", state: "active", summary: "拉活：并行补充调研" },
   ],
 
   /* 事件类型与配色遵循总指令 §14.2 */

@@ -7,7 +7,24 @@
 const SVGNS = "http://www.w3.org/2000/svg";
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-const NODE_W = 230, NODE_H = 76, WORLD_W = 1200, WORLD_H = 440;
+const NODE_W = 230, NODE_H = 76, GAP_X = 240, PAD_X = 60;
+let WORLD_W = 0, WORLD_H = 440;
+
+/* 按实际 Agent 数量自动排布（3 个画 3 个，30 个画 30 个），坐标不写死 */
+function layoutAgents() {
+  const chiefs = DEMO.agents.filter(a => a.kind === "chief");
+  const workers = DEMO.agents.filter(a => a.kind === "worker");
+  const cols = Math.max(chiefs.length, workers.length, 1);
+  WORLD_W = PAD_X * 2 + NODE_W + (cols - 1) * GAP_X;
+  const place = (list, y) => {
+    const total = list.length;
+    if (!total) return;
+    const startX = (WORLD_W - (total * NODE_W + (total - 1) * GAP_X)) / 2;
+    list.forEach((a, i) => { a.x = startX + i * (NODE_W + GAP_X); a.y = y; });
+  };
+  place(chiefs, 40);
+  place(workers, 340);
+}
 
 const STATUS_META = {
   idle:          { label: "空闲",   color: "var(--sb-text-tertiary)" },
@@ -118,14 +135,15 @@ function switchView(id) {
 
 /* ---------- 指挥中心 ---------- */
 function renderCommand(host) {
+  layoutAgents();
   const m = DEMO.metrics;
   host.innerHTML = `
   <section class="view" aria-label="指挥中心">
     <div class="pt-metrics">
-      ${stat("在线 Agent", m.agentsOnline, "全部活跃")}
+      ${stat("指挥入口", m.chiefs, "7 席在线")}
+      ${stat("执行 Agent", m.workers, "7 席就绪")}
       ${stat("执行中任务", m.tasksRunning, "2 个协作链路")}
       ${stat("待处理", m.tasksPending, "无积压")}
-      ${stat("异常", m.alerts, "系统正常")}
       ${stat("今日事件", m.eventsToday, "实时流入")}
     </div>
 
