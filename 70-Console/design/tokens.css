@@ -1,0 +1,121 @@
+/* ==========================================================================
+   Super-Brain 3.0 Design Tokens（唯一事实源）
+   依据《SUPER-BRAIN 2.0→3.0 完整工程升级开发总指令》§4 / §16
+   纪律：所有页面与组件必须引用变量，禁止散落硬编码的颜色、圆角、间距、时长。
+   ========================================================================== */
+
+:root {
+  /* Font */
+  --sb-font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Display",
+    "SF Pro Text",
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+    sans-serif;
+
+  /* Background */
+  --sb-bg: #F5F5F7;
+  --sb-bg-secondary: #EEEEF2;
+
+  /* Surfaces */
+  --sb-surface: rgba(255, 255, 255, 0.88);
+  --sb-surface-solid: #FFFFFF;
+  --sb-surface-secondary: #F0F0F2;
+  --sb-surface-glass: rgba(255, 255, 255, 0.68);
+
+  /* Typography */
+  --sb-text-primary: #1D1D1F;
+  --sb-text-secondary: #6E6E73;
+  --sb-text-tertiary: #86868B;
+
+  /* Brand */
+  --sb-primary: #007AFF;
+  --sb-primary-hover: #0066D6;
+  --sb-primary-soft: rgba(0, 122, 255, 0.10);
+
+  /* Semantic */
+  --sb-success: #30A46C;
+  --sb-warning: #D99A24;
+  --sb-danger: #E5484D;
+  --sb-info: #0A84FF;
+  --sb-collaborating: #8B7CFF;
+
+  /* Borders */
+  --sb-border: rgba(60, 60, 67, 0.12);
+  --sb-border-strong: rgba(60, 60, 67, 0.20);
+
+  /* Radius */
+  --sb-radius-xs: 6px;
+  --sb-radius-sm: 10px;
+  --sb-radius-md: 14px;
+  --sb-radius-lg: 20px;
+  --sb-radius-xl: 26px;
+  --sb-radius-pill: 999px;
+
+  /* Spacing */
+  --sb-space-1: 4px;
+  --sb-space-2: 8px;
+  --sb-space-3: 12px;
+  --sb-space-4: 16px;
+  --sb-space-5: 20px;
+  --sb-space-6: 24px;
+  --sb-space-8: 32px;
+  --sb-space-10: 40px;
+  --sb-space-12: 48px;
+
+  /* Shadows */
+  --sb-shadow-card:
+    0 2px 8px rgba(0, 0, 0, 0.035),
+    0 12px 32px rgba(0, 0, 0, 0.045);
+  --sb-shadow-floating:
+    0 12px 40px rgba(0, 0, 0, 0.12);
+
+  /* Glass */
+  --sb-glass-blur: 24px;
+  --sb-glass-saturation: 180%;
+
+  /* Motion */
+  --sb-motion-fast: 120ms;
+  --sb-motion-normal: 200ms;
+  --sb-motion-smooth: 300ms;
+  --sb-motion-slow: 450ms;
+  --sb-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Layout */
+  --sb-sidebar-width: 248px;
+  --sb-detail-width: 380px;
+  --sb-topbar-height: 56px;
+}
+
+/* 深色主题：通过 <html data-theme="dark"> 或容器元素切换 */
+[data-theme="dark"] {
+  --sb-bg: #111113;
+  --sb-bg-secondary: #19191D;
+
+  --sb-surface: rgba(35, 35, 39, 0.88);
+  --sb-surface-solid: #222226;
+  --sb-surface-secondary: #2B2B30;
+  --sb-surface-glass: rgba(40, 40, 46, 0.72);
+
+  --sb-text-primary: #F5F5F7;
+  --sb-text-secondary: #A1A1A8;
+  --sb-text-tertiary: #777780;
+
+  --sb-primary: #0A84FF;
+  --sb-primary-hover: #409CFF;
+  --sb-primary-soft: rgba(10, 132, 255, 0.16);
+
+  --sb-collaborating: #9C8FFF;
+
+  --sb-border: rgba(255, 255, 255, 0.10);
+  --sb-border-strong: rgba(255, 255, 255, 0.18);
+
+  --sb-shadow-card:
+    0 4px 16px rgba(0, 0, 0, 0.18),
+    0 16px 36px rgba(0, 0, 0, 0.22);
+  --sb-shadow-floating:
+    0 16px 48px rgba(0, 0, 0, 0.36);
+}
