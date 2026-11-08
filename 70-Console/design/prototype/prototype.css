@@ -179,7 +179,23 @@ body.net-fs { overflow: hidden; }
 @media (max-width: 720px) {
   .net-hud { left: 10px; right: 10px; bottom: 10px; width: auto; max-height: 46%; overflow: auto; }
   .net-tip { display: none !important; }
+  .net-legend { bottom: auto; top: 12px; right: 12px; }
 }
+/* 状态图例（仅 3D） */
+.net-legend {
+  position: absolute; right: 14px; bottom: 14px; z-index: 19;
+  display: none; gap: 12px; font-size: 11px; color: #94a3b8;
+  background: rgba(5, 7, 15, .55); padding: 5px 10px; border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, .14);
+}
+.pt-net.is-3d .net-legend { display: flex; }
+.net-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.net-legend span::before {
+  content: ""; width: 7px; height: 7px; border-radius: 50%; background: #2dd4bf;
+}
+.net-legend [data-s="working"]::before { background: #fbbf24; box-shadow: 0 0 8px #fbbf24; }
+.net-legend [data-s="idle"]::before { background: #2dd4bf; opacity: .6; }
+.net-legend [data-s="offline"]::before { background: #64748b; opacity: .35; }
 .pt-net-svg { position: absolute; top: 0; left: 0; overflow: visible; }
 .pt-edge { cursor: pointer; }
 .pt-edge .pt-edge-line { transition: opacity var(--sb-motion-fast) var(--sb-ease), stroke-width var(--sb-motion-fast) var(--sb-ease); }

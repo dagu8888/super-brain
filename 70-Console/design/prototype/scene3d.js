@@ -31,7 +31,9 @@
     grd.addColorStop(1, rgba(hex, 0));
     g.fillStyle = grd;
     g.fillRect(0, 0, S, S);
-    return new T.CanvasTexture(cv);
+    const tex = new T.CanvasTexture(cv);
+    if (T.SRGBColorSpace) tex.colorSpace = T.SRGBColorSpace;
+    return tex;
   }
 
   /* 节点贴图：光圈 + 首字母 + 名称（离线灰化并降低对比） */
@@ -65,6 +67,7 @@
       g.fillText(name, S / 2, 208);
     }
     const tex = new T.CanvasTexture(cv);
+    if (T.SRGBColorSpace) tex.colorSpace = T.SRGBColorSpace;
     tex.anisotropy = 4;
     return tex;
   }
@@ -169,6 +172,8 @@
       tip: null, hud: null,
     };
     mountOverlays(canvas);
+    R.reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    R.auto = !R.reduceMotion;
     R.onKey = e => { if (e.key === "Escape" && R && R.mode === "focus") exitFocus(); };
     document.addEventListener("keydown", R.onKey);
 
@@ -375,6 +380,31 @@
     }
     rebuildEdges(edges || []);
     computeFit();
+    if (R.mode === "focus" && R.focusId) {
+      const n = R.nodes.get(R.focusId);
+      if (n && !n.removing) refreshHUD(n.agent);
+      else exitFocus();
+    }
+  }
+
+  function refreshHUD(agent) {
+    if (!R || !R.hud) return;
+    R.hud.querySelector(".h-name").textContent = agent.name;
+    const st = R.hud.querySelector(".h-status");
+    st.textContent = statusLabel(agent);
+    st.dataset.status = agent.status;
+    R.hud.querySelector(".h-meta").textContent =
+      `${agent.role || ""} · ${agent.kind === "chief" ? "指挥入口" : "执行者"} · 最近活动 ${agent.lastActive || "—"}`;
+    const task = agent.currentTask || "暂无任务";
+    R.hud.querySelector(".h-task").textContent = task;
+    const pct = /(\d{1,3})\s*%/.exec(task);
+    const bar = R.hud.querySelector(".h-bar");
+    if (pct && +pct[1] <= 100) {
+      bar.hidden = false;
+      bar.querySelector("i").style.width = pct[1] + "%";
+    } else {
+      bar.hidden = true;
+    }
   }
 
   function snapCamera() {
@@ -556,7 +586,7 @@
       const dt = Math.min(0.05, (now - R.last) / 1000) || 0.016;
       R.last = now;
 
-      if (!R.dragging && R.mode === "overview") R.theta += dt * 0.02;
+      if (R.auto && !R.dragging && R.mode === "overview") R.theta += dt * 0.02;
       const d = R.fit * R.zoom;
       let goal, look = new T.Vector3(0, 0, 0);
       if (R.mode === "focus" && R.nodes.get(R.focusId)) {
