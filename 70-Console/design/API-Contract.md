@@ -37,6 +37,27 @@ CORS：允许 `*`（只读接口；跨域便于本地控制台调试），预检
 | `GET /api/monitor` | — | 线程心跳 + 队列深度 + health 最近一次 + loadavg/内存 |
 | `GET /api/knowledge` | `limit`(≤500) | 知识文件列表（frontmatter：title/category/tags/quality/updated） |
 | `GET /api/memory` | — | 会话列表 + Agent 运行记忆（`last_seen`） |
+| `GET /api/relations` | — | 协作通道：`source→target`、`evidence`(history/default_route)、`task_count`、`state`(active/idle) |
+
+### 任务进度字段（自学习）
+
+`/api/tasks` 与 `/api/tasks/{id}` 额外返回：
+
+| 字段 | 说明 |
+|---|---|
+| `progress` | done=100，pending=0，doing=已过/预计×100（封顶 95），失败类=null |
+| `estimate_seconds` | 同类任务**最近 20 条完成耗时的中位数**，无样本回退 120 秒 |
+| `elapsed_seconds` | 领取至今秒数 |
+| `estimate_samples` | 参与估算的样本数（越多越准，随运行自动成长） |
+
+样本来自 `tasks` 表自身历史（`done_at - claimed_at`），无新增表、无迁移，越跑越准。
+
+### 协作线口径（必须遵守）
+
+- **线全部预先生成**：有真实派发记录的画 `history`，无记录的入口补一条 `default_route`（默认路由 chat-worker，规则层真实兜底）。
+- **不发光**：`state=idle` 时为实线 + 透明度 0.22。
+- **才发光**：`state=active`（对应执行者当前有 `doing` 任务）才加流动光点。
+- 连线不表示"此刻正在协作"，只表示"可委派的通道"；点击可看派发次数/时间。
 
 ## 4. 状态映射（前端展示 ← 后端真实字段）
 

@@ -23,8 +23,8 @@
     <nav class="pt-nav" id="nav" aria-label="主导航"></nav>
     <div class="pt-side-foot">
       <div class="pt-conn">
-        <span class="sb-status" data-status="working">实时连接</span>
-        <small class="sb-text-tertiary">WebSocket · 演示</small>
+        <span class="sb-status" data-status="idle" id="conn-state">演示数据</span>
+        <small class="sb-text-tertiary">每 6 秒轮询 · 只读</small>
       </div>
       <button class="sb-button sb-button-secondary" id="theme-toggle" type="button">切换深 / 浅色</button>
     </div>
@@ -38,7 +38,8 @@
         <input id="global-search" type="search" placeholder="搜索 Agent / 任务 / 事件…（⌘K）" aria-label="全局搜索">
       </div>
       <span class="sb-status" data-status="completed">系统正常</span>
-      <span class="pt-demo-pill" title="本原型使用静态演示数据，Phase 4 接入真实数据">演示数据</span>
+      <button class="pt-demo-pill" id="live-badge" type="button" data-live="0"
+              title="点击接入真实数据（只读口令）">演示数据</button>
       <div class="pt-avatar" aria-label="当前用户">古</div>
     </div>
     <div class="sb-content" id="views"></div>
@@ -49,6 +50,7 @@
 <aside class="sb-detail-panel" id="detail" data-open="false" aria-label="详情面板"></aside>
 
 <script src="data.js"></script>
-<script src="prototype.js?v=4"></script>
+<script src="prototype.js?v=5"></script>
+<script src="live.js?v=1"></script>
 </body>
 </html>
