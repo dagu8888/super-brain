@@ -81,13 +81,18 @@ CREATE TABLE IF NOT EXISTS perm_audit(
 """
 
 # 内置角色注册（capabilities 以实际验证为准；trae-developer 未跑通探针前 verified=0）
+# 七入口统一能力：七命令 + 协作池（pull 领取 / renew 续租 / report 回传 / assist 提交）
+CHIEF_CAPS = ["submit", "status", "list", "progress", "delegate", "link", "cancel",
+              "pull", "report", "renew", "assist"]
 BUILTIN_AGENTS = [
     # (agent_id, kind, capabilities, task_types, permissions, verified)
-    ("grok-chief", "chief", ["submit", "status", "list", "progress", "delegate", "link", "cancel"], None, {"write": [], "exec": False, "llm": False}, 1),
-    ("deepseek-chief", "chief", ["submit", "status", "list", "progress", "delegate", "link", "cancel"], None, {"write": [], "exec": False, "llm": False}, 1),
-    ("maus-chief", "chief", ["submit", "status", "list", "progress", "delegate", "link", "cancel"], None, {"write": [], "exec": False, "llm": False}, 1),
-    ("dsh-chief", "chief", ["submit", "status", "list", "progress", "delegate", "link", "cancel"], None, {"write": [], "exec": False, "llm": False}, 1),
-    ("trae-chief", "chief", ["submit", "status", "list", "progress", "delegate", "link", "cancel"], None, {"write": [], "exec": False, "llm": False}, 1),
+    ("grok-chief", "chief", CHIEF_CAPS, None, {"write": [], "exec": False, "llm": False}, 1),
+    ("deepseek-chief", "chief", CHIEF_CAPS, None, {"write": [], "exec": False, "llm": False}, 1),
+    ("maus-chief", "chief", CHIEF_CAPS, None, {"write": [], "exec": False, "llm": False}, 1),
+    ("dsh-chief", "chief", CHIEF_CAPS, None, {"write": [], "exec": False, "llm": False}, 1),
+    ("trae-chief", "chief", CHIEF_CAPS, None, {"write": [], "exec": False, "llm": False}, 1),
+    ("maus2-chief", "chief", CHIEF_CAPS, None, {"write": [], "exec": False, "llm": False}, 1),
+    ("dsh2-chief", "chief", CHIEF_CAPS, None, {"write": [], "exec": False, "llm": False}, 1),
     ("knowledge-worker", "worker", ["inbox-triage", "kb-organize"], ["inbox-triage", "kb-organize"],
      {"write": ["00-Inbox/", "10-Knowledge/", "30-Reviews/"], "exec": False, "llm": True}, 1),
     ("chat-worker", "worker", ["chat"], ["chat"],
@@ -99,9 +104,14 @@ BUILTIN_AGENTS = [
     ("trae-developer", "worker", ["code-dev", "arch-review", "tech-doc", "code-test"],
      ["code-dev", "arch-review", "tech-doc", "code-test", "probe"],
      {"write": ["60-Outputs/", "30-Reviews/"], "exec": False, "llm": True}, 0),
+    # 2026-11-08 口径「7 入口 + 7 执行 agent」：新增两个执行者，复用已验证处理器
+    ("analysis-worker", "worker", ["research"], ["research"],
+     {"write": ["60-Outputs/"], "exec": False, "llm": True}, 1),
+    ("archive-worker", "worker", ["kb-organize", "inbox-triage"], ["kb-organize", "inbox-triage"],
+     {"write": ["00-Inbox/", "10-Knowledge/", "30-Reviews/"], "exec": False, "llm": True}, 1),
 ]
 
-CHIEF_SOURCES = ["grok", "deepseek", "maus", "dsh", "trae"]
+CHIEF_SOURCES = ["grok", "deepseek", "maus", "dsh", "trae", "maus2", "dsh2"]
 CANONICAL_USER = "dagu8888"  # 单用户系统：大古老师
 
 
