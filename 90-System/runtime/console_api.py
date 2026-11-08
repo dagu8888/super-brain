@@ -87,6 +87,22 @@ def _plain_body(path):
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _wikilinks(path):
+    """解析正文 [[wikilink]]（kepano 规范：允许未解析链接，留作面包屑）。返回去重链接名。"""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return []
+    text = re.sub(r"^---\n.*?\n---\n", "", text, flags=re.S)
+    seen, out = set(), []
+    for m in re.findall(r"\[\[([^\[\]|#]+)(?:[#|][^\[\]]*)?\]\]", text):
+        name = m.strip()
+        if name and name.lower() not in seen:
+            seen.add(name.lower())
+            out.append(name)
+    return out
+
+
 def handle_get(conn, raw_path):
     """返回 (http_code, dict)。conn 为新建的 sqlite3 连接。"""
     u = urlparse(raw_path)
@@ -287,7 +303,10 @@ def handle_get(conn, raw_path):
                 "category": category,
                 "tags": tags,
                 "quality": fm.get("quality", ""),
+                "rating": fm.get("rating", ""),
+                "created": fm.get("created", ""),
                 "updated": fm.get("updated", ""),
+                "links": _wikilinks(p),
                 "size": p.stat().st_size,
                 "snippet": _plain_body(p)[:180],
             })
@@ -301,5 +320,156 @@ def handle_get(conn, raw_path):
         agents = _rows(conn.execute(
             "SELECT agent_id,last_seen FROM agents WHERE last_seen IS NOT NULL ORDER BY last_seen DESC"))
         return ok({"sessions": rows, "agent_memory": agents})
+
+    if path == "/api/knowledge/canvas":
+        # JSON Canvas 1.0（obsidianmd/jsoncanvas）：每个分类一个 group，笔记为 file 节点，
+        # [[wikilink]] 解析到文件名（大小写不敏感）生成 edge；未解析链接只计数（kepano：面包屑是特性）。
+        entries = []
+        for p in sorted(KNOWLEDGE.rglob("*.md")):
+            fm = _frontmatter(p)
+            entries.append({
+                "p": p,
+                "path": str(p.relative_to(ROOT)),
+                "stem": p.stem,
+                "category": fm.get("category") or p.parent.name,
+            })
+        stem_map = {}
+        for e in entries:
+            stem_map.setdefault(e["stem"].lower(), e["path"])
+        cats = {}
+        for e in entries:
+            cats.setdefault(e["category"], []).append(e)
+        nodes, edges, file_node = [], [], {}
+        COLORS = ("4", "5", "6", "1", "2", "3")   # canvas preset 色：蓝紫粉红橙绿
+        gx, nc = 0, 0
+        for ci, cat in enumerate(sorted(cats)):
+            fl = cats[cat]
+            gw, rowh = 440, 96
+            gh = 60 + len(fl) * rowh + 24
+            nodes.append({"id": "g%d" % ci, "type": "group", "x": gx, "y": 0,
+                          "width": gw, "height": gh, "label": cat,
+                          "color": COLORS[ci % len(COLORS)]})
+            for i, e in enumerate(fl):
+                nid = "n%d" % nc
+                nc += 1
+                file_node[e["path"]] = nid
+                nodes.append({"id": nid, "type": "file", "file": e["path"],
+                              "x": gx + 40, "y": 60 + i * rowh,
+                              "width": 360, "height": 80})
+            gx += gw + 80
+        unresolved, seen_edge = 0, set()
+        for e in entries:
+            src = file_node[e["path"]]
+            for name in _wikilinks(e["p"]):
+                tgt_path = stem_map.get(name.lower())
+                if not tgt_path:
+                    unresolved += 1
+                    continue
+                tgt = file_node.get(tgt_path)
+                if not tgt or tgt == src or (src, tgt) in seen_edge:
+                    continue
+                seen_edge.add((src, tgt))
+                edges.append({"id": "e%d" % len(edges), "fromNode": src, "toNode": tgt,
+                              "fromSide": "right", "toSide": "left", "toEnd": "arrow"})
+        return ok({"canvas": {"nodes": nodes, "edges": edges},
+                   "stats": {"nodes": len(nodes), "edges": len(edges),
+                             "unresolved": unresolved}})
+
+    if path == "/api/review/annual":
+        # 年度回顾（kepano 40 questions 的数据佐证）：全部来自 DB 与文件系统实算
+        year = int(q.get("year") or time.localtime().tm_year)
+        y0 = int(time.mktime((year, 1, 1, 0, 0, 0, 0, 0, -1)))
+        y1 = int(time.mktime((year + 1, 1, 1, 0, 0, 0, 0, 0, -1)))
+        done = conn.execute(
+            "SELECT COUNT(*) FROM tasks WHERE status='done' AND done_at>=? AND done_at<?",
+            (y0, y1)).fetchone()[0]
+        failed = conn.execute(
+            "SELECT COUNT(*) FROM tasks WHERE status IN ('failed','dead') AND done_at>=? AND done_at<?",
+            (y0, y1)).fetchone()[0]
+        top_types = _rows(conn.execute(
+            "SELECT type, COUNT(*) AS n FROM tasks WHERE created_at>=? AND created_at<? "
+            "GROUP BY type ORDER BY n DESC LIMIT 5", (y0, y1)))
+        events_total = conn.execute(
+            "SELECT COUNT(*) FROM events WHERE created_at>=? AND created_at<?",
+            (y0, y1)).fetchone()[0]
+        active_days = conn.execute(
+            "SELECT COUNT(DISTINCT date(created_at,'unixepoch','localtime')) FROM events "
+            "WHERE created_at>=? AND created_at<?", (y0, y1)).fetchone()[0]
+        per_agent = _rows(conn.execute(
+            "SELECT lease_owner AS agent, COUNT(*) AS done FROM tasks "
+            "WHERE status='done' AND done_at>=? AND done_at<? "
+            "AND lease_owner IS NOT NULL AND lease_owner!='' "
+            "GROUP BY 1 ORDER BY done DESC", (y0, y1)))
+        knowledge_new = 0
+        for p in KNOWLEDGE.rglob("*.md"):
+            c = (_frontmatter(p).get("created") or "")[:4]
+            if c.isdigit():
+                if int(c) == year:
+                    knowledge_new += 1
+            elif y0 <= int(p.stat().st_mtime) < y1:
+                knowledge_new += 1
+        return ok({"year": year, "tasks_done": done, "tasks_failed": failed,
+                   "top_types": top_types, "events_total": events_total,
+                   "active_days": active_days, "per_agent": per_agent,
+                   "knowledge_new": knowledge_new})
+
+    if path == "/api/review/fractal":
+        # 分形回顾：日 / ISO 周 / 月 三个尺度的真实计数
+        days_n = min(int(q.get("days", 30)), 120)
+        today0 = int(time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1)))
+        t0 = today0 - (days_n - 1) * 86400
+        ev_day = dict(conn.execute(
+            "SELECT date(created_at,'unixepoch','localtime'), COUNT(*) FROM events "
+            "WHERE created_at>=? GROUP BY 1", (t0,)))
+        done_day = dict(conn.execute(
+            "SELECT date(done_at,'unixepoch','localtime'), COUNT(*) FROM tasks "
+            "WHERE status='done' AND done_at>=? GROUP BY 1", (t0,)))
+        fail_day = dict(conn.execute(
+            "SELECT date(done_at,'unixepoch','localtime'), COUNT(*) FROM tasks "
+            "WHERE status IN ('failed','dead') AND done_at>=? GROUP BY 1", (t0,)))
+        sess_day = dict(conn.execute(
+            "SELECT date(updated_at,'unixepoch','localtime'), COUNT(*) FROM sessions "
+            "WHERE updated_at>=? GROUP BY 1", (t0,)))
+        src_rows = conn.execute(
+            "SELECT date(created_at,'unixepoch','localtime') d, source, COUNT(*) n "
+            "FROM events WHERE created_at>=? GROUP BY 1,2 ORDER BY 1, n DESC", (t0,)).fetchall()
+        src_day = {}
+        for d, s, n in src_rows:
+            src_day.setdefault(d, []).append((s, n))
+        days = []
+        for i in range(days_n):
+            dstr = time.strftime("%Y-%m-%d",
+                                 time.localtime(today0 - (days_n - 1 - i) * 86400))
+            days.append({"date": dstr, "events": ev_day.get(dstr, 0),
+                         "tasks_done": done_day.get(dstr, 0),
+                         "tasks_failed": fail_day.get(dstr, 0),
+                         "sessions": sess_day.get(dstr, 0),
+                         "top_sources": [{"source": s, "n": n}
+                                         for s, n in (src_day.get(dstr) or [])[:3]]})
+        wk_ev = dict(conn.execute(
+            "SELECT strftime('%Y-W%W',created_at,'unixepoch','localtime') w, COUNT(*) "
+            "FROM events WHERE created_at>=? GROUP BY w", (t0,)))
+        wk_done = dict(conn.execute(
+            "SELECT strftime('%Y-W%W',done_at,'unixepoch','localtime') w, COUNT(*) "
+            "FROM tasks WHERE status='done' AND done_at>=? GROUP BY w", (t0,)))
+        wk_fail = dict(conn.execute(
+            "SELECT strftime('%Y-W%W',done_at,'unixepoch','localtime') w, COUNT(*) "
+            "FROM tasks WHERE status IN ('failed','dead') AND done_at>=? GROUP BY w", (t0,)))
+        weeks = [{"week": w, "events": wk_ev.get(w, 0),
+                  "tasks_done": wk_done.get(w, 0), "tasks_failed": wk_fail.get(w, 0)}
+                 for w in sorted(set(wk_ev) | set(wk_done) | set(wk_fail))]
+        mo_ev = dict(conn.execute(
+            "SELECT strftime('%Y-%m',created_at,'unixepoch','localtime') m, COUNT(*) "
+            "FROM events WHERE created_at>=? GROUP BY m", (t0,)))
+        mo_done = dict(conn.execute(
+            "SELECT strftime('%Y-%m',done_at,'unixepoch','localtime') m, COUNT(*) "
+            "FROM tasks WHERE status='done' AND done_at>=? GROUP BY m", (t0,)))
+        mo_fail = dict(conn.execute(
+            "SELECT strftime('%Y-%m',done_at,'unixepoch','localtime') m, COUNT(*) "
+            "FROM tasks WHERE status IN ('failed','dead') AND done_at>=? GROUP BY m", (t0,)))
+        months = [{"month": m, "events": mo_ev.get(m, 0),
+                   "tasks_done": mo_done.get(m, 0), "tasks_failed": mo_fail.get(m, 0)}
+                  for m in sorted(set(mo_ev) | set(mo_done) | set(mo_fail))]
+        return ok({"days": days, "weeks": weeks, "months": months})
 
     return 404, {"ok": False, "error": "not found"}

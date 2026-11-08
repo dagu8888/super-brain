@@ -13,6 +13,60 @@
     pending: '待执行', doing: '执行中', done: '已完成', failed: '失败',
     dead: '死信', cancelled: '已取消'
   };
+  /* kepano/40-questions 简体中文版（translations/zh-hans/year.md） */
+  var QUESTIONS_40 = [
+    '你今年做了哪些之前从未做过的事？',
+    '你有没有遵守年初时和自己许下的约定？',
+    '你身边有人生孩子了吗？',
+    '你身边有人去世了吗？',
+    '你去了哪些城市/州/国家？',
+    '明年你想要获得哪些你今年没有的东西？',
+    '今年的哪个或哪些日子会铭刻在你的记忆中，为什么？',
+    '你今年最大的成就是什么？',
+    '你今年最大的失败是什么？',
+    '你今年还遇到过哪些困难？',
+    '你今年是否生过病或受过伤？',
+    '你今年买过的最好的东西是什么？',
+    '谁的行为值得去表扬？',
+    '谁的行为令你感到震惊？',
+    '你大部分的钱都花到哪里去了？',
+    '有什么事让你感到超级、超级、超级兴奋？',
+    '哪首歌会永远让你想起这一年？',
+    '与去年的这个时候相比，你是：感到更快乐还是更悲伤了？变得更健康还是更糟了？变得更富还是更穷了？',
+    '你希望自己能做得更多的是什么？',
+    '你希望自己能做得更少的是什么？',
+    '你是如何度过节假日的？',
+    '你今年坠入爱河了吗？',
+    '你是否有讨厌某个你去年此时不觉得讨厌的人呢？',
+    '你最喜欢的电视节目是什么？',
+    '你读过最好的一本书是什么？',
+    '你今年发现的最好听的一首歌是什么？',
+    '你今年看过最喜欢的一部电影是什么？',
+    '你今年吃过最好吃的一顿饭是什么？',
+    '有什么是你想要且得到了的？',
+    '有什么是你想要却没有得到的？',
+    '你生日那天做了什么？',
+    '有什么还未发生的事，如果发生了，会让你的这一年变得无比满足?',
+    '你会如何描述你今年的个人时尚风格？',
+    '是什么让你保持理智？',
+    '你最欣赏哪个名人/公众人物？',
+    '哪个政治问题最令你有感而发？',
+    '你想念哪些人？',
+    '在你新认识的人之中，谁是最好的？',
+    '今年你学到了什么宝贵的人生经验？',
+    '能够总结你这一年的一句话是什么？'
+  ];
+  /* 40 问中可由年度真实数据佐证的问题（1-based 序号 → 生成佐证文本） */
+  function annualEvidence(n, a) {
+    if (!a) return '';
+    if (n === 7) return a.active_days ? '全年有事件记录 ' + a.active_days + ' 天' : '';
+    if (n === 8) return a.tasks_done ? '全年完成任务 ' + a.tasks_done + ' 条' : '';
+    if (n === 9) return a.tasks_failed ? '全年失败任务 ' + a.tasks_failed + ' 条' : '';
+    if (n === 18) return a.knowledge_new ? '全年新增知识笔记 ' + a.knowledge_new + ' 篇' : '';
+    if (n === 29) return (a.top_types && a.top_types[0]) ? '完成最多的任务类型：' + a.top_types[0].type + '（' + a.top_types[0].n + ' 条）' : '';
+    if (n === 38) return (a.per_agent && a.per_agent[0]) ? '产出最高的执行者：' + a.per_agent[0].agent + '（完成 ' + a.per_agent[0].done + ' 条）' : '';
+    return '';
+  }
   var LIVE_ZH = { working: '工作中', idle: '空闲', offline: '离线' };
   var PRIORITY_ZH = { 0: '普通', 1: '高', 2: '紧急' };
 
@@ -206,6 +260,64 @@
           return el('div', { className: 'sb-list' }, keys.map(function (k) {
             return row(k, workers[k] + ' 条线程', chip(String(workers[k]), 'cyan'));
           }));
+        })()),
+        section('分形回顾', '日 / 周 / 月 三个尺度的真实计数', (function () {
+          var host = el('div', { className: 'sb-list' }, [empty('加载中…')]);
+          var state = { mode: 'days', data: null };
+
+          function drawMode() {
+            D.clear(host);
+            var f = state.data;
+            if (!f) { host.appendChild(empty('暂无数据')); return; }
+            if (state.mode === 'days') {
+              var days = (f.days || []).slice(-14);
+              if (!days.length) { host.appendChild(empty()); return; }
+              days.forEach(function (x) {
+                var top = (x.top_sources || []).map(function (s) { return s.source + '×' + s.n; }).join(' / ');
+                host.appendChild(row(x.date,
+                  '事件 ' + x.events + ' · 完成 ' + x.tasks_done + ' · 失败 ' + x.tasks_failed + ' · 会话 ' + x.sessions + (top ? ' · ' + top : ''),
+                  x.events ? chip(String(x.events), 'cyan') : chip('0', 'muted')));
+              });
+            } else if (state.mode === 'weeks') {
+              var weeks = f.weeks || [];
+              if (!weeks.length) { host.appendChild(empty()); return; }
+              weeks.forEach(function (x) {
+                host.appendChild(row(x.week,
+                  '事件 ' + x.events + ' · 完成 ' + x.tasks_done + ' · 失败 ' + x.tasks_failed,
+                  x.events ? chip(String(x.events), 'cyan') : chip('0', 'muted')));
+              });
+            } else {
+              var months = f.months || [];
+              if (!months.length) { host.appendChild(empty()); return; }
+              months.forEach(function (x) {
+                host.appendChild(row(x.month,
+                  '事件 ' + x.events + ' · 完成 ' + x.tasks_done + ' · 失败 ' + x.tasks_failed,
+                  x.events ? chip(String(x.events), 'cyan') : chip('0', 'muted')));
+              });
+            }
+          }
+
+          var wrap = el('div', { className: 'sb-chips' });
+          [{ id: 'days', label: '日（近 14 天）' }, { id: 'weeks', label: '周' }, { id: 'months', label: '月' }].forEach(function (m, i) {
+            var b = el('button', { className: 'sb-chip sb-chip--btn' + (i === 0 ? ' is-on' : ''), attrs: { type: 'button' }, text: m.label });
+            b.addEventListener('click', function () {
+              Array.prototype.forEach.call(wrap.children, function (c) { c.classList.remove('is-on'); });
+              b.classList.add('is-on');
+              state.mode = m.id;
+              drawMode();
+            });
+            wrap.appendChild(b);
+          });
+
+          PAO.SB.api('/api/review/fractal?days=30').then(function (r) {
+            state.data = r.data || null;
+            drawMode();
+          }).catch(function () {
+            D.clear(host);
+            host.appendChild(empty('分形回顾接口暂不可用'));
+          });
+
+          return el('div', {}, [wrap, host]);
         })())
       ]);
     },
@@ -222,24 +334,44 @@
       var d = PAO.SB ? PAO.SB.data : {};
       var items = d.knowledge || [];
       var q = '';
+      var catFilter = '';
       var cats = {};
       items.forEach(function (x) { cats[x.category || '未分类'] = (cats[x.category || '未分类'] || 0) + 1; });
 
       var listHost = el('div', { className: 'sb-list' });
+      var expanded = {};
 
       function draw() {
         D.clear(listHost);
         var list = items.filter(function (x) {
+          if (catFilter && (x.category || '未分类') !== catFilter) return false;
           if (!q) return true;
           var hay = (x.title + ' ' + x.path + ' ' + (x.tags || []).join(' ') + ' ' + (x.snippet || '')).toLowerCase();
           return hay.indexOf(q) >= 0;
         });
         if (!list.length) { listHost.appendChild(empty()); return; }
         list.slice(0, 60).forEach(function (x) {
+          var metaBits = [x.category || '未分类'];
+          if (x.tags && x.tags.length) metaBits.push(x.tags.join(' / '));
+          if (x.updated) metaBits.push('更新 ' + x.updated);
+          else if (x.created) metaBits.push('创建 ' + x.created);
+          var aside = [
+            chip(x.quality ? 'Q ' + x.quality : '—', x.quality >= 80 ? 'ok' : 'muted'),
+            x.rating ? chip('★ ' + x.rating + '/7', 'cyan') : null
+          ];
+          var linksBox = null;
+          if (expanded[x.path]) {
+            var links = x.links || [];
+            linksBox = el('div', { className: 'sb-chips' }, links.length
+              ? links.map(function (ln) { return chip('[[' + ln + ']]', 'cyan'); })
+              : [chip('无 wikilink', 'muted')]);
+          }
           listHost.appendChild(row(
             x.title || x.path,
-            (x.category || '未分类') + (x.tags && x.tags.length ? ' · ' + x.tags.join(' / ') : '') + ' · ' + (x.snippet || '').slice(0, 42),
-            chip(x.quality ? 'Q ' + x.quality : '—', x.quality >= 80 ? 'ok' : 'muted')
+            metaBits.join(' · '),
+            aside,
+            function () { expanded[x.path] = !expanded[x.path]; draw(); },
+            linksBox
           ));
         });
       }
@@ -256,12 +388,24 @@
           metric('最近更新', items.length && items[items.length - 1].updated ? items[items.length - 1].updated : '暂无数据')
         ])),
         section('搜索', '实时过滤', input),
-        section('分类分布', '', (function () {
+        section('分类分布', '点击筛选，再次点击取消', (function () {
           var keys = Object.keys(cats);
           if (!keys.length) return empty();
-          return el('div', { className: 'sb-chips' }, keys.map(function (k) { return chip(k + ' ' + cats[k], 'muted'); }));
+          var wrap = el('div', { className: 'sb-chips' });
+          keys.forEach(function (k) {
+            var b = el('button', { className: 'sb-chip sb-chip--btn', attrs: { type: 'button' }, text: k + ' ' + cats[k] });
+            b.addEventListener('click', function () {
+              var on = b.classList.contains('is-on');
+              Array.prototype.forEach.call(wrap.children, function (c) { c.classList.remove('is-on'); });
+              catFilter = on ? '' : k;
+              if (!on) b.classList.add('is-on');
+              draw();
+            });
+            wrap.appendChild(b);
+          });
+          return wrap;
         })()),
-        section('条目', '', listHost)
+        section('条目', '点击条目展开 wikilinks', listHost)
       ]);
       draw();
     },
@@ -563,7 +707,34 @@
               return row(a + ' → ' + b, (r.rel || r.type || '关系') + (r.note ? ' · ' + r.note : ''),
                 chip(String(r.rel || r.type || 'rel'), 'cyan'));
             }))
-          : empty())
+          : empty()),
+        section('知识画布', 'JSON Canvas 1.0 · 可在 Obsidian 打开', (function () {
+          var stats = el('div', { className: 'sb-note', text: '根据知识库分类分组、[[wikilink]] 连线，布局确定性预生成。' });
+          var btn = el('button', { className: 'pao-btn pao-btn--ghost', attrs: { type: 'button' }, text: '导出 .canvas' });
+          btn.addEventListener('click', function () {
+            btn.disabled = true;
+            btn.textContent = '生成中…';
+            PAO.SB.api('/api/knowledge/canvas').then(function (r) {
+              var d = r.data || {};
+              var blob = new Blob([JSON.stringify(d.canvas || {}, null, 2)], { type: 'application/json' });
+              var a = el('a', { attrs: { href: URL.createObjectURL(blob), download: 'super-brain-knowledge.canvas' } });
+              document.body.appendChild(a);
+              a.click();
+              setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+              var s = d.stats || {};
+              stats.textContent = '已导出：节点 ' + (s.nodes != null ? s.nodes : '—') +
+                ' · 连线 ' + (s.edges != null ? s.edges : '—') +
+                ' · 未解析链接 ' + (s.unresolved != null ? s.unresolved : '—') + '（面包屑，非错误）';
+              btn.disabled = false;
+              btn.textContent = '重新导出 .canvas';
+            }).catch(function (e) {
+              stats.textContent = '导出失败：' + ((e && e.message) || '未知错误');
+              btn.disabled = false;
+              btn.textContent = '导出 .canvas';
+            });
+          });
+          return el('div', {}, [el('div', { className: 'sb-chips' }, [btn]), stats]);
+        })())
       ]);
     },
     onEnter: function (ctx) { live(ctx, 'graph'); },
@@ -639,7 +810,38 @@
           row('进度估算', '仅使用同类型任务的历史中位数；无样本时显示「暂无数据」，不套默认值。', chip('真实', 'ok')),
           row('上限保护', '任何任务进度最高 95%，完成以 tasks 表 done 为准。', chip('约束', 'warn')),
           row('高风险动作', '必须人工确认，并写入审计记录；口令永不显示、不落盘。', chip('审计', 'cyan'))
-        ]))
+        ])),
+        section('年度回顾', 'kepano 40 问 · 数据佐证来自全年真实运行记录', (function () {
+          var year = new Date().getFullYear();
+          var host = el('div', {}, [empty('加载中…')]);
+          PAO.SB.api('/api/review/annual?year=' + year).then(function (r) {
+            var a = r.data || null;
+            D.clear(host);
+            if (!a) { host.appendChild(empty()); return; }
+            var topAgent = (a.per_agent && a.per_agent[0]) ? a.per_agent[0] : null;
+            D.appendAll(host, [
+              el('div', { className: 'sb-grid sb-grid--3' }, [
+                metric('完成任务', a.tasks_done, year + ' 全年 done'),
+                metric('失败任务', a.tasks_failed, 'failed + dead', a.tasks_failed ? 'crit' : ''),
+                metric('事件总数', a.events_total, 'events 表'),
+                metric('活跃天数', a.active_days, '有事件的日子'),
+                metric('新增知识', a.knowledge_new, '10-Knowledge'),
+                metric('TOP 执行者', topAgent ? topAgent.agent + ' · ' + topAgent.done : '暂无数据', '按完成数')
+              ]),
+              el('div', { className: 'pao-section__title', style: { margin: '18px 0 8px' }, text: year + ' · 40 问' }),
+              el('div', { className: 'sb-list' }, QUESTIONS_40.map(function (qtext, i) {
+                var ev = annualEvidence(i + 1, a);
+                return row((i + 1) + '. ' + qtext,
+                  '数据佐证：' + (ev || '暂无数据，留待人工填写'),
+                  ev ? chip('有佐证', 'ok') : chip('人工', 'muted'));
+              }))
+            ]);
+          }).catch(function () {
+            D.clear(host);
+            host.appendChild(empty('年度回顾接口暂不可用'));
+          });
+          return host;
+        })())
       ]);
     },
     onEnter: function (ctx) { live(ctx, 'evolve'); },
