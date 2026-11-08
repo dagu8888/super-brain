@@ -1,0 +1,3 @@
+{"ts": "2026-11-09T00:00:08+0800", "kind": "task_enqueued", "type": "chat", "event": "evt_20261109_a2a991", "priority": 1}
+{"ts": "2026-11-09T00:00:09+0800", "kind": "task_claimed", "id": 220, "type": "chat", "by": "chat-worker", "token": 1}
+{"ts": "2026-11-09T00:00:11+0800", "kind": "task_done", "id": 220, "type": "chat", "by": "chat-worker", "result": "已答复 → 60-Outputs/chat/20261109-000011-test-agent-worker-心跳丢失事件确认.md"}
