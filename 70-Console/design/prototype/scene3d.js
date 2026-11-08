@@ -68,6 +68,25 @@
     return tex;
   }
 
+  /* 层级泳道标签：让"幕僚长→入口→调度→执行"的工作流一眼看懂 */
+  function laneTexture(text, hex) {
+    const W = 512, H = 128, cv = document.createElement("canvas");
+    cv.width = W; cv.height = H;
+    const g = cv.getContext("2d");
+    g.fillStyle = rgba(hex, 0.95);
+    g.beginPath();
+    g.arc(26, H / 2, 7, 0, Math.PI * 2);
+    g.fill();
+    g.font = "600 34px system-ui, -apple-system, 'PingFang SC', sans-serif";
+    g.textAlign = "left";
+    g.textBaseline = "middle";
+    g.fillStyle = "rgba(226,232,240,.72)";
+    g.fillText(text, 44, H / 2 + 1);
+    const tex = new T.CanvasTexture(cv);
+    if (T.SRGBColorSpace) tex.colorSpace = T.SRGBColorSpace;
+    return tex;
+  }
+
   /* 节点贴图：光圈 + 首字母 + 名称（离线灰化并降低对比） */
   function nodeTexture(a, hex, short) {
     const S = 256, cv = document.createElement("canvas");
@@ -176,7 +195,7 @@
     scene.add(world);
 
     /* 星空 */
-    const starN = mobile ? 650 : 1400;
+    const starN = mobile ? 420 : 900;
     const pos = new Float32Array(starN * 3);
     for (let i = 0; i < starN; i++) {
       const r = 26 + Math.random() * 34, th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1);
@@ -209,10 +228,23 @@
     core.scale.set(7, 7, 1);
     world.add(core);
 
+    /* 四层泳道标签：幕僚长 → 入口 → 调度 → 执行 */
+    const laneDefs = [["幕僚长 · 决策", 0x8b5cf6], ["入口 · 接单", 0x818cf8],
+      ["调度 · 派发", 0x22d3ee], ["执行 · 交付", 0x2dd4bf]];
+    const lanes = laneDefs.map(([text, c]) => {
+      const sp = new T.Sprite(new T.SpriteMaterial({
+        map: laneTexture(text, c), transparent: true, opacity: 0.55, depthWrite: false,
+      }));
+      sp.scale.set(4.8, 1.2, 1);
+      sp.visible = !mobile;
+      world.add(sp);
+      return sp;
+    });
+
     R = {
       canvas, renderer, scene, camera, world, stars, mobile, handlers: handlers || {},
-      nodes: new Map(), edges: [], particles: null, activePts: [],
-      fit: 12, zoom: 1, theta: 0.42, phi: 0.18, auto: true,
+      nodes: new Map(), edges: [], particles: null, activePts: [], lanes,
+      fit: 12, zoom: 1, theta: 0.16, phi: 0.12, auto: true,
       dragging: false, moved: false, lastX: 0, lastY: 0, pointers: new Map(), pinch: null,
       raf: 0, last: performance.now(), active: true, w: W(), h: H(),
       mode: "overview", focusId: null, hoverId: null, lookTarget: new T.Vector3(),
@@ -237,7 +269,7 @@
     ro.observe(canvas);
     R.ro = ro;
     computeFit();
-    R.lookTarget.set(0, 0, 0);
+    R.lookTarget.set(0, 1.0, 0);
     start();
     return true;
   }
@@ -484,10 +516,10 @@
     const d = R.fit * R.zoom;
     R.camera.position.set(
       Math.cos(R.phi) * Math.sin(R.theta) * d,
-      Math.sin(R.phi) * d + d * 0.1,
+      Math.sin(R.phi) * d + 1.0,
       Math.cos(R.phi) * Math.cos(R.theta) * d
     );
-    R.camera.lookAt(0, 0, 0);
+    R.camera.lookAt(0, 1.0, 0);
   }
 
   function layout() {
@@ -499,29 +531,61 @@
       n.baseScale = scale; n.baseOpacity = opacity;
       n.tscale = scale; n.topacity = opacity;
     };
-    pin(STAFF_ID, 0, 5.5, 0, 3.9, 1);        // 顶层：幕僚长
-    pin(HUB_ID, 0, 0.9, 0, 3.2, 0.96);       // 中层：任务调度中枢
+    /* 四层工作流：幕僚长 → 指令入口 → 调度中枢 → 执行者 */
+    pin(STAFF_ID, 0, 6.6, 0, 3.9, 1);
+    pin(HUB_ID, 0, 0, 0, 3.1, 1);
 
-    const groups = { working: [], idle: [], offline: [] };
+    const entries = [], workers = [];
     R.nodes.forEach(n => {
       if (n.removing || n.agent.id === STAFF_ID || n.agent.id === HUB_ID) return;
-      groups[bucket(n.agent)].push(n);
+      (n.agent.kind === "chief" ? entries : workers).push(n);
     });
-    // 工作 → 内圈居中；空闲 → 中环淡化；离线 → 外缘近乎隐去
-    const order = [...groups.working, ...groups.idle, ...groups.offline];
-    order.forEach((node, i) => {
-      const total = Math.max(1, order.length);
-      const ang = (i / total) * Math.PI * 2 - Math.PI / 2;
-      const b = bucket(node.agent);
-      const r = b === "working" ? 3.6 : b === "idle" ? 5.9 : 8.4;
-      const y = -4.9 + (b === "offline" ? -0.45 : 0) + Math.cos(ang * 2) * 0.18;
-      node.tpos.set(Math.cos(ang) * r, y, Math.sin(ang) * r);
-      const chiefF = node.agent.kind === "chief" ? 1.05 : 1;
-      node.baseScale = (b === "working" ? 2.7 : b === "idle" ? 2.35 : 1.95) * chiefF;
-      node.baseOpacity = b === "working" ? 1 : b === "idle" ? 0.5 : 0.1;
-      node.tscale = node.baseScale;
-      node.topacity = node.baseOpacity;
+    entries.sort((a, b) => String(a.agent.id).localeCompare(String(b.agent.id)));
+    const gap = (n, max) => (n > 1 ? Math.min(2.35, max / (n - 1)) : 0);
+
+    /* 入口层：横向一排，不再绕圈，避免线路交叉 */
+    const eGap = gap(entries.length, 11.5);
+    entries.forEach((n, i) => {
+      const x = (i - (entries.length - 1) / 2) * eGap;
+      const b = bucket(n.agent);
+      n.tpos.set(x, 3.4, i % 2 ? -0.35 : 0.35);
+      n.baseScale = b === "working" ? 2.7 : 2.45;
+      n.baseOpacity = b === "working" ? 1 : 0.74;
+      n.tscale = n.baseScale; n.topacity = n.baseOpacity;
     });
+
+    /* 执行层：工作中居中，空闲次之，离线推到两端并沉到背景 */
+    const groups = { working: [], idle: [], offline: [] };
+    workers.forEach(n => groups[bucket(n.agent)].push(n));
+    const left = [], right = [];
+    groups.offline.forEach((n, i) => (i % 2 ? right : left).push(n));
+    const order = [...left, ...groups.working, ...groups.idle, ...right];
+    const wGap = gap(order.length, 12.5);
+    order.forEach((n, i) => {
+      const b = bucket(n.agent);
+      const x = (i - (order.length - 1) / 2) * wGap;
+      const off = b === "offline";
+      n.tpos.set(x, off ? -4.5 : -3.6, off ? -1.6 : (i % 2 ? -0.3 : 0.3));
+      n.baseScale = b === "working" ? 2.8 : b === "idle" ? 2.35 : 1.9;
+      n.baseOpacity = b === "working" ? 1 : b === "idle" ? 0.52 : 0.1;
+      n.tscale = n.baseScale; n.topacity = n.baseOpacity;
+    });
+
+    /* 泳道标签贴左侧，随行宽自适应 */
+    const half = Math.max(
+      entries.length ? ((entries.length - 1) / 2) * eGap : 0,
+      order.length ? ((order.length - 1) / 2) * wGap : 0
+    );
+    R.rowHalf = half;
+    if (R.lanes) {
+      const x = -(half + 2.9);
+      [6.6, 3.4, 0, -3.6].forEach((y, i) => {
+        const sp = R.lanes[i];
+        if (!sp) return;
+        sp.position.set(x, y, 0);
+        sp.visible = !R.mobile;
+      });
+    }
     applyEmphasis();
   }
 
@@ -530,33 +594,39 @@
     R.edges.forEach(e => { R.world.remove(e.line); e.line.geometry.dispose(); e.line.material.dispose(); });
     R.edges = [];
     R.activePts = [];
-    const list = edges.filter(e => e.evidence !== "default_route");   // 默认路由由中枢连线表达
+    /* 只画工作流结构线：入口→中枢→执行；历史委派关系交给聚焦 HUD，避免蛛网 */
+    const actSrc = new Set(), actDst = new Set();
+    (edges || []).forEach(e => {
+      if (e.state === "active") { actSrc.add(e.source); actDst.add(e.target); }
+    });
+    const list = [];
     const hubN = R.nodes.get(HUB_ID), staffN = R.nodes.get(STAFF_ID);
     if (staffN && hubN && !staffN.removing && !hubN.removing) {
-      list.push({ from: STAFF_ID, to: HUB_ID, structural: true,
-        state: hubN.agent.status === "working" ? "active" : "idle" });
+      list.push({ from: STAFF_ID, to: HUB_ID, staff: true });
     }
-    if (hubN && !hubN.removing) {
-      R.nodes.forEach(n => {
-        if (n.removing || n.agent.id === HUB_ID || n.agent.id === STAFF_ID) return;
-        list.push({ from: HUB_ID, to: n.agent.id, structural: true,
-          state: bucket(n.agent) === "working" ? "active" : "idle" });
-      });
-    }
+    R.nodes.forEach(n => {
+      if (n.removing || n.agent.id === HUB_ID || n.agent.id === STAFF_ID) return;
+      if (n.agent.kind === "chief") {
+        list.push({ from: n.agent.id, to: HUB_ID,
+          active: actSrc.has(n.agent.id) || bucket(n.agent) === "working" });
+      } else {
+        list.push({ from: HUB_ID, to: n.agent.id,
+          active: actDst.has(n.agent.id) || bucket(n.agent) === "working" });
+      }
+    });
+    const anyActive = list.some(e => e.active);
     list.forEach(e => {
       const a = R.nodes.get(e.from), b = R.nodes.get(e.to);
       if (!a || !b) return;
-      const active = e.state === "active";
-      const structural = !!e.structural;
+      const active = !!(e.active || (e.staff && anyActive));
       const geo = new T.BufferGeometry().setFromPoints([new T.Vector3(), new T.Vector3()]);
       const mat = new T.LineBasicMaterial({
-        color: active ? (structural ? 0x22d3ee : 0x8b5cf6) : 0x475569, transparent: true,
-        opacity: active ? (structural ? 0.5 : 0.8) : (structural ? 0.06 : 0.14),
-        depthWrite: false,
+        color: active ? (e.staff ? 0x8b5cf6 : 0x22d3ee) : 0x475569,
+        transparent: true, opacity: active ? 0.55 : 0.09, depthWrite: false,
       });
       const line = new T.Line(geo, mat);
       R.world.add(line);
-      R.edges.push({ line, from: e.from, to: e.to, active, structural, base: mat.opacity });
+      R.edges.push({ line, from: e.from, to: e.to, active, structural: true, base: mat.opacity });
       if (active) R.activePts.push({ from: e.from, to: e.to, t: Math.random() });
     });
     if (R.particles) {
@@ -638,7 +708,7 @@
       R.lastY = ev.clientY;
       if (Math.abs(dx) + Math.abs(dy) > 2) R.moved = true;
       R.theta -= dx * 0.005;
-      R.phi = clamp(R.phi + dy * 0.004, -0.8, 0.8);
+      R.phi = clamp(R.phi + dy * 0.004, -0.02, 0.5);
     });
     const end = ev => {
       R.pointers.delete(ev.pointerId);
@@ -683,9 +753,12 @@
       const dt = Math.min(0.05, (now - R.last) / 1000) || 0.016;
       R.last = now;
 
-      if (R.auto && !R.dragging && R.mode === "overview") R.theta += dt * 0.02;
+      if (R.auto && !R.dragging && R.mode === "overview") {   // 轻微摆动，不遮挡层级阅读
+        R.osc = (R.osc || 0) + dt * 0.25;
+        R.theta = 0.16 + Math.sin(R.osc) * 0.12;
+      }
       const d = R.fit * R.zoom;
-      let goal, look = new T.Vector3(0, 0, 0);
+      let goal, look = new T.Vector3(0, 1.0, 0);
       if (R.mode === "focus" && R.nodes.get(R.focusId)) {
         const p = R.nodes.get(R.focusId).sprite.position;
         const fd = 2.9 * R.zoom;
@@ -698,7 +771,7 @@
       } else {
         goal = new T.Vector3(
           Math.cos(R.phi) * Math.sin(R.theta) * d,
-          Math.sin(R.phi) * d + d * 0.1,
+          Math.sin(R.phi) * d + 1.0,
           Math.cos(R.phi) * Math.cos(R.theta) * d
         );
       }
@@ -761,7 +834,7 @@
     R.raf = requestAnimationFrame(R.tick);
   }
   function zoom(f) { if (R) R.zoom = clamp(R.zoom * f, 0.55, 2.2); }
-  function reset() { if (R) { R.zoom = 1; R.theta = 0.42; R.phi = 0.18; } }
+  function reset() { if (R) { R.zoom = 1; R.theta = 0.16; R.phi = 0.12; } }
   function resize() {
     if (!R) return;
     R.w = R.canvas.clientWidth || R.w;

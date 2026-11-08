@@ -243,7 +243,7 @@ function renderNetwork() {
   if (is3D) {
     net.classList.add("is-3d");
     const hint = net.querySelector(".pt-net-hint");
-    if (hint) hint.textContent = "幕僚长 → 任务调度 → 执行层 ｜ 悬停看概况 · 点击进入场景 · 拖动旋转";
+    if (hint) hint.textContent = "幕僚长 → 指令入口 → 调度中枢 → 执行层 ｜ 悬停看概况 · 点击进入场景 · 拖动旋转";
   } else if (window.SB3D) {
     const hint = net.querySelector(".pt-net-hint");
     if (hint) hint.textContent = "当前浏览器未启用 WebGL，已降级为 2D 视图 · 拖动平移 · 滚轮缩放";
