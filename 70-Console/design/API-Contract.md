@@ -31,11 +31,12 @@ CORS：允许 `*`（只读接口；跨域便于本地控制台调试），预检
 | `GET /api/overview` | — | 首页统计：Agent 总数/在线/工作中、任务各状态、今日事件数 |
 | `GET /api/agents` | — | Agent 列表（含 `live_status`、`current_task_id`） |
 | `GET /api/agents/{id}` | — | 单个 Agent + 最近 10 条任务 |
-| `GET /api/tasks` | `status`,`type`,`agent`,`limit`(≤200),`offset` | 任务列表（summary 截断 200 字） |
+| `GET /api/tasks` | `status`,`type`,`agent`,`q`,`limit`(≤200),`offset` | 任务列表（summary 截断 200 字；q 匹配 ID/类型/结果） |
 | `GET /api/tasks/{id}` | — | 任务全量（含 payload）+ 关联事件 20 条 |
 | `GET /api/events` | `since`(秒),`type`,`limit`(≤200) | 事件流，倒序 |
+| `GET /api/stream` | `token`,`since`(秒) | **SSE 实时推送**（见第 5 节） |
 | `GET /api/monitor` | — | 线程心跳 + 队列深度 + health 最近一次 + loadavg/内存 |
-| `GET /api/knowledge` | `limit`(≤500) | 知识文件列表（frontmatter：title/category/tags/quality/updated） |
+| `GET /api/knowledge` | `limit`(≤500),`q`,`category` | 知识文件列表（frontmatter：title/category/tags/quality/updated + 正文摘要 snippet；q 搜索标题/路径/标签/正文） |
 | `GET /api/memory` | — | 会话列表 + Agent 运行记忆（`last_seen`） |
 | `GET /api/relations` | — | 协作通道：`source→target`、`evidence`(history/default_route)、`task_count`、`state`(active/idle) |
 
@@ -68,15 +69,46 @@ CORS：允许 `*`（只读接口；跨域便于本地控制台调试），预检
 | Agent `offline` | `kind='worker'` 且 `last_seen` 超 300 秒 |
 | Agent `collaborating/waiting/completed/error` | **当前后端无对应字段 → 前端不显示**（不推断、不编造） |
 | Task 状态 | 直接透传 `tasks.status`（pending/doing/done/failed/dead/cancelled） |
-| 进度百分比 | **后端无可靠进度字段 → 不显示百分比**，改展示阶段与最近事件 |
+| 进度百分比 | 后端按「同类任务近 20 次完成耗时中位数」估算（见上），仅 `doing` 有值且封顶 95%；无样本不显示 |
 | 系统健康 | `health-*.jsonl` 末行 `alerts` 数组（空 = 无告警），不合成"健康分数" |
 | 成本 | **无采集 → 不展示** |
 
-## 5. 实时性
+## 5. 实时性（SSE 推送 + 轮询兜底）
 
-- 当前为**轮询**（建议 3 秒 overview/agents/tasks，5 秒 events）。
-- WebSocket/SSE 推送属 Phase 4 后半段，需新增 `ws_adapter`（不影响本节契约）。
-- `events` 无自增序号，用 `created_at`（秒）+ `event_id` 去重排序；`since` 用于增量拉取，重叠窗口由前端去重。
+### 5.1 `GET /api/stream`
+
+浏览器 `EventSource` 无法自定义请求头，因此该端点接受 **查询参数 `token`**（其余接口仍用 `Authorization`）。
+连接数上限 8，单连接最长 600 秒后正常结束，浏览器会自动重连。
+
+```
+GET /api/stream?token=<只读或指挥口令>&since=<秒级时间戳>
+```
+
+响应 `Content-Type: text/event-stream`：
+
+```
+id: evt_xxx
+event: event
+data: {"event_id":"evt_xxx","source":"trae-chief","type":"task_delegated","priority":5,"status":"new","parent_id":123,"created_at":1794116500}
+
+: ping
+```
+
+| 项 | 规则 |
+|---|---|
+| 增量 | 服务端从 `events.created_at >= since` 启动，1 秒轮询数据库增量推送 |
+| 去重 | 事件以 `event_id` 去重；重叠窗口（同秒事件）由 `seen` 集合兜底 |
+| 心跳 | 15 秒无数据写一行 `: ping` 注释，防代理断连 |
+| 保活上限 | 单连接 10 分钟，客户端自动重连（`Last-Event-ID` 不依赖，重连用 `since`） |
+| 鉴权失败 | 401，并记 `api_auth_failed`（日志只记 `/api/stream`，不记录 token） |
+| 过载 | 并发超过 8 返回 429 |
+
+### 5.2 前端策略（`live.js`）
+
+1. 连接成功后 **优先 SSE**；`EventSource` 关闭（如服务端拒绝）→ 自动降级为 6 秒轮询。
+2. 另有 20 秒全量刷新校准 Agent 状态与任务进度（进度随时间变化，事件流本身不推送进度）。
+3. 侧栏三态：`实时推送` / `轮询模式` / `连接中断`；断开时明确提示数据可能过期。
+4. 新事件到达时立即插入首页时间轴（不重置网络图视角），随后合并触发一次全量刷新。
 
 ## 6. 已验证（2026-11-08 实测）
 
@@ -94,4 +126,4 @@ CORS：允许 `*`（只读接口；跨域便于本地控制台调试），预检
 1. 明文 HTTP（用户已确认接受）；仅依赖口令强度 + 失败留痕。
 2. `/api/events` 与 `/api/tasks/{id}` 会返回任务/事件 payload 摘要，可能含用户私人笔记内容 → 只读口令视同隐私凭据保管。
 3. 无分页游标，超大结果集用 limit/offset 截断；知识列表最多 500。
-4. Agent 的协作关系暂无可信数据源（协作事件未持久化到独立表），首页连线须等 Phase 5 事件补充，**当前不画协作线**。
+4. 协作线来自「历史真实派发记录 + 默认路由兜底」，只表示可委派通道；当前状态仅为 `active/idle` 两态，没有独立的协作事件表。

@@ -77,6 +77,16 @@ def _frontmatter(path):
     return out
 
 
+def _plain_body(path):
+    """正文纯文本摘要：去掉 frontmatter、压缩空白，供列表预览与搜索。"""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return ""
+    text = re.sub(r"^---\n.*?\n---\n", "", text, flags=re.S)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def handle_get(conn, raw_path):
     """返回 (http_code, dict)。conn 为新建的 sqlite3 连接。"""
     u = urlparse(raw_path)
@@ -154,6 +164,10 @@ def handle_get(conn, raw_path):
         if q.get("agent"):
             where.append("lease_owner=?")
             args.append(q["agent"])
+        if q.get("q"):
+            kw = "%" + q["q"].strip() + "%"
+            where.append("(type LIKE ? OR COALESCE(result,error,'') LIKE ? OR CAST(id AS TEXT)=?)")
+            args.extend([kw, kw, q["q"].strip()])
         w = ("WHERE " + " AND ".join(where)) if where else ""
         rows = _rows(conn.execute(
             f"SELECT id,type,status,priority,lease_owner,retry_count,claimed_at,created_at,done_at,"
@@ -245,19 +259,33 @@ def handle_get(conn, raw_path):
 
     if path == "/api/knowledge":
         limit = min(int(q.get("limit", 100)), 500)
-        items = []
-        for p in sorted(KNOWLEDGE.rglob("*.md"))[-limit:]:
+        kw = (q.get("q") or "").strip().lower()
+        cat = (q.get("category") or "").strip()
+        items, total = [], 0
+        for p in sorted(KNOWLEDGE.rglob("*.md")):
             fm = _frontmatter(p)
+            title = fm.get("title") or p.stem
+            category = fm.get("category") or p.parent.name
+            tags = [t for t in re.split(r",\s*", fm.get("tags", "")) if t]
+            relpath = str(p.relative_to(ROOT))
+            if cat and category != cat:
+                continue
+            body = _plain_body(p)
+            if kw and kw not in f"{title} {relpath} {' '.join(tags)} {category} {body}".lower():
+                continue
             items.append({
-                "path": str(p.relative_to(ROOT)),
-                "title": fm.get("title") or p.stem,
-                "category": fm.get("category") or p.parent.name,
-                "tags": [t for t in re.split(r",\s*", fm.get("tags", "")) if t],
+                "path": relpath,
+                "title": title,
+                "category": category,
+                "tags": tags,
                 "quality": fm.get("quality", ""),
                 "updated": fm.get("updated", ""),
                 "size": p.stat().st_size,
+                "snippet": _plain_body(p)[:180],
             })
-        return ok(items, total=len(items))
+        total = len(items)
+        items = items[-limit:] if not (kw or cat) else items[:limit]
+        return ok(items, total=total)
 
     if path == "/api/memory":
         rows = _rows(conn.execute(

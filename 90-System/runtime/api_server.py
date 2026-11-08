@@ -10,21 +10,27 @@
 import hmac
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import console_api
 
 HERE = Path(__file__).parent
 CONF = HERE / "api_tokens.json"
 MAX_BODY = 64 * 1024                      # 请求体上限 64KB
+STREAM_MAX_CLIENTS = 8                    # SSE 并发连接上限
+STREAM_SECONDS = 600                      # 单连接最长 10 分钟后自动重连（浏览器原生支持）
 CORS = (("Access-Control-Allow-Origin", "*"),
         ("Access-Control-Allow-Headers", "Authorization, Content-Type"),
         ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"))
+STREAM = {"active": 0}
 
 
-def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None):
+def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None):
     viewers = viewers or {}
+    stop_event = stop or threading.Event()
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "SuperBrainAPI/1.1"
@@ -55,9 +61,75 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None):
             return bool(token) and any(
                 t and hmac.compare_digest(str(t).encode(), token.encode()) for t in allowed)
 
+        def _stream(self):
+            """SSE 增量推送（EventSource 不支持自定义请求头，token 走查询参数）。"""
+            u = urlparse(self.path)
+            q = {k: v[0] for k, v in parse_qs(u.query).items()}
+            auth = self.headers.get("Authorization", "")
+            token = q.get("token") or (auth[7:] if auth.startswith("Bearer ") else "")
+            allowed = list(tokens.values()) + list(viewers.values())
+            if not token or not any(
+                    t and hmac.compare_digest(str(t).encode(), token.encode()) for t in allowed):
+                log_event("api_auth_failed", ip=self.client_address[0], path="/api/stream")
+                return self._send(401, {"ok": False, "error": "无效口令"})
+            if STREAM["active"] >= STREAM_MAX_CLIENTS:
+                return self._send(429, {"ok": False, "error": "推送连接已达上限"})
+            try:
+                since = int(float(q.get("since", time.time())))
+            except Exception:
+                since = int(time.time())
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-transform")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("X-Accel-Buffering", "no")
+            for k, v in CORS:
+                self.send_header(k, v)
+            self.end_headers()
+            STREAM["active"] += 1
+            seen, beat, deadline = set(), 0.0, time.time() + STREAM_SECONDS
+            try:
+                self.wfile.write(b": connected\n\n")
+                self.wfile.flush()
+                while not stop_event.is_set() and time.time() < deadline:
+                    conn = db_fn()
+                    try:
+                        rows = conn.execute(
+                            "SELECT event_id,source,type,priority,status,parent_id,created_at "
+                            "FROM events WHERE created_at>=? ORDER BY created_at ASC, rowid ASC "
+                            "LIMIT 200", (since,)).fetchall()
+                    finally:
+                        conn.close()
+                    for r in rows:
+                        eid = r[0]
+                        if eid in seen:
+                            continue
+                        seen.add(eid)
+                        payload = {"event_id": eid, "source": r[1], "type": r[2],
+                                   "priority": r[3], "status": r[4], "parent_id": r[5],
+                                   "created_at": r[6]}
+                        self.wfile.write(
+                            f"id: {eid}\nevent: event\ndata: "
+                            f"{json.dumps(payload, ensure_ascii=False)}\n\n".encode())
+                        since = max(since, int(r[6] or 0))
+                    if len(seen) > 20000:          # 去重集合封顶，防止长连接内存膨胀
+                        seen.clear()
+                    if time.time() - beat > 15:
+                        self.wfile.write(b": ping\n\n")
+                        beat = time.time()
+                    self.wfile.flush()
+                    stop_event.wait(1.0)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            finally:
+                STREAM["active"] = max(0, STREAM["active"] - 1)
+                self.close_connection = True
+
         def do_GET(self):
             if self.path.startswith("/healthz"):        # 免鉴权探活
                 return self._send(200, {"ok": True, "service": "super-brain-api"})
+            if self.path.startswith("/api/stream"):     # 实时推送（SSE）
+                return self._stream()
             if self.path.startswith("/api/"):           # 只读控制台接口（viewers 或 chief 口令）
                 if not self._authed(list(tokens.values()) + list(viewers.values())):
                     log_event("api_auth_failed", ip=self.client_address[0], path=self.path[:80])
@@ -114,7 +186,9 @@ def maybe_start(stop, log_event, db_fn, execute_fn):
         return None
     viewers = conf.get("viewers") or {}
     bind, port = str(conf.get("bind", "127.0.0.1")), int(conf.get("port", 18765))
-    srv = ThreadingHTTPServer((bind, port), _make_handler(db_fn, execute_fn, log_event, tokens, viewers))
+    srv = ThreadingHTTPServer(
+        (bind, port),
+        _make_handler(db_fn, execute_fn, log_event, tokens, viewers, stop))
     srv.daemon_threads = True
     srv.timeout = 2                         # handle_request 轮询间隔，便于响应 stop
 
