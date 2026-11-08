@@ -42,6 +42,9 @@
       if (PAO.net && PAO.net.connect) PAO.net.connect();
 
       PAO.boot.init();
+      PAO.bus.on('boot:done', function () {
+        if (!PAO.ui.current) PAO.ui.openPanel('home');
+      });
       PAO.boot.run(false);
 
       // 首帧后移除「加载中」态
