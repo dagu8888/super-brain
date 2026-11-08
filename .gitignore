@@ -9,3 +9,4 @@ Thumbs.db
 
 # 本地临时区（仅工作副本，禁止上云）
 99-Local/
+90-System/node_watchdog.log
