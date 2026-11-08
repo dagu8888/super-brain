@@ -23,7 +23,7 @@ sources:
       - name: 紧急关键词直达
         if: { matches: '紧急|挂了|宕机|线上问题|崩了|urgent|down了' }
         action: URGENT
-      - name: @我才处理
+      - name: "@我才处理"
         if: { mentioned: true }
         action: ALLOW
       - name: 其余群消息静默
@@ -78,5 +78,26 @@ sources:
         if: { paths_match: '00-Inbox/**' }
         action: ALLOW
         dispatch: knowledge-worker
+        task_type: kb-organize
       - name: 其他目录变更只留痕
+        action: DROP
+
+  inbox:                               # 收集箱笔记（InboxAdapter 本地扫描，V2 新增）
+    rules:
+      - name: 空笔记丢弃
+        if: { matches: '^\s*$' }
+        action: DROP
+      - name: 笔记直派整理（确定性映射，不调模型）
+        action: ALLOW
+        dispatch: knowledge-worker
+        task_type: inbox-triage
+
+  cron:                                # 定时事件（CronAdapter，V2 新增）
+    rules:
+      - name: Inbox 积压提醒 → 直派整理
+        if: { paths_match: '00-Inbox/**' }
+        action: ALLOW
+        dispatch: knowledge-worker
+        task_type: kb-organize
+      - name: 其他定时事件留痕
         action: DROP
