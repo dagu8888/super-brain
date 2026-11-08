@@ -56,7 +56,8 @@ def handle_get(conn, raw_path):
         busy = {r[0] for r in conn.execute(
             "SELECT lease_owner FROM tasks WHERE status='doing' AND lease_owner IS NOT NULL")}
         agents = _rows(conn.execute(
-            "SELECT agent_id,kind,status,last_seen FROM agents ORDER BY kind,agent_id"))
+            "SELECT agent_id,kind,status,last_seen FROM agents WHERE status='active' "
+            "ORDER BY kind,agent_id"))
         for a in agents:
             a["live_status"] = _agent_status(a["last_seen"], a["agent_id"] in busy)
         tasks = dict(conn.execute("SELECT status,COUNT(*) FROM tasks GROUP BY status").fetchall())
