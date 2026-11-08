@@ -47,48 +47,7 @@ const NAV = [
   { id: "settings",      label: "系统设置", icon: '<path d="M5 6h14M5 12h14M5 18h14"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="8" cy="18" r="2"/>' },
 ];
 
-/* 其余 7 页线框（Phase 4 接入真实数据） */
-const WF = {
-  agents: { intro: "Agent 花名册：卡片网格而非密集表格；点击卡片在右侧打开统一详情面板。", blocks: [
-    ["筛选工具条", "状态（7 态）/ 类型（chief·worker）/ 关键词搜索"],
-    ["Agent 卡片网格", "AgentCard ×10：名称、角色、状态徽章、当前任务、最近活动时间"],
-    ["统一详情面板", "基本信息 / 当前任务 / 最近活动 / 协作对象 / 历史任务 / 健康 / 权限摘要"],
-    ["高风险操作区", "停止·重启 Agent：确认框 + 后端权限校验 + 审计留痕"],
-  ]},
-  tasks: { intro: "任务全生命周期：状态来自 tasks 表真实映射，时间线由真实事件渲染。", blocks: [
-    ["工具条", "搜索 / 状态 / 优先级 / Agent / 创建时间 / 排序"],
-    ["任务列表", "TaskCard：标题、状态徽章、优先级、当前 Agent、最近事件"],
-    ["任务时间线", "创建→分配→领取→执行→协作→交接→完成；允许分支与重试，不强制线性"],
-    ["进度展示纪律", "仅有可靠数据才显示百分比，否则显示当前阶段 + 最近事件"],
-  ]},
-  collaboration: { intro: "Agent 间协作追踪：每条记录都可追溯到真实事件 ID。", blocks: [
-    ["进行中的协作", "协作链路图：委派 / 消息 / 交接 / 反馈 / 共享上下文"],
-    ["协作历史", "按 Agent、Task、时间筛选；点击跳转事件详情"],
-    ["协作异常", "交接超时、消息失败等异常单列"],
-  ]},
-  knowledge: { intro: "空间感知识网络：2D 交互图谱起步，预留 3D 扩展接口。", blocks: [
-    ["图谱画布", "节点（Agent/Task/Document/Concept/Memory/Event）+ 语义关系边"],
-    ["图谱工具", "搜索定位 / 类型筛选 / 关系筛选 / 邻居展开 / 分支收起 / 路径追踪 / 一键重置"],
-    ["增量更新纪律", "新节点增量进入，不重置布局；用户浏览时不打断视图"],
-  ]},
-  memory: { intro: "现有记忆系统的可视化管理，底层不重构；当前 sessions 仅 7 条，如实展示。", blocks: [
-    ["记忆分 Tab", "全局记忆 / Agent 记忆 / 项目记忆"],
-    ["记忆列表", "内容摘要、来源、关联任务、关联知识、更新时间"],
-    ["写操作纪律", "修改/删除/合并必须经后端权限校验与审计"],
-  ]},
-  monitor: { intro: "系统健康实况：仅展示后端真实采集的数据，没有的一律「暂无数据」。", blocks: [
-    ["服务状态", "runtime / api-server / WebSocket 适配层（Phase 4 新增）"],
-    ["线程心跳", "Router / Reaper / 5 Worker / api-server：heartbeats 表"],
-    ["资源与队列", "health.py 七项检查：磁盘、内存、队列深度、死信、同步状态"],
-    ["异常事件", "system.warning / system.error 持久化告警列表"],
-  ]},
-  settings: { intro: "偏好与系统设置：主题等客户端偏好存本地，系统设置走后端校验。", blocks: [
-    ["外观", "主题：浅色 / 深色 / 跟随系统"],
-    ["通知", "级别开关；严重异常进入持久告警列表"],
-    ["连接", "WebSocket 状态、断线补偿、数据过期提示"],
-    ["高风险区", "重启服务、修改权限等：确认框 + 审计"],
-  ]},
-};
+/* 其余 7 页已在 Phase 5 接入真实数据（见文件末尾 pages 区块） */
 
 const state = {
   view: "command",
@@ -97,6 +56,13 @@ const state = {
   net: { scale: 1, tx: 0, ty: 0 },
   tl: { paused: false, filter: "all", pending: [] },
   sim: 0,
+  filters: {
+    agents: { status: "all", kind: "all", q: "" },
+    tasks: { status: "all", agent: "", q: "", offset: 0 },
+    collab: { state: "all" },
+    knowledge: { q: "", category: "all" },
+  },
+  cache: { tasks: [], tasksTotal: 0, knowledge: [], knowledgeTotal: 0 },
 };
 
 /* ---------- 主题 ---------- */
@@ -130,7 +96,7 @@ function switchView(id) {
   const host = $("#views");
   host.innerHTML = "";
   if (id === "command") renderCommand(host);
-  else renderWireframe(host, id);
+  else renderPage(host, id);
 }
 
 /* ---------- 指挥中心 ---------- */
@@ -178,7 +144,7 @@ function renderCommand(host) {
           <option value="system">系统</option>
         </select>
         <button class="sb-button sb-button-secondary" id="tl-pause" type="button">暂停滚动</button>
-        <button class="sb-button sb-button-ghost" id="tl-sim" type="button">模拟新事件（演示）</button>
+        ${window.SB && SB.data ? "" : '<button class="sb-button sb-button-ghost" id="tl-sim" type="button">模拟新事件（演示）</button>'}
         <button class="sb-button sb-button-ghost" type="button" disabled title="Phase 4 接入真实事件回放">历史回放（Phase 4）</button>
       </div>
       <button class="pt-tl-pending" id="tl-pending" type="button"></button>
@@ -191,7 +157,8 @@ function renderCommand(host) {
   $("#tl-filter").addEventListener("change", e => { state.tl.filter = e.target.value; renderTimelineList(); });
   $("#tl-pause").addEventListener("click", togglePause);
   $("#tl-pending").addEventListener("click", flushPending);
-  $("#tl-sim").addEventListener("click", simulateEvent);
+  const simBtn = $("#tl-sim");
+  if (simBtn) simBtn.addEventListener("click", simulateEvent);
 }
 
 const stat = (label, val, sub) =>
@@ -419,7 +386,8 @@ function renderDetail() {
     const a = DEMO.agents.find(x => x.id === target.id);
     const meta = STATUS_META[a.status];
     const edges = DEMO.edges.filter(e => e.from === a.id || e.to === a.id);
-    const events = DEMO.events.filter(e => e.source.includes(a.id)).slice(0, 3);
+    const events = DEMO.events.filter(e =>
+      (e.rawSource && e.rawSource === a.id) || e.source === a.name).slice(0, 5);
     kind = "Agent 详情"; title = a.name;
     body = `
       <div class="pt-dp-sec"><h3>基本信息</h3><div class="pt-dl">
@@ -444,8 +412,11 @@ function renderDetail() {
         ${events.map(e => `<button class="pt-dp-link" data-goto-event="${e.id}" type="button">
           ${e.text}<small>${e.time}</small></button>`).join("") || '<small class="sb-text-tertiary">暂无活动</small>'}
       </div>
-      <div class="pt-dp-sec"><h3>健康</h3><div class="pt-dl">
-        ${detailRow("心跳", "正常（演示）")}
+      <div class="pt-dp-sec"><h3>健康与权限</h3><div class="pt-dl">
+        ${detailRow("最近心跳", a.lastActive)}
+        ${detailRow("在线判定", meta.label)}
+        ${detailRow("能力", (a.capabilities || []).join(" / ") || "未登记")}
+        ${detailRow("任务类型", (a.task_types || []).join(" / ") || "未登记")}
         ${detailRow("权限", a.kind === "chief" ? "七接口指挥权" : "知识库/产出写入")}
       </div></div>`;
   }
@@ -536,18 +507,579 @@ $("#global-search").addEventListener("input", e => {
     i.style.display = !q || i.textContent.toLowerCase().includes(q) ? "" : "none");
 });
 
-/* ---------- 线框视图 ---------- */
-function renderWireframe(host, id) {
-  const wf = WF[id];
-  host.innerHTML = `
-  <section class="view" aria-label="${NAV.find(n => n.id === id).label}">
-    <span class="wf-note">线框原型 · Phase 4 接入真实数据</span>
-    <p class="sb-text-secondary" style="margin-bottom:20px">${wf.intro}</p>
-    <div class="wf-grid cols-2">
-      ${wf.blocks.map(([b, s]) => `<div class="wf-block"><b>${b}</b><small>${s}</small></div>`).join("")}
+/* ==========================================================================
+   Phase 5 · 七个业务页面（数据全部来自 console_api 真实接口）
+   纪律：没有可靠数据就显示「暂无数据」，不做二次推算、不编造。
+   ========================================================================== */
+const PAGE_STATUS = {
+  pending:   { label: "待领取", cls: "waiting" },
+  doing:     { label: "执行中", cls: "working" },
+  done:      { label: "已完成", cls: "completed" },
+  failed:    { label: "失败",   cls: "failed" },
+  dead:      { label: "死信",   cls: "failed" },
+  cancelled: { label: "已取消", cls: "cancelled" },
+};
+const esc = s => String(s ?? "").replace(/[&<>"']/g,
+  c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmtTs = ts => ts ? new Date(ts * 1000).toLocaleString("zh-CN", { hour12: false }) : "—";
+const relTime = ts => {
+  if (!ts) return "从未";
+  const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+  if (s < 60) return "刚刚";
+  if (s < 3600) return Math.floor(s / 60) + " 分钟前";
+  if (s < 86400) return Math.floor(s / 3600) + " 小时前";
+  return Math.floor(s / 86400) + " 天前";
+};
+const badge = (cls, label) => `<span class="sb-status" data-status="${cls}">${label}</span>`;
+
+function renderPage(host, id) {
+  const scroller = $(".sb-content");
+  const keep = scroller ? scroller.scrollTop : 0;
+  if (!(window.SB && SB.data)) {
+    if (id === "settings") renderSettingsPage(host);
+    else renderNoData(host, id);
+  } else {
+    const map = {
+      agents: renderAgentsPage, tasks: renderTasksPage, collaboration: renderCollabPage,
+      knowledge: renderKnowledgePage, memory: renderMemoryPage, monitor: renderMonitorPage,
+      settings: renderSettingsPage,
+    };
+    (map[id] || renderNoData)(host, id);
+  }
+  if (scroller) scroller.scrollTop = keep;
+}
+
+function renderNoData(host, id) {
+  const label = (NAV.find(n => n.id === id) || {}).label || "该页面";
+  host.innerHTML = `<section class="view">
+    <div class="sb-card pt-empty">
+      <h3>暂无数据</h3>
+      <p class="sb-text-secondary">${label}只展示后端真实数据。当前未接入只读口令，或后端尚未产生该类数据。</p>
+      <button class="sb-button sb-button-primary" id="empty-connect" type="button">接入真实数据</button>
     </div>
   </section>`;
+  const btn = $("#empty-connect");
+  if (btn) btn.addEventListener("click", () => window.SB && SB.connect && SB.connect());
 }
+
+/* ---------- 通用详情面板（真实数据版本） ---------- */
+function openPanel(kind, title, body) {
+  const host = $("#detail");
+  const p = state.panel;
+  host.innerHTML = `
+    <div class="pt-dp-head">
+      <div><small>${esc(kind)}</small><h3>${esc(title)}</h3></div>
+      <div class="pt-dp-actions">
+        ${p.history.length ? '<button class="pt-icon-btn" data-act="back" type="button" aria-label="返回">←</button>' : ""}
+        <button class="pt-icon-btn ${p.pinned ? "pinned" : ""}" data-act="pin" type="button" aria-label="固定">⌘</button>
+        <button class="pt-icon-btn" data-act="close" type="button" aria-label="关闭">✕</button>
+      </div>
+    </div>
+    <div class="pt-dp-body" id="panel-body">${body}</div>`;
+  host.dataset.open = "true";
+  $$("[data-act]", host).forEach(b => b.addEventListener("click", () => {
+    const act = b.dataset.act;
+    if (act === "close") closeDetail();
+    if (act === "pin") { p.pinned = !p.pinned; openPanel(kind, title, body); }
+    if (act === "back") goBack();
+  }));
+  return $("#panel-body");
+}
+
+/* ---------- 1. Agent 管理 ---------- */
+function renderAgentsPage(host) {
+  const f = state.filters.agents;
+  const agents = DEMO.agents;
+  host.innerHTML = `<section class="view" aria-label="Agent 管理">
+    <div class="pt-toolbar">
+      <input id="ag-q" class="pt-input" type="search" placeholder="搜索名称 / ID / 角色" value="${esc(f.q)}">
+      <select id="ag-status" class="pt-select">
+        ${[["all", "全部状态"], ["idle", "空闲"], ["working", "执行中"], ["offline", "离线"]]
+          .map(([v, t]) => `<option value="${v}" ${f.status === v ? "selected" : ""}>${t}</option>`).join("")}
+      </select>
+      <select id="ag-kind" class="pt-select">
+        ${[["all", "全部类型"], ["chief", "指挥入口"], ["worker", "执行者"]]
+          .map(([v, t]) => `<option value="${v}" ${f.kind === v ? "selected" : ""}>${t}</option>`).join("")}
+      </select>
+      <span class="pt-count" id="ag-count"></span>
+    </div>
+    <div class="pt-agent-grid" id="ag-grid"></div>
+  </section>`;
+
+  const grid = $("#ag-grid");
+  grid.innerHTML = agents.map(a => {
+    const meta = STATUS_META[a.status] || STATUS_META.idle;
+    return `<button class="sb-card pt-agent-card" data-id="${esc(a.id)}"
+        data-status="${a.status}" data-kind="${a.kind}"
+        data-text="${esc(`${a.name} ${a.id} ${a.role}`.toLowerCase())}" type="button">
+      <div class="pt-agent-head">
+        <span class="agent-node-avatar">${esc((a.name || "?").trim()[0].toUpperCase())}</span>
+        <div class="pt-agent-id"><strong>${esc(a.name)}</strong><small>${esc(a.role)}</small></div>
+        ${badge(a.status, meta.label)}
+      </div>
+      <p class="pt-agent-task">${esc(a.currentTask || "当前无任务")}</p>
+      <div class="pt-agent-foot">
+        <span class="pt-tag">${a.kind === "chief" ? "指挥入口" : "执行者"}</span>
+        <span class="sb-text-tertiary">最近活动：${esc(a.lastActive)}</span>
+      </div>
+    </button>`;
+  }).join("") || '<div class="pt-empty-inline">暂无数据</div>';
+
+  const applyFilter = () => {
+    let n = 0;
+    $$(".pt-agent-card", grid).forEach(c => {
+      const hit = (f.status === "all" || c.dataset.status === f.status)
+        && (f.kind === "all" || c.dataset.kind === f.kind)
+        && (!f.q || c.dataset.text.includes(f.q));
+      c.hidden = !hit;
+      if (hit) n++;
+    });
+    $("#ag-count").textContent = `显示 ${n} / ${agents.length}`;
+  };
+  $("#ag-q").addEventListener("input", e => { f.q = e.target.value.trim().toLowerCase(); applyFilter(); });
+  $("#ag-status").addEventListener("change", e => { f.status = e.target.value; applyFilter(); });
+  $("#ag-kind").addEventListener("change", e => { f.kind = e.target.value; applyFilter(); });
+  applyFilter();
+  $$(".pt-agent-card", grid).forEach(c =>
+    c.addEventListener("click", () => selectAgent(c.dataset.id)));
+}
+
+/* ---------- 2. 任务中心 ---------- */
+function renderTasksPage(host) {
+  const f = state.filters.tasks;
+  host.innerHTML = `<section class="view" aria-label="任务中心">
+    <div class="pt-toolbar">
+      <input id="tk-q" class="pt-input" type="search" placeholder="搜索任务 ID / 类型 / 结果" value="${esc(f.q)}">
+      <select id="tk-status" class="pt-select">
+        ${[["all", "全部状态"], ["doing", "执行中"], ["pending", "待领取"], ["done", "已完成"],
+           ["failed", "失败"], ["dead", "死信"], ["cancelled", "已取消"]]
+          .map(([v, t]) => `<option value="${v}" ${f.status === v ? "selected" : ""}>${t}</option>`).join("")}
+      </select>
+      <select id="tk-agent" class="pt-select">
+        <option value="">全部 Agent</option>
+        ${DEMO.agents.map(a => `<option value="${esc(a.id)}" ${f.agent === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}
+      </select>
+      <button class="sb-button sb-button-secondary" id="tk-refresh" type="button">刷新</button>
+      <span class="pt-count" id="tk-count"></span>
+    </div>
+    <div class="pt-list" id="tk-list"><div class="pt-loading">加载中…</div></div>
+    <div class="pt-more"><button class="sb-button sb-button-secondary" id="tk-more" type="button" hidden>加载更多</button></div>
+  </section>`;
+
+  const reload = reset => loadTasks(reset);
+  $("#tk-q").addEventListener("change", e => { f.q = e.target.value.trim(); reload(true); });
+  $("#tk-status").addEventListener("change", e => { f.status = e.target.value; reload(true); });
+  $("#tk-agent").addEventListener("change", e => { f.agent = e.target.value; reload(true); });
+  $("#tk-refresh").addEventListener("click", () => reload(true));
+  $("#tk-more").addEventListener("click", () => { f.offset += 50; reload(false); });
+  reload(true);
+}
+
+async function loadTasks(reset) {
+  const f = state.filters.tasks;
+  const list = $("#tk-list");
+  if (!list) return;
+  if (reset) { f.offset = 0; state.cache.tasks = []; list.innerHTML = '<div class="pt-loading">加载中…</div>'; }
+  const p = new URLSearchParams({ limit: "50", offset: String(f.offset) });
+  if (f.status !== "all") p.set("status", f.status);
+  if (f.agent) p.set("agent", f.agent);
+  if (f.q) p.set("q", f.q);
+  try {
+    const body = await SB.api("/api/tasks?" + p.toString());
+    state.cache.tasks = reset ? body.data : state.cache.tasks.concat(body.data);
+    state.cache.tasksTotal = body.total;
+    renderTaskList();
+  } catch (e) {
+    list.innerHTML = `<div class="pt-empty-inline">加载失败：${esc(e.message)}</div>`;
+  }
+}
+
+function renderTaskList() {
+  const list = $("#tk-list");
+  if (!list) return;
+  const rows = state.cache.tasks || [];
+  if (!rows.length) {
+    list.innerHTML = '<div class="pt-empty-inline">暂无数据</div>';
+    $("#tk-count").textContent = "";
+    $("#tk-more").hidden = true;
+    return;
+  }
+  list.innerHTML = rows.map(t => {
+    const st = PAGE_STATUS[t.status] || { label: t.status, cls: "idle" };
+    const prog = t.progress == null ? "" : `
+      <div class="pt-prog"><span style="width:${Math.max(0, Math.min(100, t.progress))}%"></span></div>
+      <small class="sb-text-tertiary">${t.progress}% · 已过 ${t.elapsed_seconds}s / 预计 ${t.estimate_seconds}s（样本 ${t.estimate_samples}）</small>`;
+    return `<button class="sb-card pt-task-card" data-id="${t.id}" type="button">
+      <div class="pt-task-head">
+        <strong>#${t.id} · ${esc(t.type)}</strong>
+        ${badge(st.cls, st.label)}
+      </div>
+      <p class="pt-task-sum">${esc(t.summary || "暂无摘要")}</p>
+      ${prog}
+      <div class="pt-task-foot">
+        <span>${esc(t.lease_owner || "未分配")}</span>
+        <span>优先级 P${t.priority ?? "—"}</span>
+        <span>${fmtTs(t.created_at)}</span>
+      </div>
+    </button>`;
+  }).join("");
+  $("#tk-count").textContent = `共 ${state.cache.tasksTotal} 条 · 已加载 ${rows.length}`;
+  $("#tk-more").hidden = rows.length >= state.cache.tasksTotal;
+  $$(".pt-task-card", list).forEach(b =>
+    b.addEventListener("click", () => openTaskDetail(b.dataset.id)));
+}
+
+async function openTaskDetail(id) {
+  const body = openPanel("任务详情", `#${id}`, '<div class="pt-loading">加载中…</div>');
+  try {
+    const b = await SB.api("/api/tasks/" + id);
+    const t = b.data;
+    const st = PAGE_STATUS[t.status] || { label: t.status, cls: "idle" };
+    const evs = (t.events || []).map(e => `<button class="pt-dp-link" type="button">
+        ${esc(e.type)} <small>${esc(e.source)} · ${fmtTs(e.created_at)}</small></button>`).join("")
+      || '<small class="sb-text-tertiary">暂无关联事件</small>';
+    body.innerHTML = `
+      <div class="pt-dp-sec"><h3>任务信息</h3><div class="pt-dl">
+        ${detailRow("任务 ID", "#" + t.id)}
+        ${detailRow("类型", esc(t.type))}
+        ${detailRow("状态", badge(st.cls, st.label))}
+        ${detailRow("执行 Agent", esc(t.lease_owner || "未分配"))}
+        ${detailRow("优先级", "P" + (t.priority ?? "—"))}
+        ${detailRow("重试次数", t.retry_count ?? 0)}
+        ${detailRow("创建时间", fmtTs(t.created_at))}
+        ${detailRow("领取时间", fmtTs(t.claimed_at))}
+        ${detailRow("完成时间", fmtTs(t.done_at))}
+      </div></div>
+      <div class="pt-dp-sec"><h3>进度（自学习估算）</h3><div class="pt-dl">
+        ${detailRow("进度", t.progress == null ? "—" : t.progress + "%")}
+        ${detailRow("已过", t.elapsed_seconds == null ? "—" : t.elapsed_seconds + " 秒")}
+        ${detailRow("预计", t.estimate_seconds == null ? "—" : t.estimate_seconds + " 秒")}
+        ${detailRow("样本数", t.estimate_samples ?? "—")}
+      </div></div>
+      <div class="pt-dp-sec"><h3>结果 / 错误</h3>
+        <p class="pt-pre">${esc(t.result || t.error || "暂无数据")}</p></div>
+      <div class="pt-dp-sec"><h3>Payload</h3>
+        <pre class="pt-pre">${esc(JSON.stringify(t.payload || {}, null, 2))}</pre></div>
+      <div class="pt-dp-sec"><h3>关联事件（${(t.events || []).length}）</h3>${evs}</div>`;
+  } catch (e) {
+    body.innerHTML = `<div class="pt-empty-inline">加载失败：${esc(e.message)}</div>`;
+  }
+}
+
+/* ---------- 3. 协作中心 ---------- */
+function renderCollabPage(host) {
+  const f = state.filters.collab;
+  const rels = DEMO.edges || [];
+  const evs = (DEMO.events || []).filter(e =>
+    ["task_delegated", "task_linked", "chief_cmd", "chief_result", "api_call", "task_progress"].includes(e.rawType));
+  host.innerHTML = `<section class="view" aria-label="协作中心">
+    <div class="pt-toolbar">
+      <select id="cl-state" class="pt-select">
+        ${[["all", "全部通道"], ["active", "进行中"], ["idle", "空闲"]]
+          .map(([v, t]) => `<option value="${v}" ${f.state === v ? "selected" : ""}>${t}</option>`).join("")}
+      </select>
+      <span class="pt-count" id="cl-count"></span>
+      <span class="sb-text-tertiary" style="margin-left:auto">连线只表示「可委派通道」；进行中才发光</span>
+    </div>
+    <div class="pt-cols">
+      <div class="sb-card pt-panel">
+        <h3 class="pt-panel-title">协作通道</h3>
+        <div id="cl-list"></div>
+      </div>
+      <div class="sb-card pt-panel">
+        <h3 class="pt-panel-title">协作相关事件</h3>
+        <div id="cl-events"></div>
+      </div>
+    </div>
+  </section>`;
+
+  const list = $("#cl-list");
+  list.innerHTML = rels.map(r => {
+    const active = r.state === "active";
+    return `<button class="pt-rel-row" data-rel="${esc(r.id)}" type="button">
+      <span class="pt-rel-dot" data-active="${active ? 1 : 0}"></span>
+      <span class="pt-rel-main">
+        <strong>${esc(r.from)} → ${esc(r.to)}</strong>
+        <small>${esc(r.summary)} · ${esc(r.time)}</small>
+      </span>
+      ${active ? badge("working", "进行中") : badge("idle", "空闲")}
+    </button>`;
+  }).join("") || '<div class="pt-empty-inline">暂无数据</div>';
+
+  $("#cl-events").innerHTML = evs.map(e => {
+    const meta = DEMO.eventTypeMeta[e.type] || { label: e.type, color: "var(--sb-text-tertiary)" };
+    return `<button class="pt-tl-item" data-event="${esc(e.id)}" type="button">
+      <span class="pt-tl-dot" style="background:${meta.color}"></span>
+      <span class="pt-tl-time">${esc(e.time)}</span>
+      <span class="pt-tl-text">${esc(e.text)}</span>
+      <span class="pt-tl-type">${esc(meta.label)}</span>
+    </button>`;
+  }).join("") || '<div class="pt-empty-inline">暂无数据</div>';
+
+  const apply = () => {
+    let n = 0;
+    $$(".pt-rel-row", list).forEach(row => {
+      const rel = rels.find(r => r.id === row.dataset.rel);
+      const hit = f.state === "all" || (rel && rel.state === f.state);
+      row.hidden = !hit;
+      if (hit) n++;
+    });
+    $("#cl-count").textContent = `显示 ${n} / ${rels.length}`;
+  };
+  $("#cl-state").addEventListener("change", e => { f.state = e.target.value; apply(); });
+  apply();
+  $$(".pt-rel-row", list).forEach(b =>
+    b.addEventListener("click", () => openDetail({ type: "edge", id: b.dataset.rel })));
+  $$("#cl-events .pt-tl-item").forEach(b =>
+    b.addEventListener("click", () => openDetail({ type: "event", id: b.dataset.event })));
+}
+
+/* ---------- 4. 知识图谱 ---------- */
+function renderKnowledgePage(host) {
+  const f = state.filters.knowledge;
+  host.innerHTML = `<section class="view" aria-label="知识图谱">
+    <div class="pt-toolbar">
+      <input id="kn-q" class="pt-input" type="search" placeholder="搜索标题 / 标签 / 正文" value="${esc(f.q)}">
+      <select id="kn-cat" class="pt-select"><option value="all">全部分类</option></select>
+      <button class="sb-button sb-button-secondary" id="kn-refresh" type="button">刷新</button>
+      <span class="pt-count" id="kn-count"></span>
+    </div>
+    <div class="pt-list" id="kn-list"><div class="pt-loading">加载中…</div></div>
+  </section>`;
+
+  $("#kn-q").addEventListener("change", e => { f.q = e.target.value.trim(); loadKnowledge(); });
+  $("#kn-refresh").addEventListener("click", loadKnowledge);
+  loadKnowledge();
+}
+
+async function loadKnowledge() {
+  const f = state.filters.knowledge;
+  const list = $("#kn-list");
+  if (!list) return;
+  list.innerHTML = '<div class="pt-loading">加载中…</div>';
+  const p = new URLSearchParams({ limit: "300" });
+  if (f.q) p.set("q", f.q);
+  if (f.category !== "all") p.set("category", f.category);
+  try {
+    const body = await SB.api("/api/knowledge?" + p.toString());
+    state.cache.knowledge = body.data;
+    state.cache.knowledgeTotal = body.total;
+    renderKnowledgeList();
+  } catch (e) {
+    list.innerHTML = `<div class="pt-empty-inline">加载失败：${esc(e.message)}</div>`;
+  }
+}
+
+function renderKnowledgeList() {
+  const f = state.filters.knowledge;
+  const items = state.cache.knowledge || [];
+  const list = $("#kn-list");
+  if (!list) return;
+  const cats = [...new Set(items.map(i => i.category).filter(Boolean))];
+  const sel = $("#kn-cat");
+  if (sel && cats.length) {
+    sel.innerHTML = '<option value="all">全部分类</option>' + cats
+      .map(c => `<option value="${esc(c)}" ${f.category === c ? "selected" : ""}>${esc(c)}</option>`).join("");
+    sel.onchange = e => { f.category = e.target.value; loadKnowledge(); };
+  }
+  list.innerHTML = items.map((k, i) => `
+    <button class="sb-card pt-kn-card" data-idx="${i}" type="button">
+      <div class="pt-task-head">
+        <strong>${esc(k.title)}</strong>
+        <span class="pt-tag">${esc(k.category || "未分类")}</span>
+      </div>
+      <p class="pt-task-sum">${esc(k.snippet || "暂无摘要")}</p>
+      <div class="pt-task-foot">
+        <span>${esc((k.tags || []).join(" / ") || "无标签")}</span>
+        <span>${k.quality ? "质量 " + esc(k.quality) : "质量未标注"}</span>
+        <span>${esc(k.updated || "—")}</span>
+      </div>
+    </button>`).join("") || '<div class="pt-empty-inline">暂无数据</div>';
+  $("#kn-count").textContent = `共 ${state.cache.knowledgeTotal} 篇 · 已加载 ${items.length}`;
+  $$(".pt-kn-card", list).forEach(b => b.addEventListener("click", () => {
+    const k = items[Number(b.dataset.idx)];
+    openPanel("知识文件", k.title, `
+      <div class="pt-dp-sec"><h3>文件信息</h3><div class="pt-dl">
+        ${detailRow("路径", esc(k.path))}
+        ${detailRow("分类", esc(k.category || "—"))}
+        ${detailRow("标签", esc((k.tags || []).join(" / ") || "—"))}
+        ${detailRow("质量", esc(k.quality || "未标注"))}
+        ${detailRow("更新时间", esc(k.updated || "—"))}
+        ${detailRow("大小", (k.size / 1024).toFixed(1) + " KB")}
+      </div></div>
+      <div class="pt-dp-sec"><h3>正文摘要</h3><p class="pt-pre">${esc(k.snippet || "暂无数据")}</p></div>`);
+  }));
+}
+
+/* ---------- 5. 记忆中心 ---------- */
+async function renderMemoryPage(host) {
+  host.innerHTML = `<section class="view" aria-label="记忆中心">
+    <div class="pt-cols">
+      <div class="sb-card pt-panel"><h3 class="pt-panel-title">会话记忆</h3><div id="mem-sessions"><div class="pt-loading">加载中…</div></div></div>
+      <div class="sb-card pt-panel"><h3 class="pt-panel-title">Agent 运行记忆</h3><div id="mem-agents"><div class="pt-loading">加载中…</div></div></div>
+    </div>
+  </section>`;
+  try {
+    const b = await SB.api("/api/memory");
+    const { sessions = [], agent_memory = [] } = b.data || {};
+    $("#mem-sessions").innerHTML = sessions.length ? sessions.map(s => `
+      <div class="pt-mem-row">
+        <strong>${esc(s.thread_id)}</strong>
+        <small>${esc(s.worker || "—")} · ${relTime(s.updated_at)}</small>
+      </div>`).join("") : '<div class="pt-empty-inline">暂无数据</div>';
+    $("#mem-agents").innerHTML = agent_memory.length ? agent_memory.map(a => `
+      <div class="pt-mem-row">
+        <strong>${esc(a.agent_id)}</strong>
+        <small>最近心跳：${relTime(a.last_seen)}</small>
+      </div>`).join("") : '<div class="pt-empty-inline">暂无数据</div>';
+  } catch (e) {
+    $("#mem-sessions").innerHTML = `<div class="pt-empty-inline">加载失败：${esc(e.message)}</div>`;
+    $("#mem-agents").innerHTML = "";
+  }
+}
+
+/* ---------- 6. 系统监控 ---------- */
+function renderMonitorPage(host) {
+  const m = SB.data.monitor || {};
+  const sys = m.system || {};
+  const hb = m.heartbeats || [];
+  const queue = m.queue || {};
+  const health = m.health || {};
+  const alerts = Array.isArray(health.alerts) ? health.alerts : [];
+  const queueRows = Object.entries(queue).map(([k, v]) => {
+    const st = PAGE_STATUS[k] || { label: k, cls: "idle" };
+    return `<div class="pt-mem-row"><strong>${esc(st.label)}</strong><small>${v} 条</small></div>`;
+  }).join("") || '<div class="pt-empty-inline">暂无数据</div>';
+  host.innerHTML = `<section class="view" aria-label="系统监控">
+    <div class="pt-metrics">
+      ${stat("线程心跳", hb.length, "运行中线程")}
+      ${stat("执行中", queue.doing || 0, "任务")}
+      ${stat("待领取", queue.pending || 0, "任务")}
+      ${stat("死信", (queue.dead || 0), "需处理")}
+      ${stat("告警", alerts.length, alerts.length ? "见下方" : "无告警")}
+    </div>
+    <div class="pt-cols">
+      <div class="sb-card pt-panel"><h3 class="pt-panel-title">线程心跳</h3><div id="mo-hb"></div></div>
+      <div class="sb-card pt-panel"><h3 class="pt-panel-title">队列深度</h3><div>${queueRows}</div></div>
+    </div>
+    <div class="pt-cols" style="margin-top:16px">
+      <div class="sb-card pt-panel"><h3 class="pt-panel-title">资源</h3><div class="pt-dl">
+        ${detailRow("负载（1/5/15 分钟）", sys.loadavg ? sys.loadavg.join(" / ") : "暂无数据")}
+        ${detailRow("内存总量", sys.mem_total_mb ? sys.mem_total_mb + " MB" : "暂无数据")}
+        ${detailRow("可用内存", sys.mem_available_mb ? sys.mem_available_mb + " MB" : "暂无数据")}
+      </div></div>
+      <div class="sb-card pt-panel"><h3 class="pt-panel-title">健康检查</h3>
+        ${health && Object.keys(health).length ? `
+          <div class="pt-dl">${detailRow("检查时间", esc(health.ts || health.time || "—"))}</div>
+          <div class="pt-dp-sec" style="margin-top:12px"><h3>告警（${alerts.length}）</h3>
+            ${alerts.length ? alerts.map(a => `<p class="pt-alert">${esc(typeof a === "string" ? a : JSON.stringify(a))}</p>`).join("") : '<small class="sb-text-tertiary">无告警</small>'}
+          </div>
+          <details class="pt-details"><summary>原始健康数据</summary><pre class="pt-pre">${esc(JSON.stringify(health, null, 2))}</pre></details>`
+        : '<div class="pt-empty-inline">暂无数据</div>'}
+      </div>
+    </div>
+  </section>`;
+  $("#mo-hb").innerHTML = hb.length ? hb.map(h => `
+    <div class="pt-mem-row">
+      <strong>${esc(h.agent)}</strong>
+      <small>${h.age_seconds == null ? "—" : h.age_seconds + " 秒前"} ${h.note ? "· " + esc(h.note) : ""}</small>
+    </div>`).join("") : '<div class="pt-empty-inline">暂无数据</div>';
+}
+
+/* ---------- 7. 系统设置 ---------- */
+function renderSettingsPage(host) {
+  const modeText = { push: "SSE 实时推送", poll: "轮询（推送不可用）", error: "连接中断", idle: "未连接" }[SB.mode] || "未连接";
+  const synced = SB.lastSync ? new Date(SB.lastSync).toLocaleTimeString("zh-CN", { hour12: false }) : "—";
+  host.innerHTML = `<section class="view" aria-label="系统设置">
+    <div class="pt-cols">
+      <div class="sb-card pt-panel"><h3 class="pt-panel-title">外观</h3>
+        <p class="sb-text-secondary" style="font-size:13px;margin-bottom:12px">主题仅保存在本机浏览器，不影响后端。</p>
+        <button class="sb-button sb-button-secondary" id="set-theme" type="button">切换深 / 浅色</button>
+      </div>
+      <div class="sb-card pt-panel"><h3 class="pt-panel-title">数据连接（只读）</h3><div class="pt-dl">
+        ${detailRow("连接方式", esc(modeText))}
+        ${detailRow("最近同步", esc(synced))}
+        ${detailRow("只读口令", "已保存在本机浏览器（不回显）")}
+      </div>
+      <div style="margin-top:14px">
+        <button class="sb-button sb-button-primary" id="set-conn" type="button">${SB.token ? "断开并清除口令" : "接入真实数据"}</button>
+      </div></div>
+    </div>
+    <div class="sb-card pt-panel" style="margin-top:16px">
+      <h3 class="pt-panel-title">Agent 管理（高风险）</h3>
+      <p class="sb-text-secondary" style="font-size:13px;margin-bottom:12px">
+        只读口令没有指挥权。此处的操作需要临时输入<b>指挥口令</b>，口令不入库、不保存、不回显；
+        后端 API 会记录调用留痕。停用前系统会校验同类至少保留一个可用 Agent。
+      </p>
+      <div class="pt-form">
+        <select id="mg-cmd" class="pt-select">
+          <option value="disable-agent">停用 Agent</option>
+          <option value="enable-agent">启用 Agent</option>
+          <option value="add-agent">新增 Agent</option>
+        </select>
+        <input id="mg-id" class="pt-input" placeholder="Agent ID，如 research-worker" autocomplete="off">
+        <select id="mg-kind" class="pt-select">
+          <option value="worker">执行者</option>
+          <option value="chief">指挥入口</option>
+        </select>
+        <input id="mg-token" class="pt-input" type="password" placeholder="指挥口令（仅本次使用）" autocomplete="off">
+        <button class="sb-button sb-button-primary" id="mg-run" type="button">执行</button>
+      </div>
+      <div id="mg-result" class="pt-result" aria-live="polite"></div>
+    </div>
+  </section>`;
+
+  $("#set-theme").addEventListener("click", () => $("#theme-toggle").click());
+  $("#set-conn").addEventListener("click", () => {
+    if (SB.token) SB.disconnect();
+    else if (SB.connect) SB.connect();
+  });
+  $("#mg-run").addEventListener("click", async () => {
+    const cmd = $("#mg-cmd").value;
+    const id = $("#mg-id").value.trim();
+    const kind = $("#mg-kind").value;
+    const token = $("#mg-token").value;
+    const out = $("#mg-result");
+    if (!/^[a-z0-9][a-z0-9._-]{1,40}$/.test(id)) {
+      out.dataset.status = "error";
+      out.textContent = "Agent ID 不合法：小写字母/数字/. _ -，长度 2-41";
+      return;
+    }
+    if (!token) {
+      out.dataset.status = "error";
+      out.textContent = "请输入指挥口令（只读口令无法执行管理操作）";
+      return;
+    }
+    const action = cmd === "add-agent" ? `新增 ${kind === "chief" ? "指挥入口" : "执行者"} ${id}`
+      : (cmd === "disable-agent" ? `停用 ${id}` : `启用 ${id}`);
+    if (!confirm(`确认${action}？\n该操作会写入审计留痕。`)) return;
+    out.dataset.status = "pending";
+    out.textContent = "执行中…";
+    $("#mg-token").value = "";
+    try {
+      const args = { id };
+      if (cmd === "add-agent") args.kind = kind;
+      const res = await SB.post(cmd, args, token);
+      out.dataset.status = res.ok ? "ok" : "error";
+      out.textContent = res.ok ? `成功：${JSON.stringify(res).slice(0, 300)}` : `失败：${res.error || "未知错误"}`;
+      if (res.ok) setTimeout(() => SB.refresh && SB.refresh(), 800);
+    } catch (e) {
+      out.dataset.status = "error";
+      out.textContent = "失败：" + e.message;
+    }
+  });
+}
+
+/* ---------- 数据更新：平滑刷新当前页 ---------- */
+document.addEventListener("sb:data", () => {
+  const host = $("#views");
+  if (!host) return;
+  const ae = document.activeElement;
+  if (ae && host.contains(ae) && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;  // 输入中不打断
+  if (state.view === "agents" || state.view === "collaboration" || state.view === "monitor") {
+    renderPage(host, state.view);
+  }
+});
 
 /* ---------- 启动 ---------- */
 initTheme();
