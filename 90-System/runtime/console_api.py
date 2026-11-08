@@ -14,6 +14,39 @@ ROOT = Path(__file__).resolve().parents[2]
 KNOWLEDGE = ROOT / "10-Knowledge"
 EVENTS_DIR = ROOT / "50-Events"
 OFFLINE_SECONDS = 300          # 心跳超过 5 分钟视为离线
+DEFAULT_ESTIMATE = 120         # 无历史样本时的默认预计耗时（秒）
+_EST_CACHE = {}                # type -> (中位耗时, 样本数, 计算时刻)
+
+
+def _estimate(conn, ttype):
+    """同类任务最近 20 条完成耗时的中位数；样本为零回退默认值。样本越多越准（自学习）。"""
+    hit = _EST_CACHE.get(ttype)
+    if hit and time.time() - hit[2] < 60:
+        return hit[0], hit[1]
+    vals = sorted(r[0] for r in conn.execute(
+        "SELECT done_at-claimed_at FROM tasks WHERE type=? AND status='done' "
+        "AND claimed_at IS NOT NULL AND done_at IS NOT NULL AND done_at>claimed_at "
+        "ORDER BY id DESC LIMIT 20", (ttype,)))
+    out = (int(vals[len(vals) // 2]), len(vals)) if vals else (DEFAULT_ESTIMATE, 0)
+    _EST_CACHE[ttype] = (*out, time.time())
+    return out
+
+
+def _with_progress(conn, row, now):
+    """给任务行补 progress（仅 doing 有估算值）：进度=已过/预计，封顶 95，完成回填 100。"""
+    st = row.get("status")
+    if st == "done":
+        row.update(progress=100, estimate_seconds=None, elapsed_seconds=None)
+    elif st == "pending":
+        row.update(progress=0, estimate_seconds=None, elapsed_seconds=None)
+    elif st == "doing" and row.get("claimed_at"):
+        est, n = _estimate(conn, row.get("type") or "")
+        el = max(0, now - int(row["claimed_at"]))
+        row.update(progress=min(95, max(1, round(el * 100 / est))),
+                   estimate_seconds=est, elapsed_seconds=el, estimate_samples=n)
+    else:
+        row.update(progress=None, estimate_seconds=None, elapsed_seconds=None)
+    return row
 _PUBLIC_FIELDS = ("event_id", "source", "type", "priority", "status", "created_at")
 
 
@@ -123,9 +156,11 @@ def handle_get(conn, raw_path):
             args.append(q["agent"])
         w = ("WHERE " + " AND ".join(where)) if where else ""
         rows = _rows(conn.execute(
-            f"SELECT id,type,status,priority,lease_owner,retry_count,created_at,done_at,"
+            f"SELECT id,type,status,priority,lease_owner,retry_count,claimed_at,created_at,done_at,"
             f"substr(COALESCE(result,error),1,200) AS summary FROM tasks {w} "
             f"ORDER BY id DESC LIMIT ? OFFSET ?", (*args, limit, offset)))
+        for r in rows:
+            _with_progress(conn, r, now)
         total = conn.execute(f"SELECT COUNT(*) FROM tasks {w}", args).fetchone()[0]
         return ok(rows, total=total, limit=limit, offset=offset)
 
@@ -140,10 +175,33 @@ def handle_get(conn, raw_path):
             d["payload"] = json.loads(d["payload"] or "{}")
         except Exception:
             pass
+        _with_progress(conn, d, now)
         evs = _rows(conn.execute(
             "SELECT event_id,source,type,status,created_at FROM events WHERE parent_id=? "
             "OR event_id=? ORDER BY created_at DESC LIMIT 20", (d["event_id"], d["event_id"])))
         return ok({**d, "events": evs})
+
+    if path == "/api/relations":
+        # 依据一：真实历史派发记录（events.source → tasks.lease_owner），有据可查
+        rows = _rows(conn.execute(
+            "SELECT e.source AS source, t.lease_owner AS target, COUNT(*) AS task_count, "
+            "MAX(t.created_at) AS last_at FROM tasks t JOIN events e ON t.event_id=e.event_id "
+            "WHERE t.lease_owner IS NOT NULL AND t.lease_owner!='' AND e.source!='' "
+            "GROUP BY 1,2 ORDER BY task_count DESC LIMIT 60"))
+        for r in rows:
+            r["type"] = "delegation"
+            r["evidence"] = "history"
+        busy = {r[0] for r in conn.execute(
+            "SELECT lease_owner FROM tasks WHERE status='doing' AND lease_owner IS NOT NULL")}
+        covered = {(r["source"], r["target"]) for r in rows}
+        # 依据二：尚无派发记录的入口 → 默认路由 chat-worker（规则层真实兜底，非虚构）
+        for (c,) in conn.execute("SELECT agent_id FROM agents WHERE kind='chief' AND status='active'"):
+            if not any(s == c for s, _ in covered) and (c, "chat-worker") not in covered:
+                rows.append({"source": c, "target": "chat-worker", "task_count": 0,
+                             "last_at": None, "type": "delegation", "evidence": "default_route"})
+        for r in rows:
+            r["state"] = "active" if (r["target"] in busy and r["evidence"] == "history") else "idle"
+        return ok(rows)
 
     if path == "/api/events":
         limit = min(int(q.get("limit", 50)), 200)
