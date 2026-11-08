@@ -1,0 +1,361 @@
+/* ==========================================================================
+   PERSONAL AI OS — css/motion.css
+   全部 keyframes · 进入/离开曲线 · prefers-reduced-motion · 低性能降级
+   依赖：tokens.css
+   --------------------------------------------------------------------------
+   原则
+   1) 只动 transform / opacity（契约 §11），不触发布局。
+   2) 无缩放弹跳；位移不超过 24px，时长不超过 420ms。
+   3) 无限循环动画只允许三种：呼吸点、步骤脉冲、加载旋转。
+   ========================================================================== */
+
+/* ==========================================================================
+   01 · 基础 keyframes
+   ========================================================================== */
+@keyframes pao-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes pao-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+@keyframes pao-rise-in {
+  from { opacity: 0; transform: translate3d(0, 8px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@keyframes pao-drop-in {
+  from { opacity: 0; transform: translate3d(0, -10px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+/* ==========================================================================
+   02 · 右侧上下文面板：translateX(24px) + opacity 0→1，280ms
+   ========================================================================== */
+@keyframes pao-panel-in {
+  from { opacity: 0; transform: translate3d(24px, 0, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@keyframes pao-panel-out {
+  from { opacity: 1; transform: translate3d(0, 0, 0); }
+  to   { opacity: 0; transform: translate3d(24px, 0, 0); }
+}
+
+/* ≤1180px：面板变底部抽屉，改为纵向进入 */
+@keyframes pao-sheet-in {
+  from { opacity: 0; transform: translate3d(0, 24px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@keyframes pao-sheet-out {
+  from { opacity: 1; transform: translate3d(0, 0, 0); }
+  to   { opacity: 0; transform: translate3d(0, 24px, 0); }
+}
+
+/* ==========================================================================
+   03 · 设置抽屉 / Modal / Toast
+   ========================================================================== */
+@keyframes pao-drawer-in {
+  from { opacity: .6; transform: translate3d(100%, 0, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@keyframes pao-drawer-out {
+  from { opacity: 1; transform: translate3d(0, 0, 0); }
+  to   { opacity: .4; transform: translate3d(100%, 0, 0); }
+}
+
+@keyframes pao-modal-in {
+  from { opacity: 0; transform: translate3d(0, 10px, 0) scale(.985); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes pao-toast-in {
+  from { opacity: 0; transform: translate3d(0, -10px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@keyframes pao-toast-out {
+  from { opacity: 1; transform: translate3d(0, 0, 0); }
+  to   { opacity: 0; transform: translate3d(0, -8px, 0); }
+}
+
+/* ==========================================================================
+   04 · 状态与加载（唯三的无限循环）
+   ========================================================================== */
+/* 呼吸点：只用阴影扩散，不做光晕泛白 */
+@keyframes pao-breathe {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 3px var(--ok-10); }
+  50%      { opacity: .72; box-shadow: 0 0 0 5px var(--ok-04); }
+}
+
+/* 运行中步骤：圆点外环脉冲 */
+@keyframes pao-step-pulse {
+  0%   { box-shadow: 0 0 0 0 var(--cyan-38); }
+  70%  { box-shadow: 0 0 0 5px var(--cyan-00); }
+  100% { box-shadow: 0 0 0 0 var(--cyan-00); }
+}
+
+/* 旋转（按钮忙态 / 刷新图标） */
+@keyframes pao-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ==========================================================================
+   05 · 骨架屏 / 不定进度 / 数值强调
+   ========================================================================== */
+@keyframes pao-shimmer {
+  0%   { opacity: .34; }
+  50%  { opacity: .72; }
+  100% { opacity: .34; }
+}
+
+@keyframes pao-indeterminate {
+  0%   { transform: translate3d(-100%, 0, 0) scaleX(.4); }
+  50%  { transform: translate3d(20%, 0, 0) scaleX(.6); }
+  100% { transform: translate3d(100%, 0, 0) scaleX(.4); }
+}
+
+@keyframes pao-tick {
+  0%   { color: var(--ice); }
+  100% { color: inherit; }
+}
+
+@keyframes pao-sweep {
+  0%   { transform: translate3d(-120%, 0, 0); }
+  100% { transform: translate3d(320%, 0, 0); }
+}
+
+/* ==========================================================================
+   06 · 可直接挂的动画类
+   ========================================================================== */
+.pao-anim-fade {
+  animation: pao-fade-in var(--dur-3) var(--ease-out) both;
+}
+
+.pao-anim-rise {
+  animation: pao-rise-in var(--dur-3) var(--ease-out) both;
+}
+
+.pao-anim-drop {
+  animation: pao-drop-in var(--dur-3) var(--ease-out) both;
+}
+
+.pao-anim-tick {
+  animation: pao-tick var(--dur-5) var(--ease-out) 1;
+}
+
+.pao-skeleton {
+  border-radius: var(--r-s);
+  background: var(--ice-08);
+  animation: pao-shimmer 1.8s var(--ease-in-out) infinite;
+}
+
+.pao-progress-indeterminate {
+  position: relative;
+  overflow: hidden;
+}
+
+.pao-progress-indeterminate::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: 40%;
+  border-radius: inherit;
+  background: var(--grad-accent-x);
+  animation: pao-indeterminate 1.6s var(--ease-in-out) infinite;
+}
+
+.pao-boot__bar.is-loading .pao-boot__fill {
+  animation: pao-indeterminate 1.7s var(--ease-in-out) infinite;
+  transform: none;
+}
+
+/* 列表错峰入场：给容器加 .pao-stagger，子项依次浮起 */
+.pao-stagger > * {
+  animation: pao-rise-in var(--dur-3) var(--ease-out) both;
+}
+
+.pao-stagger > *:nth-child(1)  { animation-delay: 0ms; }
+.pao-stagger > *:nth-child(2)  { animation-delay: 24ms; }
+.pao-stagger > *:nth-child(3)  { animation-delay: 48ms; }
+.pao-stagger > *:nth-child(4)  { animation-delay: 72ms; }
+.pao-stagger > *:nth-child(5)  { animation-delay: 96ms; }
+.pao-stagger > *:nth-child(6)  { animation-delay: 120ms; }
+.pao-stagger > *:nth-child(7)  { animation-delay: 144ms; }
+.pao-stagger > *:nth-child(8)  { animation-delay: 168ms; }
+.pao-stagger > *:nth-child(9)  { animation-delay: 192ms; }
+.pao-stagger > *:nth-child(10) { animation-delay: 216ms; }
+.pao-stagger > *:nth-child(11) { animation-delay: 240ms; }
+.pao-stagger > *:nth-child(n+12) { animation-delay: 264ms; }
+
+/* 悬停时不做位移，只做亮度/描边（真正的 hover 规则在 shell/panels 内） */
+.pao-hover-lift:hover {
+  filter: brightness(1.08);
+}
+
+/* ==========================================================================
+   07 · prefers-reduced-motion 降级
+   系统级无障碍开关：全部动画瞬时完成，只保留终态。
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: .001ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .pao-stagger > * {
+    animation-delay: 0ms !important;
+  }
+
+  .pao-skeleton,
+  .pao-progress-indeterminate::after,
+  .pao-boot__bar.is-loading .pao-boot__fill,
+  .pao-dot.is-live,
+  .pao-topbar__status:not(:has(.pao-dot))::before,
+  .pao-step.is-running::after,
+  .pao-btn.is-busy svg {
+    animation: none !important;
+  }
+
+  /* 保留运行态的静态视觉信号 */
+  .pao-skeleton {
+    opacity: .55;
+  }
+
+  .pao-step.is-running::after {
+    box-shadow: 0 0 0 3px var(--cyan-18);
+  }
+
+  /* 抽屉/面板不走位移动画，直接呈现 */
+  .pao-panel,
+  .pao-guided,
+  .pao-toast,
+  .pao-modal,
+  .pao-modal__card,
+  .pao-modal__panel,
+  .pao-modal__dialog,
+  .pao-drawer {
+    transform: none !important;
+  }
+}
+
+/* ==========================================================================
+   08 · 低性能降级（.pao-quality-low）
+   由 PAO.app.quality === 'low' 或 scene.isLowPerf() 挂到
+   #pao-app / html / body 上；这里负责关掉 GPU 高开销项。
+
+   关闭：backdrop-filter 模糊、大面积径向渐变、所有循环动画、重阴影
+   保留：1px 描边、透明度层级、单次入场（瞬时）
+   ========================================================================== */
+.pao-quality-low *,
+.pao-quality-low *::before,
+.pao-quality-low *::after,
+.pao-app.pao-quality-low *,
+.pao-app.pao-quality-low *::before,
+.pao-app.pao-quality-low *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  animation-duration: .001ms !important;
+  animation-delay: 0ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 90ms !important;
+  transition-delay: 0ms !important;
+}
+
+/* 大气光与暗角：低配直接关掉两层全屏渐变叠加 */
+.pao-quality-low .pao-app::before,
+.pao-quality-low .pao-app::after,
+.pao-app.pao-quality-low::before,
+.pao-app.pao-quality-low::after {
+  display: none !important;
+}
+
+/* 玻璃换成不透明基底，视觉层级不丢、合成成本归零 */
+.pao-quality-low .pao-panel,
+.pao-quality-low .pao-topbar,
+.pao-quality-low .pao-nav,
+.pao-quality-low .pao-statusbar,
+.pao-quality-low .pao-guided,
+.pao-quality-low .pao-toast,
+.pao-quality-low .pao-drawer,
+.pao-quality-low .pao-label,
+.pao-quality-low .pao-modal,
+.pao-quality-low .pao-modal__scrim {
+  background-color: var(--glass-95);
+}
+
+.pao-quality-low .pao-topbar {
+  background: var(--wash-92);
+}
+
+.pao-quality-low .pao-statusbar {
+  background: var(--wash-92);
+}
+
+.pao-quality-low .pao-nav {
+  background: var(--nav-90);
+}
+
+.pao-quality-low .pao-guarded,
+.pao-quality-low .pao-modal,
+.pao-quality-low .pao-modal__scrim {
+  background: var(--scrim-86);
+}
+
+/* 阴影与高光收敛 */
+.pao-quality-low .pao-panel,
+.pao-quality-low .pao-modal__card,
+.pao-quality-low .pao-modal__panel,
+.pao-quality-low .pao-modal__dialog,
+.pao-quality-low .pao-drawer,
+.pao-quality-low .pao-toast,
+.pao-quality-low .pao-guided {
+  box-shadow: none !important;
+}
+
+.pao-quality-low .pao-panel::before,
+.pao-quality-low .pao-modal__card::before,
+.pao-quality-low .pao-modal__panel::before,
+.pao-quality-low .pao-modal__dialog::before {
+  display: none;
+}
+
+/* 循环动画一律停：呼吸点 / 步骤脉冲 / 骨架屏 / 不定进度 */
+.pao-quality-low .pao-dot.is-live,
+.pao-quality-low .pao-topbar__status:not(:has(.pao-dot))::before,
+.pao-quality-low .pao-step.is-running::after,
+.pao-quality-low .pao-skeleton,
+.pao-quality-low .pao-progress-indeterminate::after,
+.pao-quality-low .pao-boot__bar.is-loading .pao-boot__fill,
+.pao-quality-low .pao-btn.is-busy svg {
+  animation: none !important;
+}
+
+.pao-quality-low .pao-progress-indeterminate::after {
+  left: 0;
+  width: 62%;
+}
+
+/* 列表不逐项入场，避免 48 条记忆同时起 48 个动画 */
+.pao-quality-low .pao-stagger > * {
+  animation: none !important;
+}
+
+/* 拖拽面板时低配不做过渡 */
+.pao-quality-low .pao-app.is-panel-resizing .pao-panel {
+  transition: none !important;
+}

@@ -1,0 +1,324 @@
+/* ==========================================================================
+   PERSONAL AI OS — css/tokens.css
+   设计变量层 · 单一真源（Single Source of Truth）
+
+   命名约定
+   --bg-*        背景层级（越深越靠后）
+   --cyan/ice/…  品牌色，与 docs/CONTRACT.md §10 完全一致，不得改写
+   --text-*      文本层级（靠透明度建立层级，不靠颜色堆叠）
+   --surf-*      表面层（玻璃 / 提升态）
+   --line*       描边
+   --sp-*        间距（4px 基准）
+   --r-*         圆角
+   --fs- / --lh- / --track  字阶与字距
+   --dur- / --ease-         动效（曲线与时长）
+   --z-*         层级
+   --sh-*        阴影
+   ========================================================================== */
+
+:root {
+  color-scheme: dark;
+
+  /* ---------- 01 · 基底色（契约 §10 锁定） ---------- */
+  --bg-0: #05070B;
+  --bg-1: #080D16;
+  --bg-2: #0B1424;
+  --bg-3: #101B2E;
+  --bg-4: #16243B;
+
+  /* ---------- 02 · 品牌色（契约 §10 锁定） ---------- */
+  --cyan: #55DDF5;
+  --ice: #91DFFF;
+  --white: #EAF4FF;
+  --violet: #9178FF;
+  --muted: #456A9B;
+  --grey: #7E8999;
+
+  /* ---------- 03 · 语义状态色（契约 §10 锁定） ---------- */
+  --ok: #5FD6A8;
+  --warn: #E0B15C;
+  --crit: #E06767;
+
+  /* ---------- 04 · 透明度阶梯（底纹 / 描边专用，不新增语义） ---------- */
+  --ice-04: rgba(145, 223, 255, .04);
+  --ice-06: rgba(145, 223, 255, .06);
+  --ice-08: rgba(145, 223, 255, .08);
+  --ice-12: rgba(145, 223, 255, .12);
+  --ice-18: rgba(145, 223, 255, .18);
+  --ice-26: rgba(145, 223, 255, .26);
+  --ice-40: rgba(145, 223, 255, .40);
+  --ice-55: rgba(145, 223, 255, .55);
+
+  --cyan-04: rgba(85, 221, 245, .04);
+  --cyan-06: rgba(85, 221, 245, .06);
+  --cyan-10: rgba(85, 221, 245, .10);
+  --cyan-16: rgba(85, 221, 245, .16);
+  --cyan-26: rgba(85, 221, 245, .26);
+  --cyan-42: rgba(85, 221, 245, .42);
+  --cyan-60: rgba(85, 221, 245, .60);
+  --cyan-00: rgba(85, 221, 245, 0);
+  --cyan-18: rgba(85, 221, 245, .18);
+  --cyan-38: rgba(85, 221, 245, .38);
+
+  --ice-58: rgba(145, 223, 255, .58);
+
+  --violet-07: rgba(145, 120, 255, .07);
+  --violet-08: rgba(145, 120, 255, .08);
+  --violet-14: rgba(145, 120, 255, .14);
+  --violet-30: rgba(145, 120, 255, .30);
+  --violet-55: rgba(145, 120, 255, .55);
+  --violet-00: rgba(145, 120, 255, 0);
+  --violet-82: rgba(178, 166, 255, .82);
+
+  --ok-02: rgba(95, 214, 168, .02);
+  --ok-04: rgba(95, 214, 168, .04);
+  --ok-06: rgba(95, 214, 168, .06);
+  --ok-10: rgba(95, 214, 168, .10);
+  --ok-26: rgba(95, 214, 168, .26);
+  --ok-48: rgba(95, 214, 168, .48);
+  --ok-86: rgba(95, 214, 168, .86);
+  --ok-00: rgba(95, 214, 168, 0);
+  --mint-92: rgba(150, 232, 203, .92);
+
+  --warn-04: rgba(224, 177, 92, .04);
+  --warn-06: rgba(224, 177, 92, .06);
+  --warn-12: rgba(224, 177, 92, .12);
+  --warn-30: rgba(224, 177, 92, .30);
+  --warn-52: rgba(224, 177, 92, .52);
+  --warn-86: rgba(224, 177, 92, .86);
+  --warn-88: rgba(224, 177, 92, .88);
+  --warn-92: rgba(224, 177, 92, .92);
+
+  --crit-04: rgba(224, 103, 103, .04);
+  --crit-06: rgba(224, 103, 103, .06);
+  --crit-10: rgba(224, 103, 103, .10);
+  --crit-30: rgba(224, 103, 103, .30);
+  --crit-52: rgba(224, 103, 103, .52);
+  --crit-86: rgba(224, 103, 103, .86);
+  --crit-88: rgba(224, 103, 103, .88);
+
+  --ink-06: rgba(3, 5, 9, .06);
+  --ink-20: rgba(3, 5, 9, .20);
+  --ink-42: rgba(3, 5, 9, .42);
+  --ink-62: rgba(3, 5, 9, .62);
+  --ink-86: rgba(3, 5, 9, .86);
+
+  /* ---- 底色蒙版：全部由 --bg-0 / --bg-1 / --ink 派生 ---- */
+  --wash-18: rgba(5, 7, 11, .18);
+  --wash-30: rgba(5, 7, 11, .30);
+  --wash-34: rgba(5, 7, 11, .34);
+  --wash-52: rgba(5, 7, 11, .52);
+  --wash-86: rgba(5, 7, 11, .86);
+  --wash-90: rgba(5, 7, 11, .90);
+  --wash-92: rgba(5, 7, 11, .92);
+  --wash-95: rgba(5, 7, 11, .95);
+
+  --nav-18: rgba(8, 13, 22, .18);
+  --nav-56: rgba(8, 13, 22, .56);
+  --nav-90: rgba(8, 13, 22, .90);
+
+  --scrim-00: rgba(3, 5, 9, 0);
+  --scrim-48: rgba(3, 5, 9, .48);
+  --scrim-58: rgba(3, 5, 9, .58);
+  --scrim-62: rgba(3, 5, 9, .62);
+  --scrim-86: rgba(3, 5, 9, .86);
+
+  --glass-label: rgba(9, 15, 28, .52);
+  --glass-74: rgba(12, 20, 36, .74);
+  --glass-95: rgba(9, 15, 28, .95);
+
+  /* ---------- 05 · 文本层级 ---------- */
+  --text-1: var(--white);              /* 主文本 / 数值 */
+  --text-2: rgba(234, 244, 255, .76);  /* 次级正文 */
+  --text-3: var(--grey);               /* 说明 / 标签 */
+  --text-4: rgba(126, 137, 153, .66);  /* 弱化说明 */
+  --text-5: var(--muted);              /* 最弱：kicker / 单位 */
+  --text-on-accent: #041017;           /* 亮底上的深色文字 */
+
+  /* ---------- 06 · 描边 ---------- */
+  --line: rgba(145, 223, 255, .14);        /* 契约主描边 */
+  --line-soft: rgba(145, 223, 255, .08);
+  --line-strong: rgba(145, 223, 255, .26);
+  --line-accent: rgba(85, 221, 245, .42);
+  --line-dash: rgba(145, 223, 255, .10);
+
+  /* ---------- 07 · 表面 / 玻璃 ---------- */
+  --glass: rgba(12, 20, 36, .62);
+  --glass-2: rgba(9, 15, 28, .80);
+  --glass-3: rgba(16, 27, 46, .70);
+  --glass-flat: rgba(9, 15, 28, .94);   /* 降级用不透明替代 */
+  --surf-sunken: rgba(5, 7, 11, .32);
+  --surf-raise: var(--ice-04);
+  --surf-raise-2: var(--ice-08);
+
+  --glass-blur: blur(18px) saturate(120%);       /* 契约 §10 基准 */
+  --glass-blur-high: blur(26px) saturate(135%);
+  --glass-blur-soft: blur(10px) saturate(112%);
+
+  --grad-panel: linear-gradient(180deg, rgba(16, 27, 46, .70) 0%, rgba(8, 13, 22, .66) 100%);
+  --grad-topbar: linear-gradient(180deg, rgba(5, 7, 11, .90) 0%, rgba(5, 7, 11, .46) 78%, rgba(5, 7, 11, 0) 100%);
+  --grad-statusbar: linear-gradient(0deg, rgba(5, 7, 11, .92) 0%, rgba(5, 7, 11, .54) 74%, rgba(5, 7, 11, 0) 100%);
+  --grad-hairline: linear-gradient(90deg, transparent 0%, var(--line) 22%, var(--line) 78%, transparent 100%);
+  --grad-accent: linear-gradient(180deg, var(--ice) 0%, var(--cyan) 100%);
+  --grad-accent-x: linear-gradient(90deg, var(--cyan-42) 0%, var(--ice) 100%);
+
+  /* ---------- 08 · 字体（离线，禁止网络字体） ---------- */
+  --font-ui: "SF Pro Display", "Segoe UI Variable Display", "Segoe UI",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Source Han Sans SC",
+    system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", "Cascadia Mono", "Cascadia Code",
+    ui-monospace, Consolas, "PingFang SC", "Microsoft YaHei", monospace;
+  --font-brand: var(--font-ui);
+  --font-cn: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Source Han Sans SC", var(--font-ui);
+
+  /* ---------- 09 · 字阶 ---------- */
+  --fs-micro: 9px;
+  --fs-kicker: 10px;
+  --fs-small: 11px;
+  --fs-body: 13px;
+  --fs-title: 15px;
+  --fs-sub: 17px;
+  --fs-h2: 20px;
+  --fs-h1: 26px;
+  --fs-display: 44px;
+  --fs-display-xl: 56px;
+
+  --lh-tight: 1.25;
+  --lh-snug: 1.45;
+  --lh-small: 1.60;
+  --lh-body: 1.65;
+
+  --track: .14em;        /* 仅英文全大写 */
+  --track-cn: .02em;     /* 中文 */
+  --track-wide: .22em;
+  --track-brand: .30em;
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+
+  /* ---------- 10 · 间距（4px 基准） ---------- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-7: 28px;
+  --sp-8: 32px;
+  --sp-9: 40px;
+  --sp-10: 48px;
+  --sp-12: 64px;
+
+  /* ---------- 11 · 圆角 ---------- */
+  --r-s: 6px;
+  --r-m: 10px;
+  --r-l: 16px;
+  --r-xl: 22px;
+  --r-pill: 999px;
+
+  /* ---------- 12 · 阴影（低对比、内高光为主） ---------- */
+  --sh-1: 0 1px 2px rgba(0, 0, 0, .34);
+  --sh-2: 0 10px 26px -14px rgba(0, 0, 0, .62), inset 0 1px 0 var(--ice-06);
+  --sh-panel: 0 28px 70px -34px rgba(0, 0, 0, .86), inset 0 1px 0 var(--ice-06);
+  --sh-modal: 0 44px 110px -36px rgba(0, 0, 0, .92), inset 0 1px 0 var(--ice-06);
+  --sh-drawer: -26px 0 70px -34px rgba(0, 0, 0, .88);
+  --sh-inset: inset 0 1px 0 var(--ice-06);
+
+  /* ---------- 13 · 动效 ---------- */
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 280ms;   /* 面板入场基准 */
+  --dur-4: 420ms;
+  --dur-5: 640ms;
+  --dur-6: 1200ms;
+
+  --ease-out: cubic-bezier(.22, .61, .36, 1);   /* 契约：面板入场曲线 */
+  --ease-in-out: cubic-bezier(.65, 0, .35, 1);
+  --ease-soft: cubic-bezier(.40, 0, .20, 1);
+  --ease-in: cubic-bezier(.40, 0, 1, 1);
+  --ease-linear: linear;
+
+  /* ---------- 14 · 布局尺寸（契约硬约束） ---------- */
+  --topbar-h: 64px;
+  --nav-w: 92px;
+  --panel-w: 420px;
+  --panel-w-min: 360px;
+  --panel-w-max: 560px;
+  --statusbar-h: 48px;
+  --pad-hud: 16px;
+  --nav-h-mobile: 66px;
+  --guided-w: 780px;
+
+  /* ---------- 15 · 层级 ---------- */
+  --z-scene: 0;
+  --z-labels: 10;
+  --z-hud: 20;
+  --z-nav: 24;
+  --z-statusbar: 26;
+  --z-panel: 30;
+  --z-home-hint: 28;
+  --z-guided: 34;
+  --z-topbar: 36;
+  --z-toast: 60;
+  --z-drawer: 70;
+  --z-modal: 80;
+  --z-boot: 90;
+
+  /* ---------- 16 · 标签三色（产品核心：事实 / 观察 / 推断） ---------- */
+  --tag-fact-fg: var(--cyan);
+  --tag-fact-bg: var(--cyan-10);
+  --tag-fact-line: rgba(85, 221, 245, .34);
+
+  --tag-observed-fg: var(--violet);
+  --tag-observed-bg: var(--violet-14);
+  --tag-observed-line: rgba(145, 120, 255, .36);
+
+  --tag-inference-fg: var(--warn);
+  --tag-inference-bg: var(--warn-12);
+  --tag-inference-line: rgba(224, 177, 92, .36);
+
+  /* ---------- 17 · 焦点环 ---------- */
+  --focus-color: rgba(145, 223, 255, .55);
+  --focus-width: 1px;
+  --focus-offset: 2px;
+  --focus-glow: 0 0 0 3px rgba(85, 221, 245, .10);
+
+  /* ---------- 18 · 滚动条 ---------- */
+  --sb-size: 4px;
+  --sb-thumb: rgba(145, 223, 255, .18);
+  --sb-thumb-hover: rgba(145, 223, 255, .30);
+}
+
+/* ==========================================================================
+   响应式断点：尺寸变量随视口收敛
+   ≤1440px  面板 380px
+   ≤1180px  面板转为底部抽屉（尺寸交给 shell.css）
+   ≤900px   左侧竖向导航转为底部横向条
+   ========================================================================== */
+@media (max-width: 1440px) {
+  :root {
+    --panel-w: 380px;
+    --fs-display: 40px;
+    --fs-display-xl: 48px;
+  }
+}
+
+@media (max-width: 1180px) {
+  :root {
+    --pad-hud: 12px;
+    --guided-w: 620px;
+  }
+}
+
+@media (max-width: 900px) {
+  :root {
+    --topbar-h: 56px;
+    --nav-w: 0px;
+    --statusbar-h: 44px;
+    --pad-hud: 10px;
+    --fs-display: 32px;
+    --fs-display-xl: 38px;
+    --guided-w: 100%;
+  }
+}
