@@ -2,6 +2,7 @@
 # Super-Brain 运行时 V2：事件驱动 + Router(规则层→模型层) + Worker(租约/fencing) + Supervisor
 # 依据《2026-11-08-V2-核心设计书》及修订 R1；用法: python3 runtime.py（建议 systemd 托管）
 # 仅标准库 + PyYAML（缺失时规则层退化为默认 ALLOW，不影响主干）
+import hashlib
 import json
 import math
 import os
@@ -709,7 +710,19 @@ def _frontmatter(info, source, version=1):
 
 
 def handle_inbox_triage(payload, ctx):
-    """复用 V1 handle_inbox + frontmatter 注入（F1）+ 同源幂等（重复整理→升 version）。"""
+    """复用 V1 handle_inbox + frontmatter 注入（F1）+ 同源幂等（重复整理→升 version）。
+    2026-11-08：兼容纯文本负载——外部入口 submit 文本时自动落盘为 Inbox 文件，不再要求调用方先建文件。"""
+    if isinstance(payload, dict) and not payload.get("path"):
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            return "跳过：负载既无 path 也无 text"
+        h = hashlib.sha1(text.encode("utf-8")).hexdigest()[:10]
+        target = INBOX / f"inbox-{h}.md"
+        if not target.exists():
+            INBOX.mkdir(exist_ok=True)
+            ctx.guard.write_text(target, text if text.endswith("\n") else text + "\n")
+        log_event("inbox_materialized", path=str(target.relative_to(ROOT)), chars=len(text))
+        payload = {**payload, "path": str(target.relative_to(ROOT))}
     path_rel = payload["path"] if isinstance(payload, dict) else str(payload)
     src = ROOT / path_rel
     if not src.exists():
