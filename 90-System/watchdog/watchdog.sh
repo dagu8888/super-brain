@@ -2,6 +2,12 @@
 # 看门狗巡检脚本：git 同步状态 + Inbox 积压（Worker 心跳/队列检查依赖数据库，见 watchdog.yaml）
 # 用法: bash 90-System/watchdog/watchdog.sh    建议 cron 每 10 分钟
 set -uo pipefail
+
+# P0 互斥锁：与 sync.sh 共用同一把锁，任何 git 操作前必须拿到；抢不到则本轮只做只读检查
+exec 9>/tmp/superbrain-git.lock
+GIT_LOCK=0
+flock -n 9 && GIT_LOCK=1
+
 cd "$(dirname "$0")/../.." || exit 1
 
 NOW=$(date +%s)
@@ -16,12 +22,16 @@ if git remote get-url origin >/dev/null 2>&1; then
   UNPUSHED=$(git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
 fi
 
-# 2. 自动愈合：落后就拉，有未推就推
-if [ "$BEHIND" -gt 0 ]; then
-  git pull --rebase --autostash -q 2>/dev/null && NOTE="$NOTE auto_pull_ok" || { ALERT=1; NOTE="$NOTE REBASE_CONFLICT需人工"; }
-fi
-if [ "$UNPUSHED" -gt 0 ]; then
-  git push -q 2>/dev/null && NOTE="$NOTE auto_push_ok" || NOTE="$NOTE push失败(检查凭据)"
+# 2. 自动愈合：落后就拉，有未推就推（需持有 git 锁；抢不到锁说明 sync 正在跑，本轮跳过愈合）
+if [ "$GIT_LOCK" -eq 1 ]; then
+  if [ "$BEHIND" -gt 0 ]; then
+    git pull --rebase --autostash -q 2>/dev/null && NOTE="$NOTE auto_pull_ok" || { ALERT=1; NOTE="$NOTE REBASE_CONFLICT需人工"; }
+  fi
+  if [ "$UNPUSHED" -gt 0 ]; then
+    git push -q 2>/dev/null && NOTE="$NOTE auto_push_ok" || NOTE="$NOTE push失败(检查凭据)"
+  fi
+else
+  NOTE="$NOTE skip_locked(sync运行中)"
 fi
 
 # 3. 同步停滞：最后一次提交距今 > 24h

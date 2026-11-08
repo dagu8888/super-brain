@@ -4,6 +4,10 @@
 # 署名: AGENT_NAME=grok bash 90-System/sync/sync.sh
 set -uo pipefail
 
+# P0 互斥锁：同机多 git 进程串行化（cron sync / watchdog 自愈 / 人工 共用一把锁，抢不到就跳过等下轮）
+exec 9>/tmp/superbrain-git.lock
+flock -n 9 || { echo "SKIP_LOCKED: 另一个 git 进程正在运行，下轮再试"; exit 0; }
+
 cd "$(dirname "$0")/../.." || exit 1
 AGENT="${AGENT_NAME:-unknown-agent}"
 MSG="${1:-sync: $(date '+%Y-%m-%d %H:%M:%S') by ${AGENT}}"
