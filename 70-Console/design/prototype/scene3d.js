@@ -1,22 +1,21 @@
 /* Super-Brain 3.0 · 首页 3D 协作网络（WebGL）
-   纯前端渲染：星云背景 + 球面分布节点 + 预生成通道线 + 空闲自转 + 拖拽/缩放/点击。
-   数据全部来自 DEMO（已由 live.js 换成真实接口数据），本文件不取数、不写数。 */
+   迭代 1：状态分层布局（工作中/空闲/离线）、动态增删、相机自适应、全屏。
+   数据来自 DEMO（已由 live.js 换成真实接口数据），本文件只渲染，不取数、不写数。 */
 (function () {
   "use strict";
   const T = window.THREE;
   if (!T) return;
 
-  let R = null;                       // 当前运行实例
+  let R = null;
+  const TEX = new Map();                 // 贴图缓存：状态|类型|名称
   const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
   const rgba = (c, a) => `rgba(${(c >> 16) & 255},${(c >> 8) & 255},${c & 255},${a})`;
 
-  function colorOf(agent) {
-    if (agent.status === "working") return 0xfbbf24;
-    if (agent.status === "offline") return 0x6b7280;
-    return agent.kind === "chief" ? 0x8b5cf6 : 0x2dd4bf;
-  }
+  const bucket = a => (a.status === "offline" ? "offline" : (a.status === "working" ? "working" : "idle"));
+  const colorOf = a => (a.status === "offline" ? 0x64748b
+    : a.status === "working" ? 0xfbbf24
+      : (a.kind === "chief" ? 0x8b5cf6 : 0x2dd4bf));
 
-  /* 光晕贴图（径向渐变） */
   function glowTexture(hex, strength) {
     const S = 128, cv = document.createElement("canvas");
     cv.width = cv.height = S;
@@ -30,34 +29,46 @@
     return new T.CanvasTexture(cv);
   }
 
-  /* 节点贴图：光圈 + 首字母 + 名称 */
-  function nodeTexture(agent, hex) {
+  /* 节点贴图：光圈 + 首字母 + 名称（离线灰化并降低对比） */
+  function nodeTexture(a, hex, short) {
     const S = 256, cv = document.createElement("canvas");
     cv.width = cv.height = S;
     const g = cv.getContext("2d");
+    const alpha = a.status === "offline" ? 0.55 : 1;
     const grd = g.createRadialGradient(S / 2, S / 2, 10, S / 2, S / 2, S / 2);
-    grd.addColorStop(0, rgba(hex, 0.34));
-    grd.addColorStop(0.62, rgba(hex, 0.10));
+    grd.addColorStop(0, rgba(hex, 0.34 * alpha));
+    grd.addColorStop(0.62, rgba(hex, 0.10 * alpha));
     grd.addColorStop(1, rgba(hex, 0));
     g.fillStyle = grd;
     g.fillRect(0, 0, S, S);
     g.beginPath();
-    g.arc(S / 2, 116, 64, 0, Math.PI * 2);
-    g.fillStyle = rgba(hex, 0.16);
+    g.arc(S / 2, 116, 62, 0, Math.PI * 2);
+    g.fillStyle = rgba(hex, 0.16 * alpha);
     g.fill();
     g.lineWidth = 2.5;
-    g.strokeStyle = rgba(hex, 0.95);
+    g.strokeStyle = rgba(hex, 0.95 * alpha);
     g.stroke();
-    g.fillStyle = "#ffffff";
+    g.fillStyle = a.status === "offline" ? "rgba(203,213,225,.75)" : "#ffffff";
     g.textAlign = "center";
     g.textBaseline = "middle";
     g.font = "600 56px system-ui, -apple-system, 'PingFang SC', sans-serif";
-    g.fillText((agent.name || "?").trim()[0].toUpperCase(), S / 2, 114);
-    g.font = "500 24px system-ui, -apple-system, 'PingFang SC', sans-serif";
-    g.fillStyle = "rgba(255,255,255,.86)";
-    const name = agent.name.length > 12 ? agent.name.slice(0, 12) + "…" : agent.name;
-    g.fillText(name, S / 2, 210);
-    return new T.CanvasTexture(cv);
+    g.fillText((a.name || "?").trim()[0].toUpperCase(), S / 2, 114);
+    if (!short) {
+      g.font = "500 23px system-ui, -apple-system, 'PingFang SC', sans-serif";
+      g.fillStyle = a.status === "offline" ? "rgba(148,163,184,.5)" : "rgba(255,255,255,.86)";
+      const name = a.name.length > 12 ? a.name.slice(0, 12) + "…" : a.name;
+      g.fillText(name, S / 2, 208);
+    }
+    const tex = new T.CanvasTexture(cv);
+    tex.anisotropy = 4;
+    return tex;
+  }
+
+  function texFor(a, short) {
+    const key = `${a.status}|${a.kind}|${a.name}|${short ? 1 : 0}`;
+    let t = TEX.get(key);
+    if (!t) { t = nodeTexture(a, colorOf(a), short); TEX.set(key, t); }
+    return t;
   }
 
   function dispose() {
@@ -65,11 +76,12 @@
     cancelAnimationFrame(R.raf);
     R.active = false;
     if (R.ro) R.ro.disconnect();
+    if (R.particles) { R.particles.geometry.dispose(); R.particles.material.dispose(); }
     R.scene.traverse(o => {
       if (o.geometry) o.geometry.dispose();
       if (o.material) {
-        const mats = Array.isArray(o.material) ? o.material : [o.material];
-        mats.forEach(m => { if (m.map) m.map.dispose(); m.dispose(); });
+        const ms = Array.isArray(o.material) ? o.material : [o.material];
+        ms.forEach(m => { if (m.map && ![...TEX.values()].includes(m.map)) m.map.dispose(); m.dispose(); });
       }
     });
     R.renderer.dispose();
@@ -78,171 +90,228 @@
 
   function mount(canvas, agents, edges, handlers) {
     if (!canvas || !agents || !agents.length) return false;
-    dispose();
     const mobile = matchMedia("(max-width: 720px)").matches;
-    const W = () => canvas.clientWidth || 640;
-    const H = () => canvas.clientHeight || 460;
-
-    // 先探测 WebGL，避免无 GPU 环境抛错（此时静默降级 2D）
     const probe = document.createElement("canvas");
     if (!(probe.getContext("webgl2") || probe.getContext("webgl"))) {
       console.warn("当前环境不支持 WebGL，已降级为 2D 网络视图");
       return false;
     }
+    dispose();
 
-    const renderer = (() => {
-      try {
-        const r = new T.WebGLRenderer({ canvas, antialias: !mobile, alpha: false });
-        r.setPixelRatio(Math.min(devicePixelRatio || 1, mobile ? 1.5 : 2));
-        r.setSize(W(), H(), false);
-        r.setClearColor(0x05070f, 1);
-        return r;
-      } catch (e) {
-        console.warn("WebGL 不可用，已降级为 2D 网络视图：", e && e.message);
-        return null;
-      }
-    })();
-    if (!renderer) return false;
+    const W = () => canvas.clientWidth || 640;
+    const H = () => canvas.clientHeight || 460;
+    let renderer;
+    try {
+      renderer = new T.WebGLRenderer({ canvas, antialias: !mobile, alpha: false });
+    } catch (e) {
+      console.warn("WebGL 初始化失败，已降级为 2D 网络视图：", e && e.message);
+      return false;
+    }
+    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, mobile ? 1.5 : 2));
+    renderer.setSize(W(), H(), false);
+    renderer.setClearColor(0x05070f, 1);
 
     const scene = new T.Scene();
-    scene.fog = new T.FogExp2(0x05070f, 0.022);
-    const camera = new T.PerspectiveCamera(45, W() / H(), 0.1, 200);
-    const dist0 = mobile ? 13 : 10.5;
-    camera.position.set(0, 1.8, dist0);
-    camera.lookAt(0, 0, 0);
-
+    scene.fog = new T.FogExp2(0x05070f, 0.02);
+    const camera = new T.PerspectiveCamera(45, W() / H(), 0.1, 300);
     const world = new T.Group();
     scene.add(world);
 
     /* 星空 */
     const starN = mobile ? 650 : 1400;
-    const starPos = new Float32Array(starN * 3);
+    const pos = new Float32Array(starN * 3);
     for (let i = 0; i < starN; i++) {
-      const r = 26 + Math.random() * 34;
-      const th = Math.random() * Math.PI * 2;
-      const ph = Math.acos(2 * Math.random() - 1);
-      starPos[i * 3] = r * Math.sin(ph) * Math.cos(th);
-      starPos[i * 3 + 1] = r * Math.cos(ph) * 0.6;
-      starPos[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
+      const r = 26 + Math.random() * 34, th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1);
+      pos[i * 3] = r * Math.sin(ph) * Math.cos(th);
+      pos[i * 3 + 1] = r * Math.cos(ph) * 0.6;
+      pos[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
     }
     const starGeo = new T.BufferGeometry();
-    starGeo.setAttribute("position", new T.BufferAttribute(starPos, 3));
-    const starTex = glowTexture(0xbfd0ff, 0.9);
+    starGeo.setAttribute("position", new T.BufferAttribute(pos, 3));
     const stars = new T.Points(starGeo, new T.PointsMaterial({
-      size: mobile ? 0.34 : 0.26, map: starTex, transparent: true, opacity: 0.75,
-      depthWrite: false, blending: T.AdditiveBlending, sizeAttenuation: true,
+      size: mobile ? 0.34 : 0.26, map: glowTexture(0xbfd0ff, 0.9), transparent: true,
+      opacity: 0.72, depthWrite: false, blending: T.AdditiveBlending, sizeAttenuation: true,
     }));
     scene.add(stars);
 
-    /* 星云 */
-    const nebulas = [[0x6d28d9, 26, -16, 8], [0x0891b2, 22, -22, -6], [0x1e1b4b, 34, -30, 2]];
-    nebulas.forEach(([c, s, z, y]) => {
+    /* 星云 + 核心光团 */
+    [[0x6d28d9, 26, -16, 8], [0x0891b2, 22, -22, -6], [0x1e1b4b, 34, -30, 2]].forEach(([c, s, z, y]) => {
       const sp = new T.Sprite(new T.SpriteMaterial({
-        map: glowTexture(c, 0.5), transparent: true, opacity: 0.32,
+        map: glowTexture(c, 0.5), transparent: true, opacity: 0.3,
         depthWrite: false, blending: T.AdditiveBlending,
       }));
       sp.scale.set(s, s, 1);
       sp.position.set(0, y, z);
       scene.add(sp);
     });
-
-    /* 核心光团 */
     const core = new T.Sprite(new T.SpriteMaterial({
-      map: glowTexture(0x818cf8, 0.8), transparent: true, opacity: 0.55,
+      map: glowTexture(0x818cf8, 0.8), transparent: true, opacity: 0.5,
       depthWrite: false, blending: T.AdditiveBlending,
     }));
     core.scale.set(7, 7, 1);
     world.add(core);
 
-    /* 节点（中心 7 入口内环，7 执行者外环） */
-    const chiefs = agents.filter(a => a.kind === "chief");
-    const workers = agents.filter(a => a.kind !== "chief");
-    const pos = {};
-    const pickables = [];
-    const sprites = [];
-    const place = (list, radius, yBase, offset) => {
-      list.forEach((a, i) => {
-        const ang = offset + (i / Math.max(1, list.length)) * Math.PI * 2;
-        const p = new T.Vector3(
-          Math.cos(ang) * radius,
-          yBase + Math.sin(ang * 2.1) * 0.45,
-          Math.sin(ang) * radius * 0.86
-        );
-        pos[a.id] = p;
-        const hex = colorOf(a);
-        const mat = new T.SpriteMaterial({
-          map: nodeTexture(a, hex), transparent: true, depthWrite: false,
-          opacity: 1,
-        });
+    R = {
+      canvas, renderer, scene, camera, world, stars, mobile, handlers: handlers || {},
+      nodes: new Map(), edges: [], particles: null, activePts: [],
+      fit: 12, zoom: 1, theta: 0.42, phi: 0.18, auto: true,
+      dragging: false, moved: false, lastX: 0, lastY: 0, pointers: new Map(), pinch: null,
+      raf: 0, last: performance.now(), active: true, w: W(), h: H(),
+    };
+
+    setData(agents, edges, true);
+    bindCanvas();
+    const ro = new ResizeObserver(() => {
+      if (!R) return;
+      R.w = W(); R.h = H();
+      renderer.setSize(R.w, R.h, false);
+      camera.aspect = R.w / R.h;
+      camera.updateProjectionMatrix();
+      computeFit();
+    });
+    ro.observe(canvas);
+    R.ro = ro;
+    computeFit();
+    start();
+    return true;
+  }
+
+  /* ---------- 数据 → 场景（diff，不重建、不重置视角） ---------- */
+  function setData(agents, edges, initial) {
+    if (!R) return;
+    const alive = new Set(agents.map(a => a.id));
+    const fresh = [];
+    agents.forEach(a => {
+      let n = R.nodes.get(a.id);
+      if (!n) {
+        const mat = new T.SpriteMaterial({ map: texFor(a, R.mobile), transparent: true, opacity: 0, depthWrite: false });
         const sp = new T.Sprite(mat);
-        const s = a.kind === "chief" ? 2.5 : 2.15;
-        sp.scale.set(s, s, 1);
-        sp.position.copy(p);
+        sp.scale.set(0.1, 0.1, 1);
+        sp.position.set(0, 0, 0);
         sp.userData.agent = a.id;
-        sp.userData.sig = a.status + "|" + a.kind;
-        sp.userData.baseScale = s;
-        world.add(sp);
-        sprites.push(sp);
-        pickables.push(sp);
+        R.world.add(sp);
+        n = { agent: a, sprite: sp, texKey: "", tpos: new T.Vector3(), tscale: 2.3, topacity: 1, removing: false };
+        R.nodes.set(a.id, n);
+        fresh.push(n);
+      }
+      n.removing = false;
+      n.agent = a;
+      const key = `${a.status}|${a.kind}|${a.name}`;
+      if (n.texKey !== key) {
+        n.texKey = key;
+        n.sprite.material.map = texFor(a, R.mobile);
+        n.sprite.material.needsUpdate = true;
+      }
+    });
+    R.nodes.forEach((n, id) => { if (!alive.has(id)) n.removing = true; });
+    layout();
+    // 新节点直接落到目标位置后淡入，避免从中心飞出
+    fresh.forEach(n => {
+      n.sprite.position.copy(n.tpos);
+      n.sprite.scale.set(n.tscale, n.tscale, 1);
+      n.sprite.material.opacity = 0;
+    });
+    if (initial) {
+      R.nodes.forEach(n => { n.sprite.material.opacity = n.topacity; });
+      computeFit();
+      snapCamera();
+    }
+    rebuildEdges(edges || []);
+    computeFit();
+  }
+
+  function snapCamera() {
+    if (!R) return;
+    const d = R.fit * R.zoom;
+    R.camera.position.set(
+      Math.cos(R.phi) * Math.sin(R.theta) * d,
+      Math.sin(R.phi) * d + d * 0.1,
+      Math.cos(R.phi) * Math.cos(R.theta) * d
+    );
+    R.camera.lookAt(0, 0, 0);
+  }
+
+  function layout() {
+    if (!R) return;
+    const groups = { working: [], idle: [], offline: [] };
+    R.nodes.forEach(n => { if (!n.removing) groups[bucket(n.agent)].push(n); });
+    const rW = 2.0 + Math.max(0, groups.working.length - 6) * 0.16;
+    const rI = 4.0 + Math.max(0, groups.idle.length - 8) * 0.18;
+    const rO = 6.8 + Math.max(0, groups.offline.length - 10) * 0.2;
+    const ring = (list, radius, offset, scale, opacity) => {
+      list.forEach((n, i) => {
+        const ang = offset + (i / Math.max(1, list.length)) * Math.PI * 2;
+        const y = Math.cos(ang * 2.3) * 0.32;
+        n.tpos.set(Math.cos(ang) * radius, y, Math.sin(ang) * radius * 0.92);
+        const kindFactor = n.agent.kind === "chief" ? 1.06 : 1;
+        n.tscale = 2.45 * kindFactor * scale;
+        n.topacity = opacity;
       });
     };
-    place(chiefs, 2.7, 0.25, 0.35);
-    place(workers, 4.9, -0.35, 0.35 + Math.PI / Math.max(1, chiefs.length));
+    ring(groups.working, rW, 0, 1.05, 1);
+    ring(groups.idle, rI, 0.4, 0.82, 0.48);
+    ring(groups.offline, rO, 0.75, 0.62, 0.1);
+  }
 
-    /* 通道线（全部预生成；空闲半透明，active 才亮并有光点流动） */
-    const edgeRefs = [];
-    const activePts = [];
-    (edges || []).forEach(e => {
-      const f = pos[e.from], t = pos[e.to];
-      if (!f || !t) return;
+  function rebuildEdges(edges) {
+    if (!R) return;
+    R.edges.forEach(e => { R.world.remove(e.line); e.line.geometry.dispose(); e.line.material.dispose(); });
+    R.edges = [];
+    R.activePts = [];
+    edges.forEach(e => {
+      const a = R.nodes.get(e.from), b = R.nodes.get(e.to);
+      if (!a || !b) return;
       const active = e.state === "active";
-      const geo = new T.BufferGeometry().setFromPoints([f, t]);
+      const geo = new T.BufferGeometry().setFromPoints([new T.Vector3(), new T.Vector3()]);
       const mat = new T.LineBasicMaterial({
-        color: active ? 0x8b5cf6 : 0x64748b,
-        transparent: true, opacity: active ? 0.85 : 0.16, depthWrite: false,
+        color: active ? 0x8b5cf6 : 0x64748b, transparent: true,
+        opacity: active ? 0.8 : 0.14, depthWrite: false,
       });
       const line = new T.Line(geo, mat);
-      line.userData.base = mat.opacity;
-      line.userData.ends = [e.from, e.to];
-      world.add(line);
-      edgeRefs.push(line);
-      if (active) activePts.push({ from: f.clone(), to: t.clone(), t: Math.random() });
+      R.world.add(line);
+      R.edges.push({ line, from: e.from, to: e.to, active, base: mat.opacity });
+      if (active) R.activePts.push({ from: e.from, to: e.to, t: Math.random() });
     });
-
-    let particles = null;
-    if (activePts.length) {
-      const g = new T.BufferGeometry();
-      g.setAttribute("position", new T.BufferAttribute(new Float32Array(activePts.length * 3), 3));
-      particles = new T.Points(g, new T.PointsMaterial({
-        size: 0.42, map: glowTexture(0xc4b5fd, 1), transparent: true, opacity: 0.95,
-        depthWrite: false, blending: T.AdditiveBlending, sizeAttenuation: true,
-      }));
-      world.add(particles);
+    if (R.particles) {
+      R.world.remove(R.particles);
+      R.particles.geometry.dispose();
+      R.particles.material.dispose();
+      R.particles = null;
     }
+    if (R.activePts.length) {
+      const g = new T.BufferGeometry();
+      g.setAttribute("position", new T.BufferAttribute(new Float32Array(R.activePts.length * 3), 3));
+      const m = new T.PointsMaterial({
+        size: 0.38, map: glowTexture(0xc4b5fd, 1), transparent: true, opacity: 0.95,
+        depthWrite: false, blending: T.AdditiveBlending, sizeAttenuation: true,
+      });
+      R.particles = new T.Points(g, m);
+      R.world.add(R.particles);
+    }
+  }
 
-    R = {
-      renderer, scene, camera, world, sprites, pickables, edgeRefs, activePts, particles,
-      canvas, handlers: handlers || {}, dist: dist0, dist0, active: true, dragging: false,
-      moved: false, lastX: 0, lastY: 0, raf: 0, last: performance.now(), spin: 0.0016,
-      pointers: new Map(), pinch: null, selected: null, hovered: false,
-    };
+  function computeFit() {
+    if (!R) return;
+    let max = 3.2;
+    R.nodes.forEach(n => {
+      if (n.removing) return;
+      max = Math.max(max, Math.hypot(n.tpos.x, n.tpos.z) + 1.3);
+    });
+    const vFov = 45 * Math.PI / 180;
+    const aspect = Math.max(0.4, R.w / R.h);
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
+    R.fit = Math.max(max / Math.tan(vFov / 2), max / Math.tan(hFov / 2)) * 1.02;
+  }
 
-    /* 交互 */
-    const raycaster = new T.Raycaster();
-    const ndc = new T.Vector2();
-    const hitAt = ev => {
-      const r = canvas.getBoundingClientRect();
-      ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
-      raycaster.setFromCamera(ndc, camera);
-      return raycaster.intersectObjects(pickables, false)[0] || null;
-    };
-
+  /* ---------- 交互 ---------- */
+  function bindCanvas() {
+    const canvas = R.canvas;
     canvas.addEventListener("pointerdown", ev => {
       canvas.setPointerCapture(ev.pointerId);
       R.pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
       if (R.pointers.size === 2) {
         const [a, b] = [...R.pointers.values()];
-        R.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), cam: R.dist };
+        R.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), z: R.zoom };
       }
       R.dragging = true;
       R.moved = false;
@@ -255,114 +324,115 @@
       if (R.pointers.size === 2 && R.pinch) {
         const [a, b] = [...R.pointers.values()];
         const d = Math.hypot(a.x - b.x, a.y - b.y);
-        R.dist = clamp(R.pinch.cam * (R.pinch.d / Math.max(20, d)), 5.5, 18);
-        camera.position.z = R.dist;
+        R.zoom = clamp(R.pinch.z * (R.pinch.d / Math.max(20, d)), 0.55, 2.2);
         R.moved = true;
         return;
       }
-      if (!R.dragging) {
-        if (ev.pointerType === "mouse") {
-          const hit = hitAt(ev);
-          canvas.style.cursor = hit ? "pointer" : "grab";
-        }
-        return;
-      }
+      if (!R.dragging) return;
       const dx = ev.clientX - R.lastX, dy = ev.clientY - R.lastY;
       R.lastX = ev.clientX;
       R.lastY = ev.clientY;
       if (Math.abs(dx) + Math.abs(dy) > 2) R.moved = true;
-      world.rotation.y += dx * 0.006;
-      world.rotation.x = clamp(world.rotation.x + dy * 0.004, -0.75, 0.75);
+      R.theta -= dx * 0.005;
+      R.phi = clamp(R.phi + dy * 0.004, -0.8, 0.8);
     });
-    const endDrag = ev => {
+    const end = ev => {
       R.pointers.delete(ev.pointerId);
       if (R.pointers.size < 2) R.pinch = null;
-      const wasDrag = R.dragging;
+      const was = R.dragging;
       R.dragging = false;
       canvas.style.cursor = "grab";
-      if (wasDrag && !R.moved && ev.type === "pointerup") {
-        const hit = hitAt(ev);
-        if (hit && R.handlers.onAgent) R.handlers.onAgent(hit.object.userData.agent);
+      if (was && !R.moved && ev.type === "pointerup") {
+        const hit = pick(ev);
+        if (hit && R.handlers.onAgent) R.handlers.onAgent(hit);
       }
     };
-    canvas.addEventListener("pointerup", endDrag);
-    canvas.addEventListener("pointercancel", endDrag);
+    canvas.addEventListener("pointerup", end);
+    canvas.addEventListener("pointercancel", end);
     canvas.addEventListener("pointerleave", () => { canvas.style.cursor = "grab"; });
     canvas.addEventListener("wheel", ev => {
       ev.preventDefault();
-      R.dist = clamp(R.dist * (1 + (ev.deltaY > 0 ? 0.1 : -0.1)), 5.5, 18);
-      camera.position.z = R.dist;
+      R.zoom = clamp(R.zoom * (ev.deltaY > 0 ? 1.1 : 0.9), 0.55, 2.2);
     }, { passive: false });
+  }
 
-    /* 尺寸自适应 */
-    const ro = new ResizeObserver(() => {
-      if (!R) return;
-      renderer.setSize(W(), H(), false);
-      camera.aspect = W() / H();
-      camera.updateProjectionMatrix();
-    });
-    ro.observe(canvas);
-    R.ro = ro;
+  function pick(ev) {
+    if (!R) return null;
+    const rect = R.canvas.getBoundingClientRect();
+    const rc = new T.Raycaster();
+    rc.setFromCamera(new T.Vector2(
+      ((ev.clientX - rect.left) / rect.width) * 2 - 1,
+      -((ev.clientY - rect.top) / rect.height) * 2 + 1
+    ), R.camera);
+    const sprites = [];
+    R.nodes.forEach(n => { if (!n.removing) sprites.push(n.sprite); });
+    const hit = rc.intersectObjects(sprites, false)[0];
+    return hit ? hit.object.userData.agent : null;
+  }
 
-    /* 渲染循环 */
+  /* ---------- 帧循环 ---------- */
+  function start() {
     const tick = now => {
       if (!R || !R.active) return;
       R.raf = requestAnimationFrame(tick);
       const dt = Math.min(0.05, (now - R.last) / 1000) || 0.016;
       R.last = now;
-      if (!R.dragging) R.world.rotation.y += dt * R.spin;
-      stars.rotation.y += dt * 0.004;
-      if (particles) {
-        const arr = particles.geometry.attributes.position.array;
+
+      if (!R.dragging) R.theta += dt * 0.02;
+      const d = R.fit * R.zoom;
+      const goal = new T.Vector3(
+        Math.cos(R.phi) * Math.sin(R.theta) * d,
+        Math.sin(R.phi) * d + d * 0.1,
+        Math.cos(R.phi) * Math.cos(R.theta) * d
+      );
+      R.camera.position.lerp(goal, 1 - Math.exp(-dt * 5));
+      R.camera.lookAt(0, 0, 0);
+
+      const k = 1 - Math.exp(-dt * 6);
+      R.nodes.forEach((n, id) => {
+        n.sprite.position.lerp(n.tpos, k);
+        const s = n.sprite.scale.x + (n.tscale - n.sprite.scale.x) * k;
+        n.sprite.scale.set(s, s, 1);
+        n.sprite.material.opacity += (n.topacity - n.sprite.material.opacity) * k;
+        if (n.removing && n.sprite.material.opacity < 0.02) {
+          R.world.remove(n.sprite);
+          n.sprite.material.dispose();
+          n.sprite.geometry && n.sprite.geometry.dispose();
+          R.nodes.delete(id);
+        }
+      });
+
+      R.edges.forEach(e => {
+        const a = R.nodes.get(e.from), b = R.nodes.get(e.to);
+        if (!a || !b || a.removing || b.removing || bucket(a.agent) === "offline" || bucket(b.agent) === "offline") {
+          e.line.visible = false;
+          return;
+        }
+        e.line.visible = true;
+        const arr = e.line.geometry.attributes.position.array;
+        arr[0] = a.sprite.position.x; arr[1] = a.sprite.position.y; arr[2] = a.sprite.position.z;
+        arr[3] = b.sprite.position.x; arr[4] = b.sprite.position.y; arr[5] = b.sprite.position.z;
+        e.line.geometry.attributes.position.needsUpdate = true;
+      });
+
+      if (R.particles) {
+        const arr = R.particles.geometry.attributes.position.array;
         R.activePts.forEach((p, i) => {
-          p.t = (p.t + dt * 0.3) % 1;
-          arr[i * 3] = p.from.x + (p.to.x - p.from.x) * p.t;
-          arr[i * 3 + 1] = p.from.y + (p.to.y - p.from.y) * p.t;
-          arr[i * 3 + 2] = p.from.z + (p.to.z - p.from.z) * p.t;
+          const a = R.nodes.get(p.from), b = R.nodes.get(p.to);
+          if (!a || !b) return;
+          p.t = (p.t + dt * 0.28) % 1;
+          arr[i * 3] = a.sprite.position.x + (b.sprite.position.x - a.sprite.position.x) * p.t;
+          arr[i * 3 + 1] = a.sprite.position.y + (b.sprite.position.y - a.sprite.position.y) * p.t;
+          arr[i * 3 + 2] = a.sprite.position.z + (b.sprite.position.z - a.sprite.position.z) * p.t;
         });
-        particles.geometry.attributes.position.needsUpdate = true;
+        R.particles.geometry.attributes.position.needsUpdate = true;
       }
+
+      R.stars.rotation.y += dt * 0.004;
       R.renderer.render(R.scene, R.camera);
     };
     R.tick = tick;
     R.raf = requestAnimationFrame(tick);
-    return true;
-  }
-
-  /* 选中：关联节点高亮，其余淡化 */
-  function select(id) {
-    if (!R) return;
-    R.selected = id;
-    const related = new Set([id]);
-    R.edgeRefs.forEach(l => {
-      const [f, t] = l.userData.ends;
-      if (f === id) related.add(t);
-      if (t === id) related.add(f);
-    });
-    R.sprites.forEach(sp => {
-      const on = related.has(sp.userData.agent);
-      sp.material.opacity = !id ? 1 : (on ? 1 : 0.18);
-      const base = sp.userData.baseScale || (sp.userData.baseScale = sp.scale.x);
-      sp.scale.setScalar(sp.userData.agent === id ? base * 1.35 : base);
-    });
-    R.edgeRefs.forEach(l => {
-      const [f, t] = l.userData.ends;
-      const on = !id || f === id || t === id;
-      l.material.opacity = on ? Math.max(l.userData.base, 0.5) : l.userData.base * 0.35;
-    });
-  }
-
-  function zoom(f) {
-    if (!R) return;
-    R.dist = clamp(R.dist * f, 5.5, 18);
-    R.camera.position.z = R.dist;
-  }
-
-  function reset() {
-    if (!R) return;
-    R.dist = R.dist0;
-    R.camera.position.z = R.dist0;
-    R.world.rotation.set(0, 0, 0);
   }
 
   function pause() { if (R) { R.active = false; cancelAnimationFrame(R.raf); } }
@@ -372,23 +442,21 @@
     R.last = performance.now();
     R.raf = requestAnimationFrame(R.tick);
   }
-
-  /* 数据刷新：仅重绘状态/类型变化过的节点贴图，不重置视角 */
-  function refresh(agents) {
-    if (!R || !agents) return;
-    const map = new Map(agents.map(a => [a.id, a]));
-    R.sprites.forEach(sp => {
-      const a = map.get(sp.userData.agent);
-      if (!a) return;
-      const sig = a.status + "|" + a.kind;
-      if (sp.userData.sig === sig) return;
-      sp.userData.sig = sig;
-      const old = sp.material.map;
-      sp.material.map = nodeTexture(a, colorOf(a));
-      sp.material.needsUpdate = true;
-      if (old) old.dispose();
-    });
+  function zoom(f) { if (R) R.zoom = clamp(R.zoom * f, 0.55, 2.2); }
+  function reset() { if (R) { R.zoom = 1; R.theta = 0.42; R.phi = 0.18; } }
+  function resize() {
+    if (!R) return;
+    R.w = R.canvas.clientWidth || R.w;
+    R.h = R.canvas.clientHeight || R.h;
+    R.renderer.setSize(R.w, R.h, false);
+    R.camera.aspect = R.w / R.h;
+    R.camera.updateProjectionMatrix();
+    computeFit();
   }
 
-  window.SB3D = { mount, select, zoom, reset, pause, resume, refresh };
+  window.SB3D = {
+    mount, pause, resume, zoom, reset, resize,
+    update: (agents, edges) => setData(agents, edges, false),
+    select: () => {},
+  };
 })();
