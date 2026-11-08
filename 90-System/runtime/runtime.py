@@ -3,6 +3,7 @@
 # 依据《2026-11-08-V2-核心设计书》及修订 R1；用法: python3 runtime.py（建议 systemd 托管）
 # 仅标准库 + PyYAML（缺失时规则层退化为默认 ALLOW，不影响主干）
 import json
+import math
 import os
 import re
 import signal
@@ -665,20 +666,96 @@ def handle_kb_organize(payload, ctx):
     return f"kb-organize：补登记 {n} 篇待整理"
 
 
-def _kb_snippets(question, limit=4, chars=800):
-    """文件级检索：按关键词重叠打分（向量库暂缓，设计书 §8/F3）。"""
-    words = {w for w in re.findall(r"[\w一-鿿]{2,}", question.lower())}
+def _tokenize(text):
+    """中英文混合分词（纯标准库）：英文/数字按整词；连续中文切成重叠二字组（bigram）。
+    例如 "权限模型设计" → {权限, 限模, 模型, 型设, 设计}，有意义的二字组在评分中自然占优。"""
+    tokens = set()
+    for run in re.findall(r"[a-z0-9_]+|[一-鿿]+", text.lower()):
+        if re.fullmatch(r"[a-z0-9_]+", run):
+            if len(run) >= 2:
+                tokens.add(run)
+        elif len(run) == 1:
+            tokens.add(run)
+        else:
+            tokens.update(run[i:i + 2] for i in range(len(run) - 1))
+    return tokens
+
+
+def _parse_frontmatter(text):
+    """解析 frontmatter（有 yaml 用 yaml，否则逐行简易解析）。返回 (meta, body)。"""
+    if not text.startswith("---"):
+        return {}, text
+    end = text.find("\n---", 3)
+    if end == -1:
+        return {}, text
+    head, body = text[3:end], text[end + 4:]
+    if yaml:
+        try:
+            meta = yaml.safe_load(head)
+            return (meta if isinstance(meta, dict) else {}), body
+        except Exception:
+            pass
+    meta = {}
+    for line in head.splitlines():
+        m = re.match(r"(\w+):\s*(.+)", line)
+        if m:
+            meta[m.group(1)] = m.group(2).strip()
+    return meta, body
+
+
+def _best_excerpt(body, words, chars):
+    """以命中词最多的段落为中心截取 chars 字，截取点尽量对准首个命中词。"""
+    paras = [p.strip() for p in re.split(r"\n\s*\n", body) if p.strip()]
+    if not paras:
+        return ""
+    best = max(paras, key=lambda p: sum(p.lower().count(w) for w in words))
+    if len(best) <= chars:
+        return best
+    low = best.lower()
+    pos = min((low.find(w) for w in words if low.find(w) >= 0), default=0)
+    start = max(0, pos - chars // 3)
+    return ("…" if start else "") + best[start:start + chars] + ("…" if start + chars < len(best) else "")
+
+
+def _kb_snippets(question, limit=4, chars=700):
+    """frontmatter 感知检索（2026-11-08 批示#4 完善）：
+    标题/标签/分类命中加权高于正文；正文词频取 log1p（长文刷分无效）；
+    按问题词覆盖率加权（命中越全排越前）；摘录带路径/分类/标签/更新时间和最佳段落。"""
+    words = _tokenize(question)
+    if not words:
+        return []
     hits = []
     for f in KNOWLEDGE.rglob("*.md"):
         try:
             text = f.read_text(encoding="utf-8", errors="replace")
         except Exception:
             continue
-        score = sum(text.lower().count(w) for w in words)
-        if score:
-            hits.append((score, f, text))
-    hits.sort(reverse=True)
-    return [f"### {f.name}\n{t[:chars]}" for _, f, t in hits[:limit]]
+        meta, body = _parse_frontmatter(text)
+        title = str(meta.get("title") or f.stem).lower()
+        raw_tags = meta.get("tags") or []
+        tags = (" ".join(map(str, raw_tags)) if isinstance(raw_tags, list) else str(raw_tags)).lower()
+        category = str(meta.get("category") or f.parent.name).lower()
+        body_l = body.lower()
+        score, matched = 0.0, 0
+        for w in words:
+            ct, cg, cc, cb = title.count(w), tags.count(w), category.count(w), body_l.count(w)
+            if ct or cg or cc or cb:
+                matched += 1
+                score += 4.0 * min(ct, 2) + 3.0 * min(cg, 2) + 2.0 * min(cc, 1) + math.log1p(cb)
+        if not matched:
+            continue
+        score *= 0.5 + matched / len(words)         # 覆盖率加权：0.5（命中1词）~ 1.5（全覆盖）
+        hits.append((score, f, meta, body))
+    hits.sort(key=lambda h: h[0], reverse=True)
+    out = []
+    for _, f, meta, body in hits[:limit]:
+        raw_tags = meta.get("tags") or []
+        tag_s = ", ".join(map(str, raw_tags)) if isinstance(raw_tags, list) else (str(raw_tags) or "-")
+        updated = meta.get("updated") or time.strftime("%Y-%m-%d", time.localtime(f.stat().st_mtime))
+        out.append(f"### {meta.get('title') or f.stem}（{f.relative_to(ROOT)}）\n"
+                   f"分类：{meta.get('category') or f.parent.name} ｜ 标签：{tag_s or '-'} ｜ 更新：{updated}\n"
+                   f"{_best_excerpt(body, words, chars)}\n\n")
+    return out
 
 
 CHAT_PROMPT = """你是超级大脑助手，基于知识库内容回答用户问题。
