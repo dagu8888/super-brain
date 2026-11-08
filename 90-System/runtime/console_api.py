@@ -21,8 +21,9 @@ def _rows(cur):
     return [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
 
 
-def _agent_status(last_seen, busy):
-    if not last_seen or time.time() - int(last_seen) > OFFLINE_SECONDS:
+def _agent_status(last_seen, busy, kind="worker"):
+    # chief 是"入口身份"，不常驻进程，last_seen 只代表最近调用时间，不判离线
+    if kind != "chief" and (not last_seen or time.time() - int(last_seen) > OFFLINE_SECONDS):
         return "offline"
     return "working" if busy else "idle"
 
@@ -59,7 +60,7 @@ def handle_get(conn, raw_path):
             "SELECT agent_id,kind,status,last_seen FROM agents WHERE status='active' "
             "ORDER BY kind,agent_id"))
         for a in agents:
-            a["live_status"] = _agent_status(a["last_seen"], a["agent_id"] in busy)
+            a["live_status"] = _agent_status(a["last_seen"], a["agent_id"] in busy, a["kind"])
         tasks = dict(conn.execute("SELECT status,COUNT(*) FROM tasks GROUP BY status").fetchall())
         today0 = int(time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1)))
         ev = conn.execute("SELECT COUNT(*) FROM events WHERE created_at>=?", (today0,)).fetchone()[0]
@@ -85,7 +86,7 @@ def handle_get(conn, raw_path):
                 a["permissions"] = json.loads(a["permissions"] or "{}")
             except Exception:
                 pass
-            a["live_status"] = _agent_status(a["last_seen"], a["agent_id"] in busy)
+            a["live_status"] = _agent_status(a["last_seen"], a["agent_id"] in busy, a["kind"])
             a["current_task_id"] = busy.get(a["agent_id"])
             out.append(a)
         return ok(out)
@@ -173,7 +174,7 @@ def handle_get(conn, raw_path):
             pass
         sysinfo = {}
         try:
-            sysinfo["loadavg"] = [round(x, 2) for x in open("/proc/loadavg").read().split()[:3]]
+            sysinfo["loadavg"] = [round(float(x), 2) for x in open("/proc/loadavg").read().split()[:3]]
             mem = {}
             for line in open("/proc/meminfo"):
                 k, v = line.split(":", 1)
