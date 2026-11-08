@@ -65,6 +65,16 @@
         node.el.style.transform = 'translate3d(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px,0) translate(-50%,-50%)';
         node.el.style.opacity = String(op);
         node.el.style.pointerEvents = 'auto';
+
+        // 智能体标签：实时同步状态文案与状态色
+        if (t.kind === 'agent' && node.stateEl) {
+          var txt = t.statusZh || '未知';
+          if (node.stateEl.textContent !== txt) node.stateEl.textContent = txt;
+          if (t.hex) {
+            if (node.dotEl && node.dotEl.style.background !== t.hex) node.dotEl.style.background = t.hex;
+            if (node.stateEl.style.color !== t.hex) node.stateEl.style.color = t.hex;
+          }
+        }
       }
 
       for (var id in labels.map) {
@@ -76,14 +86,22 @@
       var d = PAO.dom;
       var numText = t.kind === 'agent' ? (t.num || '') : (t.num + (t.kind === 'arch' ? '' : ' / 06'));
       var kids = [];
+      var dotEl = null;
       if (t.kind === 'agent' && t.hex) {
-        var dot = d.el('i', { className: 'pao-label__dot' });
-        dot.style.background = t.hex;
-        kids.push(dot);
+        dotEl = d.el('i', { className: 'pao-label__dot' });
+        dotEl.style.background = t.hex;
+        kids.push(dotEl);
       }
       kids.push(d.el('span', { className: 'pao-label__num', text: numText }));
       kids.push(d.el('span', { className: 'pao-label__name', text: t.name }));
       kids.push(d.el('span', { className: 'pao-label__zh', text: t.zh }));
+      var stateEl = null;
+      if (t.kind === 'agent') {
+        stateEl = d.el('span', { className: 'pao-label__num', text: t.statusZh || '' });
+        stateEl.style.color = t.hex || 'var(--text-3)';
+        stateEl.style.letterSpacing = '0';
+        kids.push(stateEl);
+      }
 
       var el = d.el('button', {
         className: 'pao-label pao-label--' + t.kind,
@@ -104,7 +122,7 @@
         if (PAO.scene.mode === 'universe' && t.kind === 'module') PAO.scene.modules.setHover(null);
       });
 
-      return { el: el, target: t };
+      return { el: el, target: t, stateEl: stateEl, dotEl: dotEl };
     },
 
     clear: function () {

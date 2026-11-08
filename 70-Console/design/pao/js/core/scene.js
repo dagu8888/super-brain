@@ -170,7 +170,7 @@
         if (scene.graph) scene.graph.setVisible(isGraph);
         if (isGraph) scene.loadGraph();
 
-        scene.core.group.visible = uni;
+        scene.core.group.visible = mode === 'universe';
         scene.modules.group.visible = mode === 'universe';
         if (scene.core && scene.core.setDim) scene.core.setDim(ws ? 1 : 0);
         /* Agent 网络只在「网络」视图出现，避免与六大模块在同一视图互相遮挡 */
@@ -181,7 +181,8 @@
         if (mode === 'graph') {
           PAO.rig.tweenTo({ theta: 0.42, phi: 1.24, radius: 23, target: new THREE.Vector3(0, 0, 0) }, 1100);
         } else if (mode === 'workspace') {
-          PAO.rig.tweenTo({ theta: 0.55, phi: 1.18, radius: 24, target: new THREE.Vector3(0, 0.2, 0) }, 1000);
+          /* 固定机位：正对三层网络，保证 DOM 标签与节点严格对齐 */
+          PAO.rig.tweenTo({ theta: 0, phi: 1.32, radius: 21, target: new THREE.Vector3(0, 0.2, 0) }, 900);
         } else if (mode === 'universe') {
           PAO.rig.tweenTo({ theta: 0.62, phi: 1.16, radius: 18.5, target: new THREE.Vector3(0, 0.4, 0) }, 900);
         } else if (mode === 'memory') {
@@ -512,6 +513,8 @@
     labelTargets: function () {
       if (scene.mode === 'workspace' && scene.agents) {
         var out = [];
+        var ZH = { idle: '空闲', thinking: '思考', running: '执行中', waiting: '待批示', completed: '完成', failed: '失败', paused: '暂停' };
+        var HEX = { idle: '#7E8999', thinking: '#55DDF5', running: '#91DFFF', waiting: '#E0B15C', completed: '#5FD6A8', failed: '#E06767', paused: '#9178FF' };
         scene.agents.pickables.forEach(function (pk) {
           var n = scene.agents.getAgent(pk.userData.pickId);
           if (!n || !n.group) return;
@@ -519,8 +522,8 @@
           v.y += n.isHub ? 1.2 : 1.0;
           out.push({
             id: n.agentId, num: '', name: n.name, zh: n.zh,
-            kind: 'agent', pos: v, element: null, hex: null,
-            status: n.status
+            kind: 'agent', pos: v, element: null, hex: HEX[n.status] || HEX.idle,
+            status: n.status, statusZh: ZH[n.status] || n.status
           });
         });
         return out;
