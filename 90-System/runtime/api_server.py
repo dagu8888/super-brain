@@ -241,4 +241,23 @@ def maybe_start(stop, log_event, db_fn, execute_fn):
 
     t = threading.Thread(target=_serve, name="api-server", daemon=True)
     t.start()
+
+    # 可选：同时监听 80，方便直接用 http://<公网IP>/ 打开控制台（端口被占用则忽略）
+    handler = _make_handler(db_fn, execute_fn, log_event, tokens, viewers, stop)
+    for extra in conf.get("extra_ports") or []:
+        try:
+            s2 = ThreadingHTTPServer(("0.0.0.0", int(extra)), handler)
+        except OSError as e:
+            log_event("api_extra_port_failed", port=extra, error=str(e)[:120])
+            continue
+        s2.daemon_threads = True
+        s2.timeout = 2
+
+        def _serve_extra(srv2=s2, p=extra):
+            log_event("api_extra_port_started", port=p)
+            while not stop.is_set():
+                srv2.handle_request()
+
+        threading.Thread(target=_serve_extra, name=f"api-port-{extra}", daemon=True).start()
+
     return t
