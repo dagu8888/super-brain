@@ -748,6 +748,12 @@
     _bindEvents: function () {
       PAO.bus.on('nav:go', function (p) { if (p && p.id) ui.go(p.id); });
       PAO.bus.on('nav:home', function () { ui.home(); });
+      /* 3D 节点 / 标签点击 → 打开该智能体详情（真实数据） */
+      PAO.bus.on('agent:selected', function (p) {
+        if (!p || !p.agentId) return;
+        PAO.bus.set({ selectedAgent: p.agentId });
+        ui.go('agent-detail');
+      });
       PAO.bus.on('toast', function (p) { ui.toast(p.kind, p.title, p.text); });
       PAO.bus.on('perf:low', function () { ui.toast('warn', '已切换到节能渲染', '为保持流畅，部分粒子与数据流已降低密度。'); });
       PAO.bus.on('state', function () {
