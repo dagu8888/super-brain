@@ -5,11 +5,13 @@
 # 用法: python3 runtime.py        （建议由 systemd 托管，见 super-brain.service）
 import json
 import os
+import re
 import signal
 import sqlite3
 import sys
 import threading
 import time
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]          # 仓库根目录
@@ -54,10 +56,78 @@ def heartbeat(conn, agent, note=""):
     conn.commit()
 
 
+LLM_CONF = Path(__file__).parent / "llm.json"   # 不入库，仅存服务器
+KNOWLEDGE = ROOT / "10-Knowledge"
+CATEGORIES = ["Concepts", "Decisions", "Playbooks"]
+
+TRIAGE_PROMPT = """你是知识库整理员。用户给你一篇收集箱笔记，请整理归档。
+只输出一个 JSON 对象（不要输出其他内容）：
+{
+  "category": "Concepts | Decisions | Playbooks 三选一（概念知识→Concepts，决策/结论→Decisions，流程/方法/模板→Playbooks）",
+  "title": "简洁标题（可含中文，不要扩展名）",
+  "summary": "一句话摘要（30字内）",
+  "content": "整理后的 Markdown 正文：保留全部原始信息，理顺结构，去除口语冗余"
+}"""
+
+
+def load_llm():
+    try:
+        return json.loads(LLM_CONF.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def call_llm(conf, content):
+    body = json.dumps({
+        "model": conf.get("model", "deepseek-chat"),
+        "temperature": 0.2,
+        "max_tokens": 3000,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {"role": "system", "content": TRIAGE_PROMPT},
+            {"role": "user", "content": content[:8000]},
+        ],
+    }).encode()
+    req = urllib.request.Request(
+        conf.get("base_url", "https://api.deepseek.com").rstrip("/") + "/v1/chat/completions",
+        data=body,
+        headers={"Authorization": "Bearer " + conf["api_key"],
+                 "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=90) as r:
+        data = json.loads(r.read())
+    return data["choices"][0]["message"]["content"]
+
+
+def handle_inbox(path_rel):
+    src = ROOT / path_rel
+    if not src.exists():
+        return "源文件已不存在，跳过"
+    conf = load_llm()
+    if not conf or not conf.get("api_key"):
+        return f"未配置 LLM，仅登记：{path_rel}（文件保持原位）"
+    raw = call_llm(conf, src.read_text(encoding="utf-8", errors="replace"))
+    info = json.loads(re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=re.M).strip())
+    cat = info.get("category") if info.get("category") in CATEGORIES else "Concepts"
+    title = re.sub(r'[\\/:*?"<>|\s]+', "-", (info.get("title") or src.stem).strip())[:60].strip("-") or src.stem
+    dest_dir = KNOWLEDGE / cat
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest, i = dest_dir / f"{title}.md", 1
+    while dest.exists():
+        i += 1
+        dest = dest_dir / f"{title}-{i}.md"
+    dest.write_text(
+        f"# {info.get('title', title)}\n\n"
+        f"> {info.get('summary', '')}\n"
+        f"> 来源：{path_rel} ｜ {time.strftime('%Y-%m-%d')} 由 knowledge-worker 自动整理\n\n"
+        f"{info.get('content', '').strip()}\n",
+        encoding="utf-8")
+    src.unlink()
+    return f"已整理 → {dest.relative_to(ROOT)}（{info.get('summary', '')}）"
+
+
 def handle(task_type, payload):
-    # 占位处理器：只登记，不动用户文件。返回 result 字符串。
     if task_type == "inbox-triage":
-        return f"已登记待整理：{payload}（等待 LLM 会话或人工整理，文件保持原位）"
+        return handle_inbox(payload)
     return "无处理器，已跳过"
 
 
