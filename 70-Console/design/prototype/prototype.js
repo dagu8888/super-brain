@@ -131,6 +131,9 @@ function renderCommand(host) {
           <svg class="pt-net-svg" id="net-svg" width="${WORLD_W}" height="${WORLD_H}"></svg>
         </div>
         <span class="pt-net-hint">拖动平移 · 滚轮缩放 · 单击节点看详情 · Esc 关闭面板</span>
+        <div class="net-legend" aria-hidden="true">
+          <span data-s="working">工作中</span><span data-s="idle">空闲</span><span data-s="offline">离线</span>
+        </div>
       </div>
     </div>
 
@@ -227,7 +230,8 @@ function renderNetwork() {
 
   // 平移 / 缩放
   const net = $("#net");
-  const is3D = !!(window.SB3D && SB3D.mount($("#net3d"), DEMO.agents, DEMO.edges,
+  const FORCE_FLAT = /[?&]flat=1\b/.test(location.search);   // 排障用：?flat=1 强制 2D
+  const is3D = !FORCE_FLAT && !!(window.SB3D && SB3D.mount($("#net3d"), DEMO.agents, DEMO.edges,
     { onAgent: selectAgent, onMore: id => openDetail({ type: "agent", id }) }));
   if (is3D) {
     net.classList.add("is-3d");
@@ -530,6 +534,11 @@ document.addEventListener("keydown", e => {
     }
   }
   if (e.key === "Escape" && state.panel.target) closeDetail();
+  if ((e.key === "f" || e.key === "F") && state.view === "command"
+    && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) {
+    const btn = document.querySelector("[data-net-fs]");
+    if (btn && document.querySelector(".pt-net.is-3d")) btn.click();
+  }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
     e.preventDefault();
     $("#global-search").focus();
