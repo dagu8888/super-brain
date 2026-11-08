@@ -1,22 +1,19 @@
----
-tags: [元Ai, 概览, 协作]
-created: 2026-11-08
-source: yuanai
----
+# 元Ai 工作区概览与协作指南
+
+> 元Ai 主工作区总览、能力清单与协作约定
+> 来源：00-Inbox/2026-11-08-元Ai工作区概览与协作指南-yuanai.md ｜ 2026-11-08 由 knowledge-worker 自动整理
 
 # 元Ai 工作区概览与协作指南
 
 ## 摘要
-元Ai 主工作区 D:\DSH\Yuan Ai 的总览地图，供 super-brain 全体 Agent 对齐现状、查重避撞、找到协作入口。
+元Ai 主工作区 `D:\DSH\Yuan Ai` 的总览地图，供 super-brain 全体 Agent 对齐现状、查重避撞、找到协作入口。
 
-## 正文
-
-### 身份与署名
+## 身份与署名
 - 元Ai：大古老师的主控 AI，对外唯一身份；娜娜/茉莉为内部工作模式，不对外暴露。
-- 本工作区署名 **yuanai**。云端的 `lead` 署名属另一个工作区实例（副本在 D:\DSH\super-brain），两实例互不指挥、互不覆盖，靠署名隔离协作。
+- 本工作区署名 **yuanai**。云端的 `lead` 署名属另一个工作区实例（副本在 `D:\DSH\super-brain`），两实例互不指挥、互不覆盖，靠署名隔离协作。
 - 使命：培育真正懂用户的全能元Ai——控制台 + 多 Agent 协作 + 跨工作区记忆 + 影视/游戏生产，四线并进。
 
-### 主要板块
+## 主要板块
 | 板块 | 位置 | 说明 |
 |---|---|---|
 | 控制台与运维 | agents/ ops/ deploy/ tools/ data/ | DSH 控制台、作战大屏、启停脚本（start.bat / stop.bat） |
@@ -26,20 +23,22 @@ source: yuanai
 | 知识库 | super-brain/ | 本仓库工作副本（云端 main 唯一事实源） |
 | Toonflow 无限画布 | D:\DSH\toonflow无线画布视频工作流\toonflow-app | 短剧/漫剧/无限画布视频工作流，http://127.0.0.1:3000 |
 
-### 能力清单（工具链）
+## 能力清单（工具链）
 - 影视生产：dsh-agnes-studio（37 个技能：短剧 11 / 网文 13 / 视频解说 6 / 小说改游戏 7）+ dsh-grok-imagine（Grok 生图/生视频）
 - 记忆栈：dsh-full-life-memory（物理遗忘）+ dsh-memory-gate（注入硬预算）+ longterm-memory vault
 - 终端能力：ego browser（浏览器自动化）、phone_*（手机控制）、send_wechat（微信推送）、飞书文档读写
 - 模型网关：workbuddy（glm 系）等
 
-### 协作约定（云端口径，依据 README.md + 40-Agents/权限与同步规则.md + 90-System/sync/同步规则.md）
+## 协作约定（云端口径）
+依据：README.md + 40-Agents/权限与同步规则.md + 90-System/sync/同步规则.md
+
 1. 云端唯一：核心知识只存本仓库，本地只是工作副本；写前先拉、写后即推 `AGENT_NAME=<署名> bash 90-System/sync/sync.sh`，看到 SYNC_OK 才算完成。
 2. 分区写入：只创建/追加 `YYYY-MM-DD-主题-<署名>.md` 自己署名的文件；不覆盖他人文件，补充用 [[双链]]。
 3. 接任务先查仓库现成内容，避免重复劳动；需要元Ai 协作：发消息给本工作区 lead，或共享任务板派单。
 4. 红线：禁改 `40-Agents/` 与 `90-System/`（配置改动走人工 PR，由大古老师审批）；冲突追加合并，绝不用 --force。
 5. 任务完成 = 成果已 push + Router 收到汇报；执行类成果回写 `60-Outputs/YYYY-MM-DD/`。
 
-### 现状与待办
+## 现状与待办
 - 2026-11-08 正式接入：凭据授权打通（OAuth → 凭据管理器）；本地副本重建为云端镜像（旧离线骨架收档 `origin/import/local-skeleton-20261108`，本地备份目录 `super-brain.local-backup` 保留未删）；本指南与培育计划已上云（提交 a3c4a97，本次按云端口径修订）。
 - 待办：与云端 Lead 实例对齐职责边界，避免重复派单；登记文件见 [[2026-11-08-接入登记-元Ai-yuanai]]。
 

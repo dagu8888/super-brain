@@ -19,3 +19,15 @@
 {"ts": "2026-11-08T08:08:00+0800", "kind": "task_done", "id": 35, "type": "inbox-triage", "by": "knowledge-worker", "result": "已整理 → 10-Knowledge/Concepts/Mausbot-本地项目总览.md（盘点 D:\\DSH 下四个自有项目与资产）"}
 {"ts": "2026-11-08T08:08:05+0800", "kind": "task_claimed", "id": 36, "type": "inbox-triage", "by": "knowledge-worker"}
 {"ts": "2026-11-08T08:08:08+0800", "kind": "task_done", "id": 36, "type": "inbox-triage", "by": "knowledge-worker", "result": "已整理 → 10-Knowledge/Playbooks/grok-bot-接入超级大脑知识库.md（grok-bot 完成仓库拉取、环境自检与同步上传，正式接入协作体系）"}
+{"ts": "2026-11-08T08:30:45+0800", "kind": "task_enqueued", "type": "inbox-triage", "payload": "00-Inbox/2026-11-08-接入登记-幕僚长.md"}
+{"ts": "2026-11-08T08:30:49+0800", "kind": "task_claimed", "id": 37, "type": "inbox-triage", "by": "knowledge-worker"}
+{"ts": "2026-11-08T08:30:51+0800", "kind": "task_done", "id": 37, "type": "inbox-triage", "by": "knowledge-worker", "result": "已整理 → 10-Knowledge/Playbooks/幕僚长接入登记与工作流.md（幕僚长MausBot的定位、工作流及隐私红线）"}
+{"ts": "2026-11-08T09:10:45+0800", "kind": "task_enqueued", "type": "inbox-triage", "payload": "00-Inbox/元Ai 工作区概览与协作指南.md"}
+{"ts": "2026-11-08T09:10:47+0800", "kind": "task_claimed", "id": 38, "type": "inbox-triage", "by": "knowledge-worker"}
+{"ts": "2026-11-08T09:10:51+0800", "kind": "task_done", "id": 38, "type": "inbox-triage", "by": "knowledge-worker", "result": "已整理 → 10-Knowledge/Playbooks/元Ai-工作区概览与协作指南.md（元Ai 主工作区总览地图与多 Agent 协作规范）"}
+{"ts": "2026-11-08T09:20:45+0800", "kind": "task_enqueued", "type": "inbox-triage", "payload": "00-Inbox/2026-11-08-元Ai工作区概览与协作指南-yuanai.md"}
+{"ts": "2026-11-08T09:20:45+0800", "kind": "task_enqueued", "type": "inbox-triage", "payload": "00-Inbox/2026-11-08-接入登记-元Ai-yuanai.md"}
+{"ts": "2026-11-08T09:20:46+0800", "kind": "task_claimed", "id": 39, "type": "inbox-triage", "by": "knowledge-worker"}
+{"ts": "2026-11-08T09:20:51+0800", "kind": "task_done", "id": 39, "type": "inbox-triage", "by": "knowledge-worker", "result": "已整理 → 10-Knowledge/Concepts/元Ai-工作区概览与协作指南.md（元Ai 主工作区总览、能力清单与协作约定）"}
+{"ts": "2026-11-08T09:20:56+0800", "kind": "task_claimed", "id": 40, "type": "inbox-triage", "by": "knowledge-worker"}
+{"ts": "2026-11-08T09:20:58+0800", "kind": "task_done", "id": 40, "type": "inbox-triage", "by": "knowledge-worker", "result": "已整理 → 10-Knowledge/Decisions/元Ai接入登记与协作规范.md（元Ai工作区定位、工作流与隐私红线）"}
