@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Super-Brain 3.0 · Design System 预览</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="base.css">
+<style>
+  /* 仅画廊排版用，非产品样式 */
+  .pv-topbar {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 24px;
+  }
+  .pv-wrap { max-width: 1080px; margin: 0 auto; padding: 32px 24px 96px; }
+  .pv-section { margin-bottom: 56px; }
+  .pv-section > h2 { margin-bottom: 6px; }
+  .pv-section > .pv-desc { color: var(--sb-text-secondary); margin-bottom: 20px; }
+  .pv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .pv-swatch { display: flex; flex-direction: column; gap: 8px; }
+  .pv-swatch .sw { height: 56px; border-radius: var(--sb-radius-sm); border: 1px solid var(--sb-border); }
+  .pv-swatch small { color: var(--sb-text-tertiary); font-size: 11px; }
+  .pv-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .pv-card { padding: 20px; }
+  .pv-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .pv-glass-bg {
+    border-radius: var(--sb-radius-lg); padding: 32px;
+    background: linear-gradient(135deg, #007AFF 0%, #8B7CFF 50%, #30A46C 100%);
+  }
+  .pv-nodes { display: flex; flex-wrap: wrap; gap: 16px; }
+  .pv-type p { margin-bottom: 8px; }
+  .pv-note { color: var(--sb-text-secondary); font-size: 13px; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<div class="pv-topbar sb-glass">
+  <strong>Super-Brain 3.0 · Design System 预览</strong>
+  <button class="sb-button sb-button-secondary" id="theme-toggle" type="button">切换深 / 浅色</button>
+</div>
+
+<main class="pv-wrap">
+
+  <section class="pv-section">
+    <h2>色彩体系</h2>
+    <p class="pv-desc">全部来自 tokens.css 变量；页面与组件不允许硬编码色值。</p>
+    <div class="pv-grid">
+      <div class="pv-swatch"><span class="sw" style="background: var(--sb-primary)"></span><strong>品牌主色</strong><small>--sb-primary</small></div>
+      <div class="pv-swatch"><span class="sw" style="background: var(--sb-primary-hover)"></span><strong>主色悬停</strong><small>--sb-primary-hover</small></div>
+      <div class="pv-swatch"><span class="sw" style="background: var(--sb-success)"></span><strong>成功</strong><small>--sb-success</small></div>
+      <div class="pv-swatch"><span class="sw" style="background: var(--sb-warning)"></span><strong>警告</strong><small>--sb-warning</small></div>
+      <div class="pv-swatch"><span class="sw" style="background: var(--sb-danger)"></span><strong>危险</strong><small>--sb-danger</small></div>
+      <div class="pv-swatch"><span class="sw" style="background: var(--sb-info)"></span><strong>信息</strong><small>--sb-info</small></div>
+      <div class="pv-swatch"><span class="sw" style="background: var(--sb-collaborating)"></span><strong>协作紫</strong><small>--sb-collaborating</small></div>
+      <div class="pv-swatch"><span class="sw" style="background: var(--sb-bg)"></span><strong>页面背景</strong><small>--sb-bg</small></div>
+      <div class="pv-swatch"><span class="sw" style="background: var(--sb-surface-solid)"></span><strong>卡片表面</strong><small>--sb-surface-solid</small></div>
+      <div class="pv-swatch"><span class="sw" style="background: var(--sb-surface-secondary)"></span><strong>次级表面</strong><small>--sb-surface-secondary</small></div>
+    </div>
+    <p class="pv-note">文字三级：<span style="color: var(--sb-text-primary)">主文字 1D1D1F</span> ·
+      <span style="color: var(--sb-text-secondary)">次文字 6E6E73</span> ·
+      <span style="color: var(--sb-text-tertiary)">辅助文字 86868B</span></p>
+  </section>
+
+  <section class="pv-section pv-type">
+    <h2>字体与排版</h2>
+    <p class="pv-desc">系统字栈：SF Pro（可用时）→ PingFang SC → 微软雅黑，任何设备都有可靠回退。</p>
+    <h1 style="margin-bottom:8px">指挥中心 Command Center</h1>
+    <h2 style="margin-bottom:8px">任务中心 Task Center</h2>
+    <h3 style="margin-bottom:8px">知识图谱 Knowledge Graph</h3>
+    <p>正文 14px / 1.55——Agent 正在整理今日收件箱，产出将写入知识库 Concepts 分区。</p>
+    <p class="sb-text-secondary">次要说明——最近活动时间：5 分钟前。</p>
+    <p class="sb-text-tertiary">辅助信息——事件 ID evt_20261108_a1b2c3。</p>
+  </section>
+
+  <section class="pv-section">
+    <h2>按钮</h2>
+    <p class="pv-desc">按压回弹 120ms scale(0.97)；主按钮仅用于每屏最关键操作。</p>
+    <div class="pv-row">
+      <button class="sb-button sb-button-primary" type="button">主要操作</button>
+      <button class="sb-button sb-button-secondary" type="button">次要操作</button>
+      <button class="sb-button sb-button-ghost" type="button">幽灵按钮</button>
+      <button class="sb-button sb-button-danger" type="button">危险操作</button>
+      <button class="sb-button sb-button-secondary" type="button" disabled>禁用态</button>
+    </div>
+  </section>
+
+  <section class="pv-section">
+    <h2>卡片与玻璃材质</h2>
+    <p class="pv-desc">悬停上浮 -2px；玻璃在彩色背景上呈现 24px 模糊 + 180% 饱和，不支持时自动降级为高不透明底。</p>
+    <div class="pv-cards" style="margin-bottom:16px">
+      <div class="sb-card pv-card"><h3>基础卡片</h3><p class="sb-text-secondary">静态内容容器，圆角 20px。</p></div>
+      <div class="sb-card sb-card-interactive pv-card"><h3>可交互卡片</h3><p class="sb-text-secondary">鼠标悬停时轻微上浮并加深阴影。</p></div>
+    </div>
+    <div class="pv-glass-bg">
+      <div class="sb-glass" style="border-radius: var(--sb-radius-lg); padding: 20px;">
+        <h3>玻璃面板</h3>
+        <p class="sb-text-secondary">用于顶栏、侧栏、浮动详情面板等层级更高的表面。</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="pv-section">
+    <h2>状态徽章</h2>
+    <p class="pv-desc">圆点 + 文字 + 颜色三重表达，不单独依赖颜色（可访问性要求）。</p>
+    <h3 style="margin-bottom:10px">Agent 状态（7 种）</h3>
+    <div class="pv-row" style="margin-bottom:20px">
+      <span class="sb-status" data-status="idle">空闲</span>
+      <span class="sb-status" data-status="working">执行中</span>
+      <span class="sb-status" data-status="collaborating">协作中</span>
+      <span class="sb-status" data-status="waiting">等待中</span>
+      <span class="sb-status" data-status="completed">已完成</span>
+      <span class="sb-status" data-status="error">异常</span>
+      <span class="sb-status" data-status="offline">离线</span>
+    </div>
+    <h3 style="margin-bottom:10px">Task 状态（8 种）</h3>
+    <div class="pv-row">
+      <span class="sb-status" data-status="pending">待派发</span>
+      <span class="sb-status" data-status="assigned">已分配</span>
+      <span class="sb-status" data-status="running">执行中</span>
+      <span class="sb-status" data-status="blocked">受阻</span>
+      <span class="sb-status" data-status="waiting">等待中</span>
+      <span class="sb-status" data-status="completed">已完成</span>
+      <span class="sb-status" data-status="failed">失败</span>
+      <span class="sb-status" data-status="cancelled">已取消</span>
+    </div>
+  </section>
+
+  <section class="pv-section">
+    <h2>Agent 节点</h2>
+    <p class="pv-desc">指挥中心核心组件。单击选中（蓝边高亮），右侧打开详情面板。头像字母仅为演示，生产使用稳定 Agent ID。</p>
+    <div class="pv-nodes">
+      <button class="agent-node selected" type="button">
+        <span class="agent-node-indicator" style="background: var(--sb-primary)"></span>
+        <span class="agent-node-avatar">研</span>
+        <span class="agent-node-info">
+          <strong>research-worker</strong>
+          <span>情报研究</span>
+          <small>正在整理收件箱 3 条笔记</small>
+        </span>
+        <span class="sb-status" data-status="working">执行中</span>
+      </button>
+      <button class="agent-node" type="button">
+        <span class="agent-node-indicator" style="background: var(--sb-collaborating)"></span>
+        <span class="agent-node-avatar">知</span>
+        <span class="agent-node-info">
+          <strong>knowledge-worker</strong>
+          <span>知识整理</span>
+          <small>与 research-worker 协作归档</small>
+        </span>
+        <span class="sb-status" data-status="collaborating">协作中</span>
+      </button>
+      <button class="agent-node" type="button">
+        <span class="agent-node-indicator" style="background: var(--sb-warning)"></span>
+        <span class="agent-node-avatar">码</span>
+        <span class="agent-node-info">
+          <strong>trae-developer</strong>
+          <span>开发执行</span>
+          <small>等待上游任务交接</small>
+        </span>
+        <span class="sb-status" data-status="waiting">等待中</span>
+      </button>
+      <button class="agent-node" type="button">
+        <span class="agent-node-indicator" style="background: var(--sb-text-tertiary)"></span>
+        <span class="agent-node-avatar">聊</span>
+        <span class="agent-node-info">
+          <strong>chat-worker</strong>
+          <span>对话应答</span>
+          <small>当前无任务摘要</small>
+        </span>
+        <span class="sb-status" data-status="idle">空闲</span>
+      </button>
+    </div>
+  </section>
+
+  <section class="pv-section">
+    <h2>动效与降级</h2>
+    <p class="pv-desc">四档时长（120/200/300/450ms）+ 统一缓动 cubic-bezier(0.2,0,0,1)；系统开启「减少动态效果」时全部动画自动关闭。</p>
+    <ul class="sb-text-secondary" style="margin:0; padding-left: 20px; line-height: 2;">
+      <li>悬停卡片 / Agent 节点：上浮 2–3px + 阴影加深（200ms）</li>
+      <li>按钮按压：scale(0.97)，120ms 回弹</li>
+      <li>详情面板：右侧 380px 平滑滑入（300ms）</li>
+      <li>骨架屏 shimmer：仅加载期间出现，数据到达即替换</li>
+      <li>协作连线流动动画：仅在真实协作事件活动期间触发，平时静态</li>
+    </ul>
+  </section>
+
+</main>
+
+<script>
+(function () {
+  var btn = document.getElementById("theme-toggle");
+  btn.addEventListener("click", function () {
+    var el = document.documentElement;
+    el.setAttribute("data-theme", el.getAttribute("data-theme") === "dark" ? "light" : "dark");
+  });
+})();
+</script>
+</body>
+</html>
