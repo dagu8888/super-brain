@@ -104,6 +104,15 @@
 }
 .pt-net.panning { cursor: grabbing; }
 .pt-net-canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+.pt-net-3d {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  display: none; touch-action: none; cursor: grab;
+}
+.pt-net.is-3d {
+  background: radial-gradient(circle at 50% 42%, #0b1226 0%, #05070f 62%);
+}
+.pt-net.is-3d .pt-net-3d { display: block; }
+.pt-net.is-3d .pt-net-canvas { display: none; }
 .pt-net-svg { position: absolute; top: 0; left: 0; overflow: visible; }
 .pt-edge { cursor: pointer; }
 .pt-edge .pt-edge-line { transition: opacity var(--sb-motion-fast) var(--sb-ease), stroke-width var(--sb-motion-fast) var(--sb-ease); }
@@ -328,5 +337,9 @@
 
 @media (max-width: 900px) {
   .pt-cols { grid-template-columns: 1fr; }
+  .pt-net { height: 380px; }
+}
+@media (max-width: 720px) {
+  .pt-net { height: 330px; }
 }
 

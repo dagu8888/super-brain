@@ -91,6 +91,7 @@ function renderNav() {
 
 function switchView(id) {
   state.view = id;
+  if (id !== "command" && window.SB3D) SB3D.pause();
   $("#page-title").textContent = NAV.find(n => n.id === id).label;
   renderNav();
   const host = $("#views");
@@ -124,6 +125,7 @@ function renderCommand(host) {
         </div>
       </div>
       <div class="pt-net" id="net" aria-label="Agent 协作网络画布">
+        <canvas class="pt-net-3d" id="net3d" aria-hidden="true"></canvas>
         <div class="pt-net-canvas" id="net-canvas">
           <svg class="pt-net-svg" id="net-svg" width="${WORLD_W}" height="${WORLD_H}"></svg>
         </div>
@@ -224,9 +226,20 @@ function renderNetwork() {
 
   // 平移 / 缩放
   const net = $("#net");
-  if (!state.net.inited) { fitNet(); state.net.inited = true; }   // 定时刷新时保留用户视角
-  else applyNet();
+  const is3D = !!(window.SB3D && SB3D.mount($("#net3d"), DEMO.agents, DEMO.edges,
+    { onAgent: selectAgent }));
+  if (is3D) {
+    net.classList.add("is-3d");
+    const hint = net.querySelector(".pt-net-hint");
+    if (hint) hint.textContent = "拖动旋转 · 滚轮/双指缩放 · 单击节点看详情 · Esc 关闭面板";
+  } else if (window.SB3D) {
+    const hint = net.querySelector(".pt-net-hint");
+    if (hint) hint.textContent = "当前浏览器未启用 WebGL，已降级为 2D 视图 · 拖动平移 · 滚轮缩放";
+  }
+  if (!is3D && !state.net.inited) { fitNet(); state.net.inited = true; }   // 定时刷新时保留用户视角
+  else if (!is3D) applyNet();
   net.addEventListener("wheel", e => {
+    if (net.classList.contains("is-3d")) return;
     e.preventDefault();
     const r = net.getBoundingClientRect();
     const mx = e.clientX - r.left, my = e.clientY - r.top;
@@ -234,6 +247,7 @@ function renderNetwork() {
   }, { passive: false });
   let drag = null;
   net.addEventListener("pointerdown", e => {
+    if (net.classList.contains("is-3d")) return;
     // 只在画布空白处启动平移；节点/连线上按下则不捕获指针，保证点击事件正常触发
     if (e.target.closest(".agent-node") || e.target.closest(".pt-edge")) return;
     drag = { x: e.clientX, y: e.clientY, tx: state.net.tx, ty: state.net.ty, moved: false };
@@ -254,7 +268,12 @@ function renderNetwork() {
     drag = null;
   });
   $$(".pt-net-tools [data-zoom]").forEach(b => b.addEventListener("click", () => {
-    const act = b.dataset.zoom, net = $("#net");
+    const act = b.dataset.zoom;
+    if (net.classList.contains("is-3d")) {
+      if (act === "fit" || act === "reset") SB3D.reset();
+      else SB3D.zoom(act === "in" ? 0.85 : 1.18);
+      return;
+    }
     if (act === "fit" || act === "reset") fitNet(act === "reset");
     else {
       const r = net.getBoundingClientRect();
@@ -287,6 +306,7 @@ function fitNet(reset) {
 
 function selectAgent(id) {
   state.selected = id;
+  if (window.SB3D) SB3D.select(id);
   // 高亮关联连线，淡化无关元素
   const related = DEMO.edges.filter(e => e.from === id || e.to === id).map(e => e.id);
   $$(".pt-edge").forEach(g =>
@@ -1072,6 +1092,7 @@ function renderSettingsPage(host) {
 
 /* ---------- 数据更新：平滑刷新当前页 ---------- */
 document.addEventListener("sb:data", () => {
+  if (window.SB3D && state.view === "command") SB3D.refresh(DEMO.agents);
   const host = $("#views");
   if (!host) return;
   const ae = document.activeElement;
