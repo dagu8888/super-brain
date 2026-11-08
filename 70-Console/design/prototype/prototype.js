@@ -1078,6 +1078,8 @@ document.addEventListener("sb:data", () => {
   if (ae && host.contains(ae) && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;  // 输入中不打断
   if (state.view === "agents" || state.view === "collaboration" || state.view === "monitor") {
     renderPage(host, state.view);
+  } else if (host.querySelector(".pt-empty")) {
+    renderPage(host, state.view);           // 首次拿到数据后替换空态
   }
 });
 
