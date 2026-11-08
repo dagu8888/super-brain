@@ -1,0 +1,1806 @@
+/* ==========================================================================
+   PERSONAL AI OS — css/shell.css
+   空间外壳：根容器 / 3D 底景 / 标签层 / 顶栏 / 左导航 / 右面板 / 状态条 /
+             引导条 / 操作提示 / Toast / Modal / 设置抽屉 / 启动层
+   依赖：tokens.css, base.css
+   ========================================================================== */
+
+/* ==========================================================================
+   01 · 根容器与 3D 底景
+   ========================================================================== */
+.pao-app {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--bg-0);
+  color: var(--text-1);
+  font-family: var(--font-ui);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 顶部大气光：唯一允许的大面积光效，透明度极低 */
+.pao-app::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    radial-gradient(92% 58% at 50% -10%, var(--cyan-10) 0%, var(--cyan-00) 62%),
+    radial-gradient(66% 52% at 86% 108%, var(--violet-07) 0%, var(--violet-00) 60%);
+}
+
+/* 暗角：把视觉重心压回 3D 核心 */
+.pao-app::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(126% 92% at 50% 50%, var(--scrim-00) 54%, var(--scrim-58) 100%);
+}
+
+.pao-scene {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-scene);
+  overflow: hidden;
+}
+
+.pao-scene canvas,
+#pao-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  outline: none;
+  touch-action: none;
+}
+
+/* ==========================================================================
+   02 · 3D 投影标签层
+   位置由 JS 写 left/top；transform 归 CSS 所有，不要被 JS 覆盖。
+   ========================================================================== */
+.pao-labels {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-labels);
+  overflow: hidden;
+  pointer-events: none;
+  contain: strict;
+}
+
+.pao-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--glass-label);
+  backdrop-filter: var(--glass-blur-soft);
+  -webkit-backdrop-filter: var(--glass-blur-soft);
+  color: var(--text-2);
+  font-family: var(--font-ui);
+  font-size: var(--fs-kicker);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--track);
+  line-height: 1.5;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: .74;
+  transform: translate3d(-50%, -50%, 0);
+  pointer-events: none;
+  transition: opacity var(--dur-2) var(--ease-out),
+              color var(--dur-2) var(--ease-out),
+              border-color var(--dur-2) var(--ease-out),
+              background-color var(--dur-2) var(--ease-out);
+}
+
+.pao-label__k {
+  color: inherit;
+}
+
+.pao-label__v,
+.pao-label .pao-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.pao-label--module {
+  padding: 3px 8px;
+  border-color: var(--line-soft);
+  color: var(--text-4);
+  font-size: var(--fs-micro);
+}
+
+.pao-label--memory {
+  border-color: var(--violet-30);
+  color: var(--violet-82);
+}
+
+.pao-label.is-active {
+  opacity: 1;
+  color: var(--white);
+  border-color: var(--ice-40);
+  background: var(--glass-74);
+}
+
+.pao-label.is-dim {
+  opacity: .24;
+}
+
+/* ==========================================================================
+   03 · HUD 容器与按钮系统
+   ========================================================================== */
+.pao-hud {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-hud);
+  pointer-events: none;
+}
+
+.pao-hud > * {
+  pointer-events: auto;
+}
+
+.pao-hud > .pao-home-hint {
+  pointer-events: none;
+}
+
+/* ---------- 03.1 · 按钮：primary / ghost / danger / icon ---------- */
+.pao-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--ice-06);
+  color: var(--text-1);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--track-cn);
+  line-height: 1;
+  white-space: nowrap;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color var(--dur-2) var(--ease-out),
+              border-color var(--dur-2) var(--ease-out),
+              color var(--dur-2) var(--ease-out),
+              box-shadow var(--dur-2) var(--ease-out),
+              filter var(--dur-2) var(--ease-out);
+}
+
+.pao-btn svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.pao-btn:hover {
+  background: var(--ice-12);
+  border-color: var(--line-strong);
+  color: var(--white);
+}
+
+.pao-btn:active {
+  background: var(--ice-18);
+  border-color: var(--ice-40);
+}
+
+.pao-btn:disabled,
+.pao-btn.is-disabled,
+.pao-btn[aria-disabled="true"] {
+  opacity: .38;
+  cursor: not-allowed;
+  background: var(--ice-04);
+  border-color: var(--line-soft);
+  color: var(--text-3);
+}
+
+.pao-btn--primary {
+  border-color: var(--cyan-42);
+  background: linear-gradient(180deg, var(--cyan-26) 0%, var(--cyan-10) 100%);
+  color: var(--white);
+  box-shadow: inset 0 1px 0 var(--ice-18);
+}
+
+.pao-btn--primary:hover {
+  border-color: var(--cyan-60);
+  background: linear-gradient(180deg, var(--cyan-42) 0%, var(--cyan-16) 100%);
+  color: var(--white);
+}
+
+.pao-btn--primary:active {
+  background: linear-gradient(180deg, var(--cyan-60) 0%, var(--cyan-26) 100%);
+}
+
+.pao-btn--ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-3);
+}
+
+.pao-btn--ghost:hover {
+  border-color: var(--line);
+  background: var(--ice-06);
+  color: var(--text-1);
+}
+
+.pao-btn--danger {
+  border-color: var(--crit-30);
+  background: var(--crit-06);
+  color: var(--crit);
+}
+
+.pao-btn--danger:hover {
+  border-color: var(--crit-52);
+  background: var(--crit-10);
+  color: var(--crit);
+}
+
+.pao-btn--icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-3);
+  border-radius: var(--r-m);
+}
+
+.pao-btn--icon:hover {
+  border-color: var(--line);
+  background: var(--ice-08);
+  color: var(--text-1);
+}
+
+.pao-btn--icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.pao-btn--sm {
+  height: 26px;
+  padding: 0 9px;
+  border-radius: var(--r-s);
+  font-size: var(--fs-small);
+  gap: 5px;
+}
+
+.pao-btn--sm svg {
+  width: 12px;
+  height: 12px;
+}
+
+.pao-btn--icon.pao-btn--sm {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+}
+
+.pao-btn--lg {
+  height: 38px;
+  padding: 0 18px;
+  font-size: var(--fs-body);
+  border-radius: var(--r-m);
+}
+
+.pao-btn--block {
+  display: flex;
+  width: 100%;
+}
+
+.pao-btn.is-busy {
+  color: var(--text-3);
+}
+
+.pao-btn.is-busy svg {
+  animation: pao-spin 1s var(--ease-linear) infinite;
+}
+
+.pao-btn--quiet {
+  height: 22px;
+  padding: 0 7px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-4);
+  font-size: var(--fs-kicker);
+}
+
+.pao-btn--quiet:hover {
+  background: var(--ice-06);
+  border-color: transparent;
+  color: var(--text-2);
+}
+
+/* ==========================================================================
+   04 · 顶栏
+   ========================================================================== */
+.pao-topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: var(--z-topbar);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  height: var(--topbar-h);
+  padding: 0 var(--pad-hud) 0 var(--sp-5);
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--grad-topbar);
+  backdrop-filter: var(--glass-blur-soft);
+  -webkit-backdrop-filter: var(--glass-blur-soft);
+  transition: opacity var(--dur-4) var(--ease-out);
+}
+
+.pao-topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+  flex: none;
+}
+
+.pao-topbar__brand > .pao-diamond,
+.pao-topbar__brand > i,
+.pao-topbar__brand > em,
+.pao-topbar__logo,
+.pao-brand__mark {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  transform: rotate(45deg);
+  border: 1px solid var(--ice-40);
+  border-radius: 2px;
+  background: linear-gradient(135deg, var(--cyan-26) 0%, var(--violet-14) 100%);
+  box-shadow: inset 0 0 0 3px var(--wash-86);
+}
+
+.pao-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pao-brand__name,
+.pao-topbar__brand b,
+.pao-topbar__brand strong,
+.pao-topbar__title {
+  font-family: var(--font-brand);
+  font-size: 12px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--track-brand);
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: var(--white);
+  white-space: nowrap;
+}
+
+.pao-brand__sub,
+.pao-topbar__brand small,
+.pao-topbar__slogan {
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-regular);
+  letter-spacing: var(--track);
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: var(--text-4);
+  white-space: nowrap;
+}
+
+/* ---------- 04.1 · 系统状态胶囊 ---------- */
+.pao-topbar__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 11px 0 9px;
+  border: 1px solid var(--ok-26);
+  border-radius: var(--r-pill);
+  background: linear-gradient(180deg, var(--ok-06) 0%, var(--ok-02) 100%);
+  color: var(--mint-92);
+  font-size: var(--fs-small);
+  font-weight: var(--fw-regular);
+  letter-spacing: var(--track-cn);
+  line-height: 1;
+  white-space: nowrap;
+  flex: none;
+}
+
+/* 若 Lead 自己写了 .pao-dot 就用他的；没写则补一个呼吸点 */
+.pao-topbar__status:not(:has(.pao-dot))::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 3px var(--ok-10);
+  animation: pao-breathe 3.2s var(--ease-soft) infinite;
+}
+
+.pao-topbar__status .pao-dot {
+  width: 6px;
+  height: 6px;
+}
+
+.pao-topbar__status b,
+.pao-topbar__status strong {
+  font-weight: var(--fw-medium);
+  color: var(--white);
+}
+
+/* ---------- 04.2 · 右侧工具区 ---------- */
+.pao-topbar__right {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+  flex: none;
+}
+
+.pao-clock {
+  margin-right: var(--sp-3);
+  padding-right: var(--sp-3);
+  border-right: 1px solid var(--line-soft);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .06em;
+  line-height: 1;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.pao-clock__date {
+  color: var(--text-4);
+  margin-right: 8px;
+}
+
+.pao-topbar__divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 var(--sp-2);
+  background: var(--line-soft);
+  flex: none;
+}
+
+/* ==========================================================================
+   05 · 左侧竖向导航
+   ========================================================================== */
+.pao-nav {
+  position: absolute;
+  top: var(--topbar-h);
+  left: 0;
+  bottom: var(--statusbar-h);
+  z-index: var(--z-nav);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  width: var(--nav-w);
+  padding: var(--sp-3) var(--sp-2);
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-right: 1px solid var(--line-soft);
+  background: linear-gradient(180deg, var(--nav-56) 0%, var(--nav-18) 100%);
+  backdrop-filter: var(--glass-blur-soft);
+  -webkit-backdrop-filter: var(--glass-blur-soft);
+  transition: opacity var(--dur-4) var(--ease-out);
+}
+
+.pao-nav__item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: none;
+  min-height: 56px;
+  padding: 8px 4px;
+  border-radius: var(--r-m);
+  color: var(--text-3);
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+  background: transparent;
+  transition: color var(--dur-2) var(--ease-out),
+              background-color var(--dur-2) var(--ease-out);
+}
+
+/* 左侧 2px 冰蓝竖条 */
+.pao-nav__item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 2px;
+  height: 60%;
+  border-radius: 1px;
+  background: var(--grad-accent);
+  opacity: 0;
+  transform: translateY(-50%) scaleY(.35);
+  transform-origin: 50% 50%;
+  transition: opacity var(--dur-2) var(--ease-out),
+              transform var(--dur-3) var(--ease-out);
+}
+
+.pao-nav__item:hover {
+  background: var(--ice-04);
+  color: var(--text-2);
+}
+
+.pao-nav__item:active {
+  background: var(--ice-06);
+}
+
+.pao-nav__item.is-active {
+  color: var(--white);
+  background: linear-gradient(90deg, var(--cyan-10) 0%, var(--cyan-04) 46%, var(--cyan-00) 100%);
+}
+
+.pao-nav__item.is-active::before {
+  opacity: 1;
+  transform: translateY(-50%) scaleY(1);
+}
+
+.pao-nav__item.is-active svg,
+.pao-nav__item.is-active .pao-icon {
+  color: var(--cyan);
+}
+
+.pao-nav__item svg,
+.pao-nav__item .pao-icon {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  color: currentColor;
+  transition: color var(--dur-2) var(--ease-out);
+}
+
+.pao-nav__label,
+.pao-nav__item .pao-nav__zh,
+.pao-nav__item > span:not([class]) {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--track-cn);
+  line-height: 1.2;
+  color: inherit;
+}
+
+.pao-nav__sub,
+.pao-nav__item .pao-nav__en {
+  font-family: var(--font-ui);
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-regular);
+  letter-spacing: var(--track);
+  line-height: 1;
+  text-transform: uppercase;
+  color: var(--text-5);
+  transition: color var(--dur-2) var(--ease-out);
+}
+
+.pao-nav__item.is-active .pao-nav__sub,
+.pao-nav__item.is-active .pao-nav__en {
+  color: var(--ice-58);
+}
+
+.pao-nav__sep {
+  height: 1px;
+  margin: var(--sp-2) var(--sp-2);
+  flex: none;
+  background: var(--line-soft);
+}
+
+.pao-nav__foot {
+  margin-top: auto;
+  padding-top: var(--sp-2);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-cn);
+  color: var(--text-5);
+  text-align: center;
+  line-height: 1.5;
+}
+
+/* ==========================================================================
+   06 · 右侧上下文面板
+   ========================================================================== */
+.pao-panel {
+  position: absolute;
+  top: calc(var(--topbar-h) + 10px);
+  right: var(--pad-hud);
+  bottom: calc(var(--statusbar-h) + 10px);
+  z-index: var(--z-panel);
+  display: flex;
+  flex-direction: column;
+  width: var(--panel-w);
+  min-width: var(--panel-w-min);
+  max-width: var(--panel-w-max);
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-l);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--sh-panel);
+  animation: pao-panel-in var(--dur-3) var(--ease-out) both;
+}
+
+/* 顶部 1px 高光：唯一的面板光效 */
+.pao-panel::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12%;
+  right: 12%;
+  height: 1px;
+  z-index: 1;
+  background: var(--grad-hairline);
+  opacity: .9;
+  pointer-events: none;
+}
+
+.pao-panel.is-hidden,
+.pao-panel[hidden] {
+  display: none;
+}
+
+.pao-panel.is-closing {
+  pointer-events: none;
+  animation: pao-panel-out 200ms var(--ease-in) both;
+}
+
+/* ---------- 06.1 · 面板头部 ---------- */
+.pao-panel__head {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: none;
+  padding: 16px 18px 13px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.pao-panel__kicker {
+  font-family: var(--font-ui);
+  font-size: var(--fs-kicker);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--track);
+  line-height: 1.4;
+  text-transform: uppercase;
+  color: var(--text-5);
+}
+
+.pao-panel__label {
+  padding-right: 42px;
+  font-family: var(--font-brand);
+  font-size: 16px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: .10em;
+  line-height: 1.25;
+  text-transform: uppercase;
+  color: var(--white);
+}
+
+.pao-panel__zh {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: var(--fw-regular);
+  letter-spacing: var(--track-cn);
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+.pao-panel__tagline {
+  margin-top: 5px;
+  font-size: var(--fs-kicker);
+  letter-spacing: var(--track);
+  line-height: 1.5;
+  text-transform: uppercase;
+  color: var(--text-4);
+}
+
+.pao-panel__tagline-zh,
+.pao-panel__taglineZh,
+.pao-panel__zh-tagline {
+  font-family: var(--font-ui);
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-cn);
+  line-height: 1.6;
+  text-transform: none;
+  color: var(--text-3);
+}
+
+.pao-panel__close {
+  position: absolute;
+  top: 13px;
+  right: 13px;
+  z-index: 2;
+}
+
+/* ---------- 06.2 · 面板主体（唯一滚动容器） ---------- */
+.pao-panel__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 14px 16px 18px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.pao-panel__body > :first-child {
+  margin-top: 0;
+}
+
+.pao-panel__body > :last-child {
+  margin-bottom: 0;
+}
+
+/* ---------- 06.3 · 面板底部（诚实声明徽标） ---------- */
+.pao-panel__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  min-height: 34px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--line-soft);
+  background: var(--wash-30);
+  font-family: var(--font-ui);
+  font-size: var(--fs-kicker);
+  font-weight: var(--fw-regular);
+  letter-spacing: var(--track-cn);
+  line-height: 1.5;
+  color: var(--text-4);
+}
+
+.pao-panel__foot b,
+.pao-panel__foot strong {
+  font-weight: var(--fw-medium);
+  color: var(--text-3);
+}
+
+/* ---------- 06.4 · 宽度拖拽手柄（360–560px） ---------- */
+.pao-panel__resize,
+.pao-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 3;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.pao-panel__resize::after,
+.pao-resizer::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  width: 1px;
+  height: 36px;
+  border-radius: 1px;
+  background: var(--line);
+  transform: translateY(-50%);
+  transition: height var(--dur-3) var(--ease-out),
+              background-color var(--dur-2) var(--ease-out);
+}
+
+.pao-panel__resize:hover::after,
+.pao-panel__resize.is-dragging::after,
+.pao-resizer:hover::after {
+  height: 66px;
+  background: var(--ice-40);
+}
+
+.pao-app.is-panel-resizing,
+.pao-app.is-panel-resizing * {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.pao-app.is-panel-resizing .pao-panel {
+  animation: none;
+  transition: none;
+}
+
+/* ==========================================================================
+   07 · 底部状态条
+   ========================================================================== */
+.pao-statusbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-statusbar);
+  display: flex;
+  align-items: center;
+  gap: 0;
+  height: var(--statusbar-h);
+  padding: 0 var(--pad-hud);
+  border-top: 1px solid var(--line-soft);
+  background: var(--grad-statusbar);
+  backdrop-filter: var(--glass-blur-soft);
+  -webkit-backdrop-filter: var(--glass-blur-soft);
+  transition: opacity var(--dur-4) var(--ease-out);
+}
+
+.pao-stat {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 var(--sp-4);
+  overflow: hidden;
+}
+
+.pao-stat:first-child {
+  padding-left: 0;
+}
+
+.pao-stat + .pao-stat {
+  border-left: 1px solid var(--line-soft);
+}
+
+.pao-stat__k {
+  flex: none;
+  font-family: var(--font-ui);
+  font-size: var(--fs-kicker);
+  font-weight: var(--fw-regular);
+  letter-spacing: var(--track-cn);
+  line-height: 1;
+  color: var(--text-5);
+  white-space: nowrap;
+}
+
+.pao-stat__v {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  line-height: 1;
+  color: var(--text-2);
+}
+
+.pao-stat__dot {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-5);
+}
+
+.pao-stat--ok .pao-stat__v { color: var(--ok); }
+.pao-stat--ok .pao-stat__dot { background: var(--ok); }
+
+.pao-stat--warn .pao-stat__v { color: var(--warn); }
+.pao-stat--warn .pao-stat__dot { background: var(--warn); }
+
+.pao-stat--crit .pao-stat__v { color: var(--crit); }
+.pao-stat--crit .pao-stat__dot { background: var(--crit); }
+
+.pao-stat__sep {
+  width: 1px;
+  height: 14px;
+  flex: none;
+  background: var(--line-soft);
+}
+
+/* ==========================================================================
+   08 · 引导模式舞台条
+   默认不可见；给 .pao-guided 加 .is-open / .is-active 才出现。
+   ========================================================================== */
+.pao-guided {
+  position: absolute;
+  left: calc(var(--nav-w) + var(--pad-hud) + 8px);
+  right: calc(var(--panel-w) + var(--pad-hud) + 20px);
+  bottom: calc(var(--statusbar-h) + 14px);
+  z-index: var(--z-guided);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  max-width: var(--guided-w);
+  padding: 10px 12px 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-l);
+  background: var(--glass-2);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--sh-2);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity var(--dur-3) var(--ease-out),
+              visibility var(--dur-3) var(--ease-out);
+}
+
+.pao-guided.is-open,
+.pao-guided.is-active {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.pao-guided[hidden] {
+  display: none;
+}
+
+.pao-guided__progress {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: none;
+}
+
+.pao-guided__count {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.pao-guided__count b {
+  color: var(--ice);
+  font-weight: var(--fw-medium);
+}
+
+.pao-guided__bar {
+  position: relative;
+  width: 64px;
+  height: 2px;
+  flex: none;
+  border-radius: var(--r-pill);
+  background: var(--ice-12);
+  overflow: hidden;
+}
+
+.pao-guided__fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--grad-accent-x);
+  transform-origin: 0 50%;
+  transition: transform var(--dur-4) var(--ease-out);
+}
+
+.pao-guided__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pao-guided__kicker {
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--text-5);
+  line-height: 1.3;
+}
+
+.pao-guided__title {
+  font-size: 12.5px;
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--track-cn);
+  color: var(--text-1);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pao-guided__title small {
+  margin-left: 6px;
+  font-size: var(--fs-kicker);
+  font-weight: var(--fw-regular);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--text-4);
+}
+
+.pao-guided__actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+}
+
+.pao-guided__step-dots {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.pao-guided__step-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--ice-18);
+}
+
+.pao-guided__step-dots i.is-done {
+  background: var(--cyan-60);
+}
+
+.pao-guided__step-dots i.is-active {
+  width: 12px;
+  border-radius: 2px;
+  background: var(--ice);
+}
+
+/* ==========================================================================
+   09 · 右下角操作提示
+   ========================================================================== */
+.pao-home-hint {
+  position: absolute;
+  right: var(--pad-hud);
+  bottom: calc(var(--statusbar-h) + 14px);
+  z-index: var(--z-home-hint);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 62%;
+  font-family: var(--font-ui);
+  font-size: var(--fs-small);
+  letter-spacing: var(--track-cn);
+  line-height: 1.5;
+  color: var(--text-4);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: .9;
+  transition: opacity var(--dur-3) var(--ease-out);
+}
+
+.pao-home-hint span + span::before {
+  content: "·";
+  margin-right: 10px;
+  color: var(--text-5);
+}
+
+.pao-home-hint kbd,
+.pao-home-hint .pao-kbd {
+  margin-right: 4px;
+}
+
+/* 面板打开时把它推到面板左侧：加 .is-shifted */
+.pao-home-hint.is-shifted {
+  right: calc(var(--panel-w) + var(--pad-hud) + 20px);
+}
+
+.pao-home-hint.is-hidden {
+  opacity: 0;
+  visibility: hidden;
+}
+
+/* ==========================================================================
+   10 · Toast（顶部居中，避开引导条与面板）
+   ========================================================================== */
+#pao-toasts,
+.pao-toasts {
+  position: absolute;
+  top: calc(var(--topbar-h) + 14px);
+  left: 50%;
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  width: max-content;
+  max-width: min(420px, 92vw);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+#pao-toasts:empty {
+  display: none;
+}
+
+.pao-toast {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2px;
+  width: 100%;
+  min-width: 240px;
+  max-width: 420px;
+  padding: 10px 14px 10px 15px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--glass-2);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--sh-2);
+  pointer-events: auto;
+  animation: pao-toast-in var(--dur-3) var(--ease-out) both;
+}
+
+.pao-toast::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--ice);
+  opacity: .65;
+}
+
+.pao-toast__title {
+  font-size: 12px;
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--track-cn);
+  line-height: 1.45;
+  color: var(--white);
+}
+
+.pao-toast__text {
+  font-size: var(--fs-small);
+  line-height: var(--lh-small);
+  letter-spacing: var(--track-cn);
+  color: var(--text-3);
+}
+
+.pao-toast__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pao-toast__close {
+  margin-left: auto;
+  flex: none;
+}
+
+.pao-toast.is-leaving {
+  animation: pao-toast-out 200ms var(--ease-in) both;
+}
+
+.pao-toast--ok::before,
+.pao-toast.is-ok::before {
+  background: var(--ok);
+}
+
+.pao-toast--warn::before,
+.pao-toast.is-warn::before {
+  background: var(--warn);
+}
+
+.pao-toast--crit::before,
+.pao-toast.is-crit::before {
+  background: var(--crit);
+}
+
+.pao-toast--info::before,
+.pao-toast.is-info::before {
+  background: var(--ice);
+}
+
+.pao-toast .pao-dot {
+  width: 5px;
+  height: 5px;
+  margin-right: 6px;
+}
+
+/* ==========================================================================
+   11 · Modal / 二次确认
+   ========================================================================== */
+#pao-modal-root {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-modal);
+  pointer-events: none;
+}
+
+#pao-modal-root:empty {
+  display: none;
+}
+
+.pao-modal,
+.pao-modal__scrim {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: grid;
+  place-items: center;
+  padding: var(--sp-6);
+  background: var(--scrim-62);
+  backdrop-filter: var(--glass-blur-soft);
+  -webkit-backdrop-filter: var(--glass-blur-soft);
+  pointer-events: auto;
+  animation: pao-fade-in var(--dur-2) var(--ease-linear) both;
+}
+
+.pao-modal__card,
+.pao-modal__panel,
+.pao-modal__dialog {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(520px, 100%);
+  max-height: calc(100vh - 96px);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-l);
+  background: var(--glass-2);
+  box-shadow: var(--sh-modal);
+  animation: pao-modal-in var(--dur-3) var(--ease-out) both;
+}
+
+.pao-modal__card::before,
+.pao-modal__panel::before,
+.pao-modal__dialog::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 14%;
+  right: 14%;
+  height: 1px;
+  background: var(--grad-hairline);
+  pointer-events: none;
+}
+
+.pao-modal__head {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: none;
+  padding: 18px 20px 12px;
+}
+
+.pao-modal__kicker {
+  font-size: var(--fs-kicker);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  line-height: 1.4;
+  color: var(--text-5);
+}
+
+.pao-modal__title {
+  padding-right: 28px;
+  font-size: var(--fs-title);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--track-cn);
+  line-height: 1.4;
+  color: var(--white);
+}
+
+.pao-modal__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px 20px 18px;
+  overflow-y: auto;
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--text-2);
+}
+
+.pao-modal__body p {
+  margin: 0 0 10px;
+}
+
+.pao-modal__body p:last-child {
+  margin-bottom: 0;
+}
+
+.pao-modal__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  flex: none;
+  padding: 13px 20px;
+  border-top: 1px solid var(--line-soft);
+  background: var(--wash-34);
+}
+
+.pao-modal__close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+}
+
+.pao-modal--danger .pao-modal__title,
+.pao-modal__card.is-danger .pao-modal__title {
+  color: var(--crit);
+}
+
+.pao-modal--danger .pao-modal__card,
+.pao-modal--danger .pao-modal__panel,
+.pao-modal__card.is-danger {
+  border-color: var(--crit-30);
+}
+
+/* ==========================================================================
+   12 · 设置抽屉
+   ========================================================================== */
+#pao-settings {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-drawer);
+  pointer-events: none;
+}
+
+#pao-settings::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--scrim-48);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-3) var(--ease-out);
+}
+
+#pao-settings.is-open,
+#pao-settings.is-active {
+  pointer-events: auto;
+}
+
+#pao-settings.is-open::before,
+#pao-settings.is-active::before {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#pao-settings[hidden] {
+  display: none;
+}
+
+.pao-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 92vw);
+  height: 100%;
+  border-left: 1px solid var(--line);
+  background: var(--glass-2);
+  backdrop-filter: var(--glass-blur-high);
+  -webkit-backdrop-filter: var(--glass-blur-high);
+  box-shadow: var(--sh-drawer);
+  pointer-events: auto;
+  transform: translateX(100%);
+}
+
+#pao-settings.is-open .pao-drawer,
+#pao-settings.is-active .pao-drawer,
+.pao-drawer.is-open {
+  transform: none;
+  animation: pao-drawer-in var(--dur-4) var(--ease-out) both;
+}
+
+.pao-drawer.is-closing {
+  animation: pao-drawer-out var(--dur-3) var(--ease-in) both;
+}
+
+.pao-drawer__head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: none;
+  height: var(--topbar-h);
+  padding: 0 var(--sp-4) 0 var(--sp-5);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.pao-drawer__title {
+  font-size: var(--fs-title);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--track-cn);
+  color: var(--white);
+}
+
+.pao-drawer__sub {
+  font-size: var(--fs-kicker);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--text-5);
+}
+
+.pao-drawer__close {
+  margin-left: auto;
+}
+
+.pao-drawer__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--sp-4) var(--sp-5) var(--sp-6);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.pao-drawer__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: none;
+  padding: 12px var(--sp-5);
+  border-top: 1px solid var(--line-soft);
+  background: var(--wash-34);
+}
+
+.pao-drawer__group {
+  margin-bottom: var(--sp-5);
+}
+
+.pao-drawer__group:last-child {
+  margin-bottom: 0;
+}
+
+.pao-drawer__group-title {
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-kicker);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--text-5);
+}
+
+/* ==========================================================================
+   13 · 全屏浮层 / 沉浸模式
+   ========================================================================== */
+.pao-fullscreen {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-hud);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-0);
+  pointer-events: auto;
+}
+
+.pao-app.is-focus .pao-topbar,
+.pao-app.is-focus .pao-nav,
+.pao-app.is-focus .pao-statusbar,
+.pao-app.is-focus .pao-home-hint {
+  opacity: .26;
+}
+
+.pao-app.is-focus .pao-topbar:hover,
+.pao-app.is-focus .pao-nav:hover,
+.pao-app.is-focus .pao-statusbar:hover {
+  opacity: 1;
+}
+
+/* ==========================================================================
+   14 · 启动层
+   ========================================================================== */
+#pao-boot,
+.pao-boot {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-boot);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-5);
+  background:
+    radial-gradient(68% 58% at 50% 46%, var(--bg-2) 0%, var(--bg-0) 72%);
+  transition: opacity var(--dur-5) var(--ease-out),
+              visibility var(--dur-5) var(--ease-out);
+}
+
+#pao-boot.is-done,
+.pao-boot.is-done {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+#pao-boot[hidden] {
+  display: none;
+}
+
+.pao-boot__mark {
+  width: 26px;
+  height: 26px;
+  transform: rotate(45deg);
+  border: 1px solid var(--ice-40);
+  border-radius: 3px;
+  background: linear-gradient(135deg, var(--cyan-26) 0%, var(--violet-14) 100%);
+  box-shadow: inset 0 0 0 5px var(--wash-90);
+}
+
+.pao-boot__title {
+  font-family: var(--font-brand);
+  font-size: 13px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: .34em;
+  text-transform: uppercase;
+  color: var(--white);
+  text-align: center;
+}
+
+.pao-boot__sub {
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-wide);
+  text-transform: uppercase;
+  color: var(--text-5);
+  text-align: center;
+}
+
+.pao-boot__bar {
+  position: relative;
+  width: 220px;
+  height: 1px;
+  overflow: hidden;
+  border-radius: var(--r-pill);
+  background: var(--ice-12);
+}
+
+.pao-boot__fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--grad-accent-x);
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+  transition: transform var(--dur-4) var(--ease-out);
+}
+
+.pao-boot__stage {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-kicker);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--text-4);
+  white-space: nowrap;
+}
+
+.pao-boot__pct {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  color: var(--ice);
+}
+
+/* ==========================================================================
+   15 · 响应式
+   ========================================================================== */
+
+/* ---------- ≤1180px：右面板 → 底部抽屉 ---------- */
+@media (max-width: 1180px) {
+  .pao-panel {
+    top: auto;
+    left: calc(var(--nav-w) + var(--pad-hud));
+    right: var(--pad-hud);
+    bottom: calc(var(--statusbar-h) + var(--pad-hud));
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    max-height: min(58vh, 560px);
+    animation: pao-sheet-in var(--dur-3) var(--ease-out) both;
+  }
+
+  .pao-panel__resize,
+  .pao-resizer {
+    display: none;
+  }
+
+  .pao-guided {
+    left: calc(var(--nav-w) + var(--pad-hud));
+    right: var(--pad-hud);
+    bottom: calc(var(--statusbar-h) + 14px);
+    max-width: none;
+  }
+
+  .pao-home-hint {
+    right: var(--pad-hud);
+    bottom: calc(var(--statusbar-h) + 16px);
+  }
+
+  .pao-home-hint.is-shifted {
+    right: var(--pad-hud);
+  }
+}
+
+/* ---------- ≤900px：左导航 → 底部横向条 ---------- */
+@media (max-width: 900px) {
+  .pao-topbar {
+    gap: var(--sp-2);
+    padding: 0 var(--pad-hud);
+  }
+
+  .pao-topbar__brand small,
+  .pao-topbar__slogan {
+    display: none;
+  }
+
+  .pao-brand__name,
+  .pao-topbar__brand b,
+  .pao-topbar__brand strong {
+    font-size: 11px;
+    letter-spacing: .22em;
+  }
+
+  .pao-topbar__status {
+    height: 22px;
+    padding: 0 8px 0 7px;
+    font-size: var(--fs-kicker);
+  }
+
+  .pao-clock {
+    display: none;
+  }
+
+  .pao-nav {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: var(--statusbar-h);
+    flex-direction: row;
+    align-items: center;
+    gap: var(--sp-1);
+    width: auto;
+    height: var(--nav-h-mobile);
+    padding: 6px var(--pad-hud);
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: none;
+    border-top: 1px solid var(--line-soft);
+    background: var(--glass-2);
+  }
+
+  .pao-nav__item {
+    width: 68px;
+    min-height: 50px;
+    padding: 5px 2px;
+    gap: 3px;
+    flex: none;
+  }
+
+  .pao-nav__item::before {
+    left: 50%;
+    top: auto;
+    bottom: 0;
+    width: 46%;
+    height: 2px;
+    transform: translateX(-50%) scaleX(.35);
+  }
+
+  .pao-nav__item.is-active::before {
+    transform: translateX(-50%) scaleX(1);
+  }
+
+  .pao-nav__item.is-active {
+    background: linear-gradient(0deg, var(--cyan-10) 0%, var(--cyan-00) 100%);
+  }
+
+  .pao-nav__label,
+  .pao-nav__item .pao-nav__zh,
+  .pao-nav__item > span:not([class]) {
+    font-size: 11px;
+  }
+
+  .pao-nav__sub,
+  .pao-nav__item .pao-nav__en {
+    font-size: 8px;
+    letter-spacing: .10em;
+  }
+
+  .pao-panel {
+    left: var(--pad-hud);
+    right: var(--pad-hud);
+    bottom: calc(var(--statusbar-h) + var(--nav-h-mobile) + 6px);
+    max-height: min(54vh, 480px);
+  }
+
+  .pao-statusbar {
+    padding: 0 var(--pad-hud);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .pao-stat {
+    flex: 0 0 auto;
+    gap: 5px;
+    padding: 0 var(--sp-3);
+  }
+
+  .pao-stat__v {
+    font-size: var(--fs-kicker);
+  }
+
+  .pao-guided {
+    left: var(--pad-hud);
+    right: var(--pad-hud);
+    bottom: calc(var(--statusbar-h) + var(--nav-h-mobile) + 8px);
+    gap: var(--sp-2);
+    padding: 8px 10px;
+  }
+
+  .pao-guided__bar {
+    width: 40px;
+  }
+
+  .pao-guided__title {
+    font-size: 12px;
+  }
+
+  .pao-home-hint {
+    display: none;
+  }
+
+  .pao-modal,
+  .pao-modal__scrim {
+    padding: var(--sp-4);
+  }
+
+  .pao-modal__card,
+  .pao-modal__panel,
+  .pao-modal__dialog {
+    max-height: calc(100vh - 64px);
+  }
+
+  .pao-toasts {
+    top: calc(var(--topbar-h) + 8px);
+    max-width: calc(100vw - 24px);
+  }
+
+  .pao-drawer {
+    width: 100%;
+  }
+}
+
+/* ---------- ≤640px：极窄屏收口 ---------- */
+@media (max-width: 640px) {
+  .pao-topbar__status {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .pao-guided__bar,
+  .pao-guided__step-dots {
+    display: none;
+  }
+
+  .pao-modal__actions {
+    flex-wrap: wrap;
+    justify-content: stretch;
+  }
+
+  .pao-modal__actions .pao-btn {
+    flex: 1 1 120px;
+  }
+}

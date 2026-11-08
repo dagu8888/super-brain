@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="pao">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="PERSONAL AI OS × SUPER-BRAIN — 个人智能宇宙。只读接入真实运行数据：智能体、任务、事件、知识、记忆与监控。">
+<title>PERSONAL AI OS — 个人智能宇宙</title>
+
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/shell.css">
+<link rel="stylesheet" href="css/panels.css">
+<link rel="stylesheet" href="css/motion.css">
+<link rel="stylesheet" href="css/lead.css">
+<link rel="stylesheet" href="css/lead-panels.css">
+<link rel="stylesheet" href="css/concierge.css">
+<link rel="stylesheet" href="css/hovercard.css">
+<link rel="stylesheet" href="css/sb.css">
+</head>
+
+<body class="pao-booting">
+
+<div id="pao-app" class="pao-app">
+
+  <!-- 三维画布 -->
+  <canvas id="pao-canvas" class="pao-scene" aria-label="个人智能宇宙三维场景"></canvas>
+
+  <!-- 空间标签（3D 投影） -->
+  <div id="pao-labels" class="pao-labels" aria-hidden="true"></div>
+
+  <!-- HUD -->
+  <div class="pao-hud">
+
+    <header id="pao-topbar" class="pao-topbar"></header>
+
+    <nav id="pao-nav" class="pao-nav" aria-label="模块导航"></nav>
+
+    <aside id="pao-panel" class="pao-panel" aria-live="polite"></aside>
+
+    <footer id="pao-statusbar" class="pao-statusbar"></footer>
+
+    <div id="pao-home-hint" class="pao-home-hint"></div>
+  </div>
+
+  <!-- 启动序列 -->
+  <div id="pao-boot" class="pao-boot">
+    <div class="pao-boot__vignette"></div>
+    <div class="pao-boot__brand">
+      <div class="pao-boot__name">PERSONAL AI OS</div>
+      <div class="pao-boot__sub">A NEW LAYER OF PERSONAL INTELLIGENCE</div>
+    </div>
+    <div class="pao-boot__stage">
+      <div class="pao-boot__stageName" id="pao-boot-stage-name">VOID</div>
+      <div class="pao-boot__stageZh" id="pao-boot-stage-zh">静默</div>
+      <div class="pao-boot__hint" id="pao-boot-hint">正在唤醒个人智能核心…</div>
+    </div>
+    <div class="pao-boot__progress"><i id="pao-boot-bar"></i></div>
+    <div class="pao-boot__online" id="pao-boot-online">
+      <div class="pao-boot__onlineTitle">SYSTEM ONLINE</div>
+      <div class="pao-boot__onlineSlogan">KNOW ME. THINK WITH ME. ACT FOR ME.</div>
+      <div class="pao-boot__onlineNote">只读接入 · 真实数据 · SSE 实时</div>
+    </div>
+    <button id="pao-boot-skip" class="pao-boot__skip" type="button">跳过启动动画</button>
+  </div>
+
+  <!-- 提示层 -->
+  <div id="pao-toasts" class="pao-toasts" aria-live="polite"></div>
+  <div id="pao-modal-root" class="pao-modal-root"></div>
+  <div id="pao-settings" class="pao-settings" aria-label="设置"></div>
+
+  <!-- 兜底 -->
+  <div id="pao-fallback" class="pao-fallback">
+    <div class="pao-fallback__card">
+      <div class="pao-fallback__title">无法启动三维场景</div>
+      <p class="pao-fallback__msg" data-msg>请检查浏览器是否启用了 WebGL。</p>
+      <p class="pao-fallback__hint">建议使用最新版 Chrome / Edge / Safari，并确认已开启硬件加速。</p>
+    </div>
+  </div>
+</div>
+
+<noscript>
+  <div class="pao-noscript">此页面需要启用 JavaScript。</div>
+</noscript>
+
+<!-- ===== 依赖（全部本地，零网络请求） ===== -->
+<script src="vendor/three.min.js"></script>
+
+<!-- ===== 核心 ===== -->
+<script src="js/core/bus.js"></script>
+<script src="js/data/mock-data.js"></script>
+<script src="js/data/elements.js"></script>
+<script src="js/data/sb-bridge.js"></script>
+<script src="js/ui/dom.js"></script>
+<script src="js/net/ws.js"></script>
+
+<script src="js/core/engine.js"></script>
+<script src="js/core/camera.js"></script>
+<script src="js/core/interaction.js"></script>
+
+<script src="js/core/scene-env.js"></script>
+<script src="js/core/scene-core.js"></script>
+<script src="js/core/scene-modules.js"></script>
+<script src="js/core/scene-memory.js"></script>
+<script src="js/core/scene-arch.js"></script>
+<script src="js/core/scene-agents.js"></script>
+<script src="js/core/scene-human.js"></script>
+<script src="js/core/scene-graph.js"></script>
+<script src="js/core/scene.js"></script>
+
+<!-- ===== 界面外壳 ===== -->
+<script src="js/ui/labels.js"></script>
+<script src="js/ui/fx.js"></script>
+<script src="js/ui/shell.js"></script>
+<script src="js/ui/hovercard.js"></script>
+
+<!-- ===== 功能面板（Super-Brain 真实数据） ===== -->
+<script src="js/ui/panels/sb.js"></script>
+
+<!-- ===== 启动 ===== -->
+<script src="js/boot.js"></script>
+<script src="js/main.js"></script>
+
+</body>
+</html>
