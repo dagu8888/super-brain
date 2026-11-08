@@ -12,3 +12,15 @@
 {"ts":"2026-11-08T09:30:02+08:00","behind":0,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":""}
 {"ts":"2026-11-08T09:40:02+08:00","behind":0,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":""}
 {"ts":"2026-11-08T09:50:04+08:00","behind":1,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":"auto_pull_ok"}
+{"ts":"2026-11-08T10:00:02+08:00","behind":0,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":"fetch失败(检查凭据)"}
+{"ts":"2026-11-08T10:10:03+08:00","behind":1,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":"auto_pull_ok"}
+{"ts":"2026-11-08T10:20:04+08:00","behind":1,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":"auto_pull_ok"}
+{"ts":"2026-11-08T10:30:02+08:00","behind":0,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":""}
+{"ts":"2026-11-08T10:40:02+08:00","behind":0,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":""}
+{"ts":"2026-11-08T10:50:04+08:00","behind":1,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":"auto_pull_ok"}
+{"ts":"2026-11-08T11:00:02+08:00","behind":0,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":"skip_locked(sync运行中)"}
+{"ts":"2026-11-08T11:10:03+08:00","behind":1,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":"auto_pull_ok"}
+{"ts":"2026-11-08T11:20:02+08:00","behind":0,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":""}
+{"ts":"2026-11-08T11:30:03+08:00","behind":0,"unpushed":1,"stale_h":0,"inbox":0,"alert":0,"note":"skip_locked(sync运行中)"}
+{"ts":"2026-11-08T11:40:03+08:00","behind":1,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":"auto_pull_ok"}
+{"ts":"2026-11-08T11:50:03+08:00","behind":1,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":"auto_pull_ok"}
