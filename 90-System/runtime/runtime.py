@@ -35,7 +35,7 @@ LLM_CONF = HERE / "llm.json"
 CATEGORIES = ["Concepts", "Decisions", "Playbooks"]
 
 HEARTBEAT_INTERVAL = 60
-SCAN_INTERVAL = 30               # Router 事件轮询
+SCAN_INTERVAL = 10               # Router 事件轮询（2026-11-08 批示#2：30→10 提速）
 LEASE_SECONDS = 120              # 租约时长
 RENEW_INTERVAL = 30              # 执行中续租间隔
 REAPER_INTERVAL = 60             # 租约回收
