@@ -56,19 +56,23 @@ def main():
     if backlog[0] > BACKLOG_N or (backlog[1] and now - backlog[1] > BACKLOG_AGE):
         alerts.append(f"C:队列积压 pending={backlog[0]} 最老{(now - (backlog[1] or now)) // 60}min")
 
-    # 4. LLM 可用性（C 级：近 10min 有 LLM 错误事件）
+    # 4. LLM 可用性（C 级：近 10min 内 ≥2 次 LLM 重试；历史故障不计）
     evf = EVENTS_DIR / f"runtime-{time.strftime('%Y-%m-%d')}.jsonl"
     llm_fail = 0
     if evf.exists():
+        import datetime
         for line in evf.read_text(encoding="utf-8", errors="replace").splitlines()[-500:]:
             try:
                 e = json.loads(line)
-                if e.get("kind") == "task_retry" and "LLM" in str(e.get("error", "")):
+                if e.get("kind") != "task_retry" or "LLM" not in str(e.get("error", "")):
+                    continue
+                ts = datetime.datetime.strptime(e["ts"], "%Y-%m-%dT%H:%M:%S%z").timestamp()
+                if now - ts < 600:
                     llm_fail += 1
             except Exception:
                 pass
     if llm_fail >= 2:
-        alerts.append(f"C:LLM 连续失败 {llm_fail} 次")
+        alerts.append(f"C:LLM 近10min失败 {llm_fail} 次")
 
     # 5. 磁盘（C 级）
     usage = shutil.disk_usage(ROOT)
