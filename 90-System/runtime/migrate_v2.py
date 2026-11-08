@@ -78,6 +78,15 @@ CREATE TABLE IF NOT EXISTS perm_audit(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ts INTEGER, agent TEXT, path TEXT, action TEXT, allowed INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS registry(
+  name TEXT PRIMARY KEY,           -- 名册条目：实例（DSH一号@主机）或角色别名
+  kind TEXT NOT NULL,              -- instance|worker|chief
+  location TEXT,                   -- 实例所在机器（实例类用）
+  agent_ref TEXT,                  -- 对应的 agents.agent_id
+  status TEXT DEFAULT 'active',    -- active|retired（下线留档，不删记录）
+  registered_at INTEGER
+);
 """
 
 # 内置角色注册（capabilities 以实际验证为准；trae-developer 未跑通探针前 verified=0）
@@ -115,6 +124,14 @@ BUILTIN_AGENTS = [
 
 CHIEF_SOURCES = ["grok", "deepseek", "maus", "dsh", "trae", "maus2", "dsh2", "muse"]
 CANONICAL_USER = "dagu8888"  # 单用户系统：大古老师
+
+# 实例名册种子（2026-11-09 任务包 T3）：实例 → 其幕僚长身份；下线改 status='retired' 留档
+REGISTRY_SEED = [
+    # (name, kind, location, agent_ref)
+    ("DSH一号@主机", "instance", "云服务器", "dsh-chief"),
+    ("DSH二号@笔记本", "instance", "笔记本", "dsh2-chief"),
+    ("Trae@笔记本", "instance", "笔记本", "trae-chief"),
+]
 
 
 def migrate(conn):
@@ -157,6 +174,12 @@ def migrate(conn):
         conn.execute(
             "INSERT OR IGNORE INTO user_identities(source,source_user,canonical_user_id) VALUES(?,?,?)",
             (src, CANONICAL_USER, CANONICAL_USER))
+
+    # 实例名册种子（幂等；worker/chief 由 agents 表自动在册，无需重复登记）
+    for name, kind, loc, ref in REGISTRY_SEED:
+        conn.execute(
+            "INSERT OR IGNORE INTO registry(name,kind,location,agent_ref,status,registered_at) "
+            "VALUES(?,?,?,?,'active',?)", (name, kind, loc, ref, now))
     conn.commit()
 
 

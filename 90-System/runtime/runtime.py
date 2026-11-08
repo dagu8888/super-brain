@@ -329,6 +329,27 @@ def enqueue_task(conn, ev, task_type, payload, priority=0):
 
 # ---------- chief 指令接口（设计书 §11.3，七接口） ----------
 
+def registry_lookup(conn, name):
+    """名册校验（2026-11-09 任务包 T3）：实例名册 registry ∪ agents 表（worker/chief 自动在册）。
+    返回 {'name','kind','agent_ref','status'} 或 None。名字不在册 → 网关当场拒绝，不许默默入队。"""
+    try:
+        r = conn.execute(
+            "SELECT name,kind,agent_ref,status FROM registry WHERE name=?", (name,)).fetchone()
+        if r:
+            return {"name": r[0], "kind": r[1], "agent_ref": r[2], "status": r[3]}
+    except sqlite3.OperationalError:               # registry 表尚未迁移时的兜底
+        pass
+    a = conn.execute("SELECT agent_id,kind,status FROM agents WHERE agent_id=?", (name,)).fetchone()
+    if a:
+        return {"name": a[0], "kind": a[1], "agent_ref": a[0], "status": a[2]}
+    return None
+
+
+def _registry_reject(name):
+    return {"ok": False, "registry_rejected": True,
+            "error": f"{name} 不在名册或已下线，已当场拒绝，未入队"}
+
+
 def chief_execute(conn, chief_id, cmd, args):
     row = conn.execute("SELECT kind,status FROM agents WHERE agent_id=?", (chief_id,)).fetchone()
     if not row or row[0] != "chief" or row[1] != "active":
@@ -339,6 +360,46 @@ def chief_execute(conn, chief_id, cmd, args):
         text = str(args.get("text", "")).strip()
         if not text:
             return {"ok": False, "error": "空指令"}
+        target = str(args.get("to", "") or "").strip()
+        if target:
+            # 点名派单：先过名册校验（不在册当场拒绝，不许默默入队）
+            entry = registry_lookup(conn, target)
+            if not entry or entry["status"] != "active":
+                return _registry_reject(target)
+            if entry["kind"] == "worker":
+                ag = conn.execute(
+                    "SELECT task_types FROM agents WHERE agent_id=? AND kind='worker' "
+                    "AND verified=1 AND status='active'", (entry["agent_ref"],)).fetchone()
+                ttypes = json.loads(ag[0] or "[]") if ag else []
+                if not ttypes:
+                    return {"ok": False, "error": f"{target} 未通过验证，按铁律不能派单"}
+                cur = conn.execute(
+                    """INSERT OR IGNORE INTO tasks
+                       (type,payload,status,priority,max_retries,canonical_user_id,created_at)
+                       VALUES(?,?,'pending',?,?,?,?)""",
+                    (ttypes[0], json.dumps({"text": text, "from": chief_id, "to": target},
+                                           ensure_ascii=False),
+                     int(args.get("priority", 0)), MAX_RETRIES, canon, int(time.time())))
+                conn.commit()
+                if not cur.rowcount:
+                    return {"ok": False, "error": "重复任务被幂等忽略"}
+                log_event("task_enqueued", type=ttypes[0], by=chief_id, to=target, task=cur.lastrowid)
+                return {"ok": True, "task_id": cur.lastrowid, "to": target, "mode": "direct",
+                        "note": f"已按名册直接落单给 {target}"}
+            # 实例/幕僚长：入入口协作池并点名（其对应身份 pull 领取）
+            cur = conn.execute(
+                """INSERT OR IGNORE INTO tasks
+                   (type,payload,status,priority,max_retries,canonical_user_id,created_at)
+                   VALUES('assist',?,'pending',?,?,?,?)""",
+                (json.dumps({"text": text, "from": chief_id, "to": target,
+                             "to_agent": entry["agent_ref"]}, ensure_ascii=False),
+                 int(args.get("priority", 0)), MAX_RETRIES, canon, int(time.time())))
+            conn.commit()
+            if not cur.rowcount:
+                return {"ok": False, "error": "重复任务被幂等忽略"}
+            log_event("assist_enqueued", by=chief_id, task=cur.lastrowid, to=target)
+            return {"ok": True, "task_id": cur.lastrowid, "to": target, "mode": "assist",
+                    "note": f"已入入口协作池并点名 {target}（{entry['agent_ref']} 可 pull 领取）"}
         if args.get("assist"):
             # 入口协作池（2026-11-08 口径）：入队后任一空闲 chief 可 pull 领取并 report 回传。
             # 不 emit manual 事件，避免 Router 再派给 worker 造成重复执行。
@@ -393,8 +454,30 @@ def chief_execute(conn, chief_id, cmd, args):
 
     if cmd == "delegate":
         tid, target = int(args["id"]), str(args["to"])
+        entry = registry_lookup(conn, target)          # 名册校验：不在册当场拒绝
+        if not entry or entry["status"] != "active":
+            return _registry_reject(target)
+        if entry["kind"] != "worker":
+            # 实例/幕僚长：转为协作池点名任务，其对应身份 pull 领取
+            row = conn.execute("SELECT payload FROM tasks WHERE id=?", (tid,)).fetchone()
+            if not row:
+                return {"ok": False, "error": "任务不存在"}
+            payload = json.loads(row[0])
+            payload.update({"to": target, "to_agent": entry["agent_ref"]})
+            cur = conn.execute(
+                "UPDATE tasks SET type='assist', status='pending', payload=?, lease_owner=NULL, "
+                "lease_expires_at=NULL, not_before=NULL, retry_count=0 "
+                "WHERE id=? AND status IN ('pending','failed','dead')",
+                (json.dumps(payload, ensure_ascii=False), tid))
+            conn.commit()
+            if not cur.rowcount:
+                return {"ok": False, "error": "任务状态不允许转交"}
+            emit_event(conn, chief_id, "task_delegated",
+                       {"task_id": tid, "to": target, "type": "assist"})
+            return {"ok": True, "task_id": tid, "to": target, "new_type": "assist",
+                    "note": f"已入协作池点名 {target}（{entry['agent_ref']} 可 pull 领取）"}
         ag = conn.execute("SELECT task_types,verified,status FROM agents WHERE agent_id=? AND kind='worker'",
-                          (target,)).fetchone()
+                          (entry["agent_ref"],)).fetchone()
         if not ag or not ag[2] == "active" or not ag[1]:
             return {"ok": False, "error": f"{target} 未通过验证或未激活，按铁律不能派单"}
         ttypes = json.loads(ag[0] or "[]")
