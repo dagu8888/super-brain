@@ -87,7 +87,7 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None)
                 self.send_header(k, v)
             self.end_headers()
             STREAM["active"] += 1
-            seen, beat, deadline = set(), 0.0, time.time() + STREAM_SECONDS
+            seen, beat, deadline = set(), time.time(), time.time() + STREAM_SECONDS
             try:
                 self.wfile.write(b": connected\n\n")
                 self.wfile.flush()
