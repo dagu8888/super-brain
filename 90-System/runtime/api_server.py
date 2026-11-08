@@ -44,7 +44,7 @@ def _make_handler(db_fn, execute_fn, log_event, tokens):
             auth = self.headers.get("Authorization", "")
             token = auth[7:] if auth.startswith("Bearer ") else ""
             chief = next((c for c, t in tokens.items()
-                          if token and hmac.compare_digest(str(t), token)), None)
+                          if token and hmac.compare_digest(str(t).encode(), token.encode())), None)
             if not chief:
                 log_event("api_auth_failed", ip=self.client_address[0])
                 return self._send(401, {"ok": False, "error": "无效口令"})
