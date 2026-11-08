@@ -47,6 +47,33 @@ def _with_progress(conn, row, now):
     else:
         row.update(progress=None, estimate_seconds=None, elapsed_seconds=None)
     return row
+
+
+def _claimable_types(conn):
+    """所有 active 执行者可认领的 task_type 并集。"""
+    out = set()
+    for (tt,) in conn.execute(
+            "SELECT task_types FROM agents WHERE kind='worker' AND status='active'"):
+        try:
+            out.update(json.loads(tt or "[]"))
+        except Exception:
+            pass
+    return out
+
+
+_AWAITING_NOTES = {
+    "fuse-review": "跳数熔断待拍板 · 挂起零消耗（不花 Token）",
+    "assist": "挂起等入口认领 · 零消耗（不花 Token）",
+}
+
+
+def _with_awaiting(conn, row):
+    """挂起零消耗标注：pending 且无执行者可认领 = 躺着等大古拍板，不花一分钱 Token。"""
+    if row.get("status") == "pending" and row.get("type") not in _claimable_types(conn):
+        row["awaiting"] = True
+        row["awaiting_note"] = _AWAITING_NOTES.get(
+            row.get("type"), "挂起待认领 · 零消耗（无对应执行者，不花 Token）")
+    return row
 _PUBLIC_FIELDS = ("event_id", "source", "type", "priority", "status", "created_at")
 
 
@@ -194,11 +221,12 @@ def handle_get(conn, raw_path):
             args.extend([kw, kw, q["q"].strip()])
         w = ("WHERE " + " AND ".join(where)) if where else ""
         rows = _rows(conn.execute(
-            f"SELECT id,type,status,priority,lease_owner,retry_count,claimed_at,created_at,done_at,"
+            f"SELECT id,event_id,type,status,priority,lease_owner,retry_count,claimed_at,"
+            f"created_at,done_at,"
             f"substr(COALESCE(result,error),1,200) AS summary FROM tasks {w} "
             f"ORDER BY id DESC LIMIT ? OFFSET ?", (*args, limit, offset)))
         for r in rows:
-            _with_progress(conn, r, now)
+            _with_awaiting(conn, _with_progress(conn, r, now))
         total = conn.execute(f"SELECT COUNT(*) FROM tasks {w}", args).fetchone()[0]
         return ok(rows, total=total, limit=limit, offset=offset)
 
@@ -213,11 +241,64 @@ def handle_get(conn, raw_path):
             d["payload"] = json.loads(d["payload"] or "{}")
         except Exception:
             pass
-        _with_progress(conn, d, now)
+        _with_awaiting(conn, _with_progress(conn, d, now))
         evs = _rows(conn.execute(
             "SELECT event_id,source,type,status,created_at FROM events WHERE parent_id=? "
             "OR event_id=? ORDER BY created_at DESC LIMIT 20", (d["event_id"], d["event_id"])))
         return ok({**d, "events": evs})
+
+    m = re.fullmatch(r"/api/round/([\w.-]+)", path)
+    if m:
+        # why 复盘视图（借鉴 Agent-Autoloop）：一轮任务为什么开始、经过几跳、谁接的活、结果如何，
+        # 一条时间线全部翻出来。向上沿 parent_id 找根，向下递归收集整条链的事件与任务。
+        eid = m.group(1)
+        if not conn.execute("SELECT 1 FROM events WHERE event_id=?", (eid,)).fetchone():
+            return 404, {"ok": False, "error": "事件不存在"}
+        chain, pid, guard_i = [], eid, 0
+        while pid and guard_i < 64:                # 向上找根（防御环）
+            r = conn.execute("SELECT event_id,parent_id FROM events WHERE event_id=?",
+                             (pid,)).fetchone()
+            if not r:
+                break
+            chain.append(r[0])
+            pid = r[1]
+            guard_i += 1
+        root = chain[-1] if chain else eid
+        ids, frontier, guard_i = [root], [root], 0
+        while frontier and guard_i < 20:           # 向下递归收集后代（防御爆链）
+            ph = ",".join("?" * len(frontier))
+            children = [r[0] for r in conn.execute(
+                f"SELECT event_id FROM events WHERE parent_id IN ({ph})", frontier)]
+            ids += children
+            frontier = children
+            guard_i += 1
+        ph = ",".join("?" * len(ids))
+        evs = _rows(conn.execute(
+            f"SELECT event_id,source,type,priority,status,parent_id,payload,created_at "
+            f"FROM events WHERE event_id IN ({ph}) ORDER BY created_at, rowid", ids))
+        tasks = _rows(conn.execute(
+            f"SELECT id,event_id,type,status,priority,lease_owner,created_at,claimed_at,done_at,"
+            f"substr(COALESCE(result,error),1,200) AS summary FROM tasks "
+            f"WHERE event_id IN ({ph}) ORDER BY created_at, id", ids))
+        timeline = []
+        for e in evs:
+            hop = None
+            try:
+                hop = json.loads(e.get("payload") or "{}").get("_hop")
+            except Exception:
+                pass
+            timeline.append({"kind": "event", "ts": e["created_at"], "event_id": e["event_id"],
+                             "source": e["source"], "type": e["type"], "status": e["status"],
+                             "priority": e["priority"], "hop": hop, "parent_id": e["parent_id"]})
+        for t_ in tasks:
+            timeline.append({"kind": "task", "ts": t_["created_at"], "task_id": t_["id"],
+                             "event_id": t_["event_id"], "type": t_["type"], "status": t_["status"],
+                             "priority": t_["priority"], "lease_owner": t_["lease_owner"],
+                             "claimed_at": t_["claimed_at"], "done_at": t_["done_at"],
+                             "summary": t_["summary"]})
+        timeline.sort(key=lambda x: (x["ts"], 0 if x["kind"] == "event" else 1))
+        return ok({"root": root, "focus": eid, "chain_events": len(ids),
+                   "chain_tasks": len(tasks), "timeline": timeline})
 
     if path == "/api/relations":
         # 依据一：真实历史派发记录（events.source → tasks.lease_owner），有据可查
