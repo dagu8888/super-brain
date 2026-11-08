@@ -66,3 +66,6 @@
 {"ts":"2026-11-08T18:30:02+08:00","behind":0,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":"skip_locked(sync运行中)"}
 {"ts":"2026-11-08T18:40:02+08:00","behind":0,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":""}
 {"ts":"2026-11-08T18:50:02+08:00","behind":0,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":""}
+{"ts":"2026-11-08T19:00:02+08:00","behind":0,"unpushed":1,"stale_h":0,"inbox":0,"alert":0,"note":"skip_locked(sync运行中)"}
+{"ts":"2026-11-08T19:10:03+08:00","behind":0,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":""}
+{"ts":"2026-11-08T19:20:02+08:00","behind":0,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":""}
