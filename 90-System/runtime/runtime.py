@@ -697,7 +697,7 @@ TRIAGE_PROMPT = """你是知识库整理员。用户给你一篇收集箱笔记�
  "title":"简洁标题（可含中文，不要扩展名）",
  "summary":"一句话摘要（30字内）",
  "tags":["标签1","标签2"],
- "content":"整理后的 Markdown 正文：保留全部原始信息，理顺结构，去除口语冗余"}"""
+ "content":"整理后的 Markdown 正文：保留关键信息与原有结构，去除口语冗余；控制在 3000 字以内，原文过长时按主题合并要点，不要逐句照抄"}"""
 
 
 def _frontmatter(info, source, version=1):
@@ -717,9 +717,10 @@ def handle_inbox_triage(payload, ctx):
         if not text:
             return "跳过：负载既无 path 也无 text"
         h = hashlib.sha1(text.encode("utf-8")).hexdigest()[:10]
-        target = INBOX / f"inbox-{h}.md"
+        # 落 .staging 子目录：inbox_adapter 只扫 *.md 不递归，避免同一个文本被重复入队
+        target = INBOX / ".staging" / f"inbox-{h}.md"
         if not target.exists():
-            INBOX.mkdir(exist_ok=True)
+            target.parent.mkdir(parents=True, exist_ok=True)
             ctx.guard.write_text(target, text if text.endswith("\n") else text + "\n")
         log_event("inbox_materialized", path=str(target.relative_to(ROOT)), chars=len(text))
         payload = {**payload, "path": str(target.relative_to(ROOT))}
@@ -730,8 +731,13 @@ def handle_inbox_triage(payload, ctx):
     ctx.guard.require_llm()
     if not ctx.llm or not ctx.llm.get("api_key"):
         return f"未配置 LLM，仅登记：{path_rel}（文件保持原位）"
-    raw = call_llm(ctx.llm, TRIAGE_PROMPT, src.read_text(encoding="utf-8", errors="replace"))
-    info = parse_json(raw)
+    raw = call_llm(ctx.llm, TRIAGE_PROMPT, src.read_text(encoding="utf-8", errors="replace"),
+                   max_tokens=8000)
+    try:
+        info = parse_json(raw)
+    except Exception as e:                       # 输出被截断/夹带杂质 → 重试而非直接死信
+        log_event("triage_json_failed", path=path_rel, chars=len(raw or ""), error=str(e)[:120])
+        raise RetryableError(f"模型输出 JSON 不完整：{e}")
     info["category"] = info.get("category") if info.get("category") in CATEGORIES else "Concepts"
     title = re.sub(r'[\\/:*?"<>|\s]+', "-", (info.get("title") or src.stem).strip())[:60].strip("-") or src.stem
     # 同源幂等：已归档过同 source → 更新 version 而非新建
