@@ -531,6 +531,121 @@
     onExit: function () { unsub('trust'); }
   };
 
+  /* ======================= 图谱（真实关系表） ======================= */
+  PAO.panels.graph = {
+    id: 'graph', kicker: 'KNOWLEDGE GRAPH', label: 'RELATION GRAPH', zh: '图谱 · 真实关系',
+    tagline: 'EVERY LINK, FROM THE DATABASE.', taglineZh: '每条关系，都来自关系表。',
+    badge: 'relations + knowledge',
+    render: function (root, ctx) {
+      var d = PAO.SB ? PAO.SB.data : {};
+      var rel = d.relations || [];
+      var kn = d.knowledge || [];
+      var kinds = {};
+      rel.forEach(function (r) { var k = r.rel || r.type || r.relation || '未分类'; kinds[k] = (kinds[k] || 0) + 1; });
+      var knKinds = {};
+      kn.forEach(function (k) { var t = k.kind || k.type || '未分类'; knKinds[t] = (knKinds[t] || 0) + 1; });
+
+      D.appendAll(root, [
+        section('概览', 'relations 表', el('div', { className: 'sb-grid sb-grid--3' }, [
+          metric('关系总数', rel.length, '最近 300 条', rel.length ? 'ok' : ''),
+          metric('知识条目', kn.length, 'knowledge 表'),
+          metric('关系类型', Object.keys(kinds).length, 'rel 字段')
+        ])),
+        section('知识分布', Object.keys(knKinds).length + ' 类', Object.keys(knKinds).length
+          ? el('div', { className: 'sb-chips' }, Object.keys(knKinds).slice(0, 10).map(function (k) {
+              return chip(k + ' ' + knKinds[k], 'muted');
+            }))
+          : empty()),
+        section('关系列表', rel.length + ' 条', rel.length
+          ? el('div', { className: 'sb-list' }, rel.slice(0, 80).map(function (r) {
+              var a = r.from || r.source || r.src || '?';
+              var b = r.to || r.target || r.dst || '?';
+              return row(a + ' → ' + b, (r.rel || r.type || '关系') + (r.note ? ' · ' + r.note : ''),
+                chip(String(r.rel || r.type || 'rel'), 'cyan'));
+            }))
+          : empty())
+      ]);
+    },
+    onEnter: function (ctx) { live(ctx, 'graph'); },
+    onExit: function () { unsub('graph'); }
+  };
+
+  /* ======================= 架构（真实运行结构） ======================= */
+  PAO.panels.architecture = {
+    id: 'architecture', kicker: 'ARCHITECTURE', label: 'RUNTIME ARCHITECTURE', zh: '架构 · 三层运行结构',
+    tagline: 'ONE STAFF. SEVEN ENTRIES. EXECUTORS.', taglineZh: '一位幕僚长，七个入口，常驻执行者。',
+    badge: 'agents + tasks',
+    render: function (root, ctx) {
+      var d = PAO.SB ? PAO.SB.data : {};
+      var ov = d.overview || {};
+      var model = PAO.SB ? PAO.SB.agentModel() : [];
+      var hub = model.filter(function (m) { return m.id === 'trae-chief'; });
+      var chiefs = model.filter(function (m) { return m.kind === 'chief' && m.id !== 'trae-chief'; });
+      var workers = model.filter(function (m) { return m.kind !== 'chief'; });
+
+      D.appendAll(root, [
+        section('三层结构', '真实 agents 表', el('div', { className: 'sb-grid sb-grid--3' }, [
+          metric('幕僚长', hub.length ? 'TRAE' : '未接入', '调度中枢', hub.length ? 'cyan' : 'warn'),
+          metric('指挥入口', chiefs.length, '固定结构'),
+          metric('执行者', workers.length, '常驻线程')
+        ])),
+        section('运行时', '来自 overview', el('div', { className: 'sb-grid' }, [
+          metric('在线智能体', (ov.agents_online || 0) + ' / ' + (ov.agents_total || 0), '心跳汇总', (ov.agents_online === ov.agents_total && ov.agents_total) ? 'ok' : ''),
+          metric('工作中', ov.agents_working || 0, '当前租约'),
+          metric('任务总量', d.totalTasks || 0, 'tasks 表'),
+          metric('今日事件', ov.events_today || 0, 'events 表'),
+          metric('会话线程', (d.sessions || []).length, 'memory 接口'),
+          metric('待批示', ov.pending_decisions || 0, 'pipeline')
+        ])),
+        section('链路', '同源只读接入', el('div', { className: 'sb-list' }, [
+          row('浏览器 → /api/*', 'GET 只读接口 · Bearer 口令 · 不写库', chip(PAO.SB.state === 'online' ? '在线' : '离线', PAO.SB.state === 'online' ? 'ok' : 'crit')),
+          row('浏览器 → /api/stream', 'SSE 实时推送 · 断线自动降级为轮询', chip(PAO.SB.statusText(), PAO.SB.state === 'online' ? 'cyan' : 'muted')),
+          row('agent → 任务 → 事件', '执行者租约任务，结果写回 events', chip('真实数据', 'ok'))
+        ]))
+      ]);
+    },
+    onEnter: function (ctx) { live(ctx, 'architecture'); },
+    onExit: function () { unsub('architecture'); }
+  };
+
+  /* ======================= 进化（真实样本，不估算） ======================= */
+  PAO.panels.evolve = {
+    id: 'evolve', kicker: 'EVOLVE', label: 'SELF-LEARNING', zh: '进化 · 样本与收敛',
+    tagline: 'LEARN FROM HISTORY. CAP AT 95%.', taglineZh: '从历史中学习，最高只报 95%。',
+    badge: 'tasks 历史样本',
+    render: function (root, ctx) {
+      var d = PAO.SB ? PAO.SB.data : {};
+      var ov = d.overview || {};
+      var tasks = d.tasks || [];
+      var sampled = tasks.filter(function (x) { return x.estimate_samples > 0; });
+      var samples = 0;
+      sampled.forEach(function (x) { samples += x.estimate_samples; });
+
+      D.appendAll(root, [
+        section('学习样本', '来自 tasks.estimate_samples', el('div', { className: 'sb-grid sb-grid--3' }, [
+          metric('有历史样本任务', sampled.length, '可自学习', sampled.length ? 'ok' : ''),
+          metric('样本总量', samples || '暂无数据', '历史同类型耗时'),
+          metric('进度封顶', '95%', '不会显示 100% 假完成')
+        ])),
+        section('收敛依据', '真实执行记录', el('div', { className: 'sb-grid' }, [
+          metric('累计完成', ((ov.tasks || {}).done) || 0, 'done'),
+          metric('失败 / 死信', ((ov.tasks || {}).failed) || 0, 'failed + dead', ((ov.tasks || {}).failed) ? 'crit' : ''),
+          metric('今日事件', ov.events_today || 0, 'events 表'),
+          metric('当前并发', ov.tasks_running || 0, 'doing'),
+          metric('在线智能体', (ov.agents_online || 0) + ' / ' + (ov.agents_total || 0), '实时心跳'),
+          metric('待批示', ov.pending_decisions || 0, '需人工确认')
+        ])),
+        section('口径', '', el('div', { className: 'sb-list' }, [
+          row('进度估算', '仅使用同类型任务的历史中位数；无样本时显示「暂无数据」，不套默认值。', chip('真实', 'ok')),
+          row('上限保护', '任何任务进度最高 95%，完成以 tasks 表 done 为准。', chip('约束', 'warn')),
+          row('高风险动作', '必须人工确认，并写入审计记录；口令永不显示、不落盘。', chip('审计', 'cyan'))
+        ]))
+      ]);
+    },
+    onEnter: function (ctx) { live(ctx, 'evolve'); },
+    onExit: function () { unsub('evolve'); }
+  };
+
   /* ======================= 口令闸门（不显示、不落盘） ======================= */
   PAO.ui = PAO.ui || {};
   PAO.ui.openSuperBrainGate = function () {

@@ -8,11 +8,14 @@
     { id: 'home', zh: '总览', en: 'HOME', icon: 'home' },
     { id: 'workspace', zh: '协作', en: 'AGENTS', icon: 'agent' },
     { id: 'memory', zh: '记忆', en: 'MEMORY', icon: 'memory' },
-    { id: 'cognitive', zh: '知识', en: 'KNOWLEDGE', icon: 'cognition' },
+    { id: 'cognitive', zh: '认知', en: 'KNOWLEDGE', icon: 'cognition' },
     { id: 'agent', zh: '智能体', en: 'AGENTS', icon: 'agent' },
     { id: 'data', zh: '任务', en: 'TASKS', icon: 'data' },
     { id: 'model', zh: '事件', en: 'EVENTS', icon: 'model' },
-    { id: 'trust', zh: '监控', en: 'MONITOR', icon: 'trust' }
+    { id: 'trust', zh: '监控', en: 'MONITOR', icon: 'trust' },
+    { id: 'architecture', zh: '架构', en: 'ARCHITECTURE', icon: 'architecture' },
+    { id: 'graph', zh: '图谱', en: 'GRAPH', icon: 'route' },
+    { id: 'evolve', zh: '进化', en: 'EVOLVE', icon: 'sync' }
   ];
 
   var D = PAO.dom;
@@ -226,6 +229,10 @@
       ui._refreshStats();
       clearInterval(ui._statTimer);
       ui._statTimer = setInterval(ui._refreshStats, 6000);
+      if (PAO.bus) {
+        PAO.bus.on('sb:state', ui._refreshStats);
+        PAO.bus.on('sb:data', ui._refreshStats);
+      }
     },
 
     _refreshStats: function () {
@@ -490,10 +497,10 @@
         return;
       }
       if (id === 'workspace') {
-        if (PAO.scene.mode !== 'universe') PAO.scene.setMode('universe');
-        ui.openPanel(id);
+        ui.closePanel();
         ui._setNavActive(id);
-        PAO.bus.set({ activeModule: null });
+        PAO.scene.setMode('workspace');
+        PAO.bus.set({ activeModule: null, mode: 'workspace' });
         return;
       }
 
@@ -501,7 +508,7 @@
 
       if (id === 'graph') {
         ui._setNavActive('graph');
-        PAO.scene.setMode('graph');
+        if (PAO.scene.mode !== 'universe') PAO.scene.setMode('universe');
         PAO.bus.set({ activeModule: null, mode: 'graph' });
         return;
       }

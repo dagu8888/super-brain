@@ -207,17 +207,17 @@
     /* ---------------- 4.2 三层布局：幕僚长居顶，入口一排，执行者一排（面向镜头） ---------------- */
     function place(node, i) {
       if (node.isHub) {
-        node.group.position.set(0, HUB_Y, 0);
+        node.group.position.set(0, 4.4, 0);
         node._spawnAt = 0;
         return;
       }
       if (node.kind === 'chief') {
-        node.group.position.set((i - 2.5) * 3.4, 0.8, (i % 2 ? 0.7 : -0.7));
-        node._angle = (i - 2.5) * 0.2;
+        node.group.position.set((i - 3) * 2.55, 0.9, 0);
+        node._angle = (i - 3) * 0.2;
         node._spawnAt = 0.4 + (i + 1) * 0.05;
         return;
       }
-      node.group.position.set((i - 3) * 2.5, -3.2, (i % 2 ? 0.7 : -0.7));
+      node.group.position.set((i - 3) * 2.55, -3.3, 0);
       node._angle = (i - 3) * 0.2;
       node._spawnAt = 0.62 + (i + 1) * 0.035;
     }
@@ -237,6 +237,17 @@
       place(nodes[i], nodes[i].isHub ? -1 : (nodes[i].kind === 'chief' ? chiefI++ : workerI++));
     }
 
+    /* 三层连线关系：执行者挂到对应入口，入口挂到幕僚长 */
+    var chiefList = [], workerList = [];
+    for (i = 0; i < nodes.length; i++) {
+      if (nodes[i].isHub) continue;
+      (nodes[i].kind === 'chief' ? chiefList : workerList).push(nodes[i]);
+    }
+    for (i = 0; i < chiefList.length; i++) { chiefList[i]._parent = hub; }
+    for (i = 0; i < workerList.length; i++) {
+      workerList[i]._parent = chiefList[i % (chiefList.length || 1)] || hub;
+    }
+
     /* ---------------- 4.3 连线：全部 tube 合并为 1 个网格 ----------------
      * 9 条 QuadraticBezierCurve3 + TubeGeometry(curve,24,0.006,3) 手动合并成
      * 单一 BufferGeometry，用顶点色承载「每条线自己的状态色 × 连线强度」。
@@ -250,7 +261,7 @@
       for (j = 0; j < nodes.length; j++) {
         var n = nodes[j];
         if (n.isHub) { n.curve = null; n._vStart = 0; n._vCount = 0; continue; }
-        var from = n.group.position, to = hub.group.position;
+        var from = n.group.position, to = (n._parent && n._parent.group ? n._parent.group.position : hub.group.position);
         // 中间控制点抬高 1.2，形成柔和拱形
         n.curve = new THREE.QuadraticBezierCurve3(
           from.clone(),
