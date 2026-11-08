@@ -13,14 +13,21 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import console_api
+
 HERE = Path(__file__).parent
 CONF = HERE / "api_tokens.json"
 MAX_BODY = 64 * 1024                      # 请求体上限 64KB
+CORS = (("Access-Control-Allow-Origin", "*"),
+        ("Access-Control-Allow-Headers", "Authorization, Content-Type"),
+        ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"))
 
 
-def _make_handler(db_fn, execute_fn, log_event, tokens):
+def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None):
+    viewers = viewers or {}
+
     class Handler(BaseHTTPRequestHandler):
-        server_version = "SuperBrainAPI/1.0"
+        server_version = "SuperBrainAPI/1.1"
 
         def log_message(self, *a):          # 默认访问日志静默（调用留痕走 50-Events）
             pass
@@ -30,12 +37,39 @@ def _make_handler(db_fn, execute_fn, log_event, tokens):
             self.send_response(code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            for k, v in CORS:
+                self.send_header(k, v)
             self.end_headers()
             self.wfile.write(body)
 
+        def do_OPTIONS(self):               # CORS 预检（控制台从本地文件/其他端口访问）
+            self.send_response(204)
+            for k, v in CORS:
+                self.send_header(k, v)
+            self.send_header("Access-Control-Max-Age", "600")
+            self.end_headers()
+
+        def _authed(self, allowed):
+            auth = self.headers.get("Authorization", "")
+            token = auth[7:] if auth.startswith("Bearer ") else ""
+            return bool(token) and any(
+                t and hmac.compare_digest(str(t).encode(), token.encode()) for t in allowed)
+
         def do_GET(self):
-            if self.path == "/healthz":     # 免鉴权探活
+            if self.path.startswith("/healthz"):        # 免鉴权探活
                 return self._send(200, {"ok": True, "service": "super-brain-api"})
+            if self.path.startswith("/api/"):           # 只读控制台接口（viewers 或 chief 口令）
+                if not self._authed(list(tokens.values()) + list(viewers.values())):
+                    log_event("api_auth_failed", ip=self.client_address[0], path=self.path[:80])
+                    return self._send(401, {"ok": False, "error": "无效口令"})
+                conn = db_fn()
+                try:
+                    code, obj = console_api.handle_get(conn, self.path)
+                except Exception as e:
+                    code, obj = 500, {"ok": False, "error": f"内部错误: {type(e).__name__}: {e}"[:200]}
+                finally:
+                    conn.close()
+                return self._send(code, obj)
             self._send(404, {"ok": False, "error": "not found"})
 
         def do_POST(self):
@@ -78,13 +112,14 @@ def maybe_start(stop, log_event, db_fn, execute_fn):
     except Exception:
         log_event("api_disabled", note="api_tokens.json 缺失或无效，仅 CLI 入口可用")
         return None
+    viewers = conf.get("viewers") or {}
     bind, port = str(conf.get("bind", "127.0.0.1")), int(conf.get("port", 18765))
-    srv = ThreadingHTTPServer((bind, port), _make_handler(db_fn, execute_fn, log_event, tokens))
+    srv = ThreadingHTTPServer((bind, port), _make_handler(db_fn, execute_fn, log_event, tokens, viewers))
     srv.daemon_threads = True
     srv.timeout = 2                         # handle_request 轮询间隔，便于响应 stop
 
     def _serve():
-        log_event("api_started", bind=bind, port=port, chiefs=sorted(tokens))
+        log_event("api_started", bind=bind, port=port, chiefs=sorted(tokens), viewers=sorted(viewers))
         while not stop.is_set():
             srv.handle_request()
 
