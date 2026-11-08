@@ -1,0 +1,11 @@
+{"ts": "2026-11-08T10:40:01+0800", "kind": "health_check", "alerts": [], "actions": []}
+{"ts": "2026-11-08T10:42:26+0800", "kind": "health_check", "alerts": [], "actions": []}
+{"ts": "2026-11-08T10:47:07+0800", "kind": "health_check", "alerts": ["C:LLM 连续失败 2 次"], "actions": []}
+{"ts": "2026-11-08T10:50:02+0800", "kind": "health_check", "alerts": ["C:LLM 连续失败 2 次"], "actions": []}
+{"ts": "2026-11-08T10:50:33+0800", "kind": "health_check", "alerts": ["C:LLM 连续失败 2 次"], "actions": []}
+{"ts": "2026-11-08T10:57:22+0800", "kind": "health_check", "alerts": ["C:LLM 近10min失败 3 次"], "actions": []}
+{"ts": "2026-11-08T11:00:01+0800", "kind": "health_check", "alerts": ["C:LLM 近10min失败 3 次"], "actions": []}
+{"ts": "2026-11-08T11:02:46+0800", "kind": "health_check", "alerts": ["C:LLM 近10min失败 2 次"], "actions": []}
+{"ts": "2026-11-08T11:10:01+0800", "kind": "health_check", "alerts": [], "actions": []}
+{"ts": "2026-11-08T11:20:02+0800", "kind": "health_check", "alerts": [], "actions": []}
+{"ts": "2026-11-08T11:30:02+0800", "kind": "health_check", "alerts": [], "actions": []}
