@@ -140,10 +140,10 @@ function renderCommand(host) {
   host.innerHTML = `
   <section class="view" aria-label="指挥中心">
     <div class="pt-metrics">
-      ${stat("指挥入口", m.chiefs, "7 席在线")}
-      ${stat("执行 Agent", m.workers, "7 席就绪")}
-      ${stat("执行中任务", m.tasksRunning, "2 个协作链路")}
-      ${stat("待处理", m.tasksPending, "无积压")}
+      ${stat("指挥入口", m.chiefs, "按需调用")}
+      ${stat("执行 Agent", m.workers, "常驻就绪")}
+      ${stat("执行中任务", m.tasksRunning, m.tasksRunning ? "见任务中心" : "当前无执行")}
+      ${stat("待处理", m.tasksPending, m.tasksPending ? "等待领取" : "无积压")}
       ${stat("今日事件", m.eventsToday, "实时流入")}
     </div>
 
@@ -218,8 +218,8 @@ function renderNetwork() {
       <title>${DEMO.collabTypeMeta[e.type]} · ${e.summary} · ${e.time}</title>
       <line x1="${f.x}" y1="${f.y}" x2="${t.x}" y2="${t.y}" stroke="transparent" stroke-width="14"/>
       <line class="pt-edge-line" x1="${f.x}" y1="${f.y}" x2="${t.x}" y2="${t.y}"
-            stroke="var(--sb-primary)" stroke-width="${active ? 2.5 : 1.5}"
-            opacity="${active ? 0.9 : 0.4}" ${active ? "" : 'stroke-dasharray="5 6"'}/>
+            stroke="var(--sb-primary)" stroke-width="${active ? 2.5 : 1.2}"
+            opacity="${active ? 0.9 : 0.22}"/>
       ${active ? `<circle r="3.5" fill="var(--sb-primary)">
         <animateMotion dur="1.8s" repeatCount="indefinite" path="M ${f.x} ${f.y} L ${t.x} ${t.y}"/>
       </circle>` : ""}`;
@@ -257,7 +257,8 @@ function renderNetwork() {
 
   // 平移 / 缩放
   const net = $("#net");
-  fitNet();
+  if (!state.net.inited) { fitNet(); state.net.inited = true; }   // 定时刷新时保留用户视角
+  else applyNet();
   net.addEventListener("wheel", e => {
     e.preventDefault();
     const r = net.getBoundingClientRect();
