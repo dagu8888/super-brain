@@ -50,7 +50,7 @@ MAX_HOP = 8                      # 跳数熔断（借鉴 IP TTL）：事件链�
 DETACH_THRESHOLD = 3000          # 指令数据分离：超过该长度的外部文本落 incoming/ 单文件
 # 内部留痕事件不参与路由、不会派活，豁免跳数熔断（豁免名单与 router 归档清单一致）
 _INTERNAL_TYPES = ("task_progress", "receipt", "chief_result", "task_delegated",
-                   "task_linked", "agent_verified")
+                   "task_linked", "agent_verified", "plan_review")
 
 stop = threading.Event()
 
@@ -415,10 +415,15 @@ def chief_execute(conn, chief_id, cmd, args):
             log_event("assist_enqueued", by=chief_id, task=cur.lastrowid)
             return {"ok": True, "task_id": cur.lastrowid, "mode": "assist",
                     "note": "已入入口协作池，空闲入口可 pull 领取"}
-        eid = emit_event(conn, chief_id, "manual", {"text": text},
+        payload = {"text": text}
+        orch = args.get("orchestrate")          # 中台编排标记（任务包第4包）：老调用不带此字段，零感知
+        if isinstance(orch, dict):
+            payload["orchestrate"] = orch
+        eid = emit_event(conn, chief_id, "manual", payload,
                          priority=int(args.get("priority", 0)),
                          dedupe_key=args.get("dedupe_key"), source_user=chief_id)
         return {"ok": bool(eid), "event_id": eid, "canonical_user_id": canon,
+                "orchestrated": isinstance(orch, dict) or None,
                 "error": None if eid else "重复指令被幂等忽略"}
 
     if cmd == "status":
@@ -664,6 +669,27 @@ def chief_execute(conn, chief_id, cmd, args):
                 "note": "执行线程将在 30 秒内自动回收" if new_status == "disabled" else
                         "执行线程将在 30 秒内自动拉起"}
 
+    if cmd in ("plan_approve", "plan_reject"):
+        # 中台计划验收（任务包第4包）：只写验收意向经 events 账本，orchestrator_loop 消费后生效
+        plan_id = str(args.get("plan_id", "")).strip()
+        reason = str(args.get("reason", "")).strip()
+        if not plan_id:
+            return {"ok": False, "error": "缺 plan_id"}
+        if cmd == "plan_reject" and not reason:
+            return {"ok": False, "error": "plan_reject 必带 reason（返工凭据）"}
+        row = conn.execute("SELECT status FROM orch_plans WHERE plan_id=?", (plan_id,)).fetchone()
+        if not row:
+            return {"ok": False, "error": f"计划 {plan_id} 不存在"}
+        if row[0] not in ("awaiting_review", "rework"):
+            return {"ok": False, "error": f"计划当前状态 {row[0]} 不可验收"}
+        emit_event(conn, chief_id, "plan_review",
+                   {"plan_id": plan_id,
+                    "decision": "approve" if cmd == "plan_approve" else "reject",
+                    "reason": reason}, priority=1, source_user=chief_id)
+        log_event("plan_review_intent", plan=plan_id, decision=cmd, by=chief_id)
+        return {"ok": True, "plan_id": plan_id,
+                "note": "验收意向已记账，orchestrator 消费后生效（约 5 秒内）"}
+
     return {"ok": False, "error": f"未知指令 {cmd}"}
 
 
@@ -733,11 +759,12 @@ def router_loop():
         # 内部留痕事件（进度/回执/指令结果等）不参与路由，直接归档
         conn.execute(
             "UPDATE events SET status='done' WHERE status='new' AND type IN "
-            "('task_progress','receipt','chief_result','task_delegated','task_linked','agent_verified')")
+            "('task_progress','receipt','chief_result','task_delegated','task_linked','agent_verified','plan_review')")
         conn.commit()
         rows = conn.execute(
             "SELECT event_id,source,type,payload,priority,canonical_user_id FROM events "
             "WHERE status='new' AND type!='chief_cmd' "
+            "AND json_extract(payload,'$.orchestrate') IS NULL "   # 编排事件归 orchestrator_loop 截获
             "ORDER BY priority DESC, created_at LIMIT 10").fetchall()
         for eid, source, etype, payload, prio, canon in rows:
             ev = {"event_id": eid, "source": source, "type": etype,
@@ -1233,7 +1260,8 @@ def main():
         t.start()
         threads[wid] = t
 
-    targets = {"router": router_loop, "reaper": reaper_loop}
+    from orchestrator import orchestrator_loop   # 中台引擎（任务包第4包）；延迟导入避免循环依赖
+    targets = {"router": router_loop, "reaper": reaper_loop, "orchestrator": orchestrator_loop}
     for n, f in targets.items():
         t = threading.Thread(target=guard_run, args=(f, n), name=n, daemon=True)
         t.start()
