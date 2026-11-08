@@ -11,15 +11,47 @@
   const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
   const rgba = (c, a) => `rgba(${(c >> 16) & 255},${(c >> 8) & 255},${c & 255},${a})`;
 
+  const STAFF_ID = "trae-chief";          // 幕僚长（顶层）
+  const HUB_ID = "__dispatch__";          // 任务调度中枢（虚拟节点，数据来自 overview）
+  const isHub = a => !!a && a.id === HUB_ID;
+  const isStaff = a => !!a && a.id === STAFF_ID;
+  const accessText = a => (isHub(a) ? "中枢" : (a.everConnected === false ? "未接入" : "已接入"));
+  const onlineText = a => {
+    if (isHub(a)) return "在线";
+    if (a.kind === "chief") return a.status === "offline" ? "久未使用" : "在线";
+    return a.status === "offline" ? "离线" : "在线";
+  };
+  const workText = a => (a.status === "working" ? (isHub(a) ? "调度中" : "工作中")
+    : (a.status === "offline" ? "离线" : "空闲"));
+  const decideText = a => ((a.pendingDecisions || 0) > 0 ? `待批示 ${a.pendingDecisions}` : "无待批示");
+  const roleText = a => (isStaff(a) ? "幕僚长" : (isHub(a) ? "派发与分诊"
+    : (a.role || (a.kind === "chief" ? "指挥入口" : "执行者"))));
+  const subText = a => [accessText(a), onlineText(a), workText(a), decideText(a)].join(" · ");
+
   const bucket = a => (a.status === "offline" ? "offline" : (a.status === "working" ? "working" : "idle"));
   const STATUS_LABEL = {
     working: "工作中", idle: "空闲", offline: "离线", collaborating: "协作中",
     waiting: "等待", completed: "已完成", error: "异常",
   };
-  const statusLabel = a => STATUS_LABEL[a.status] || a.status || "未知";
-  const colorOf = a => (a.status === "offline" ? 0x64748b
-    : a.status === "working" ? 0xfbbf24
-      : (a.kind === "chief" ? 0x8b5cf6 : 0x2dd4bf));
+  const statusLabel = a => (isHub(a) && a.status === "working" ? "调度中"
+    : (isStaff(a) ? "幕僚长" : (STATUS_LABEL[a.status] || a.status || "未知")));
+  const colorOf = a => (isStaff(a) ? 0xa78bfa
+    : isHub(a) ? 0x22d3ee
+      : a.status === "offline" ? 0x64748b
+        : a.status === "working" ? 0xfbbf24
+          : (a.kind === "chief" ? 0x8b5cf6 : 0x2dd4bf));
+
+  function hubAgent(meta) {
+    meta = meta || {};
+    const pending = meta.pending || 0, doing = meta.doing || 0, dec = meta.pendingDecisions || 0;
+    return {
+      id: HUB_ID, name: "任务调度", role: "派发与分诊", kind: "dispatch",
+      status: doing > 0 ? "working" : "idle",
+      currentTask: `待派 ${pending} · 执行中 ${doing}${dec ? ` · 待批示 ${dec}` : ""}`,
+      lastActive: "实时", everConnected: true, pendingDecisions: dec,
+      queue: { pending, doing },
+    };
+  }
 
   function glowTexture(hex, strength) {
     const S = 128, cv = document.createElement("canvas");
@@ -64,7 +96,22 @@
       g.font = "500 23px system-ui, -apple-system, 'PingFang SC', sans-serif";
       g.fillStyle = a.status === "offline" ? "rgba(148,163,184,.5)" : "rgba(255,255,255,.86)";
       const name = a.name.length > 12 ? a.name.slice(0, 12) + "…" : a.name;
-      g.fillText(name, S / 2, 208);
+      g.fillText(name, S / 2, 204);
+      g.font = "400 15px system-ui, -apple-system, 'PingFang SC', sans-serif";
+      g.fillStyle = a.status === "offline" ? "rgba(148,163,184,.34)" : "rgba(203,213,225,.62)";
+      g.fillText(subText(a), S / 2, 230);
+    }
+    if ((a.pendingDecisions || 0) > 0) {           // 关键决策待批示：红点角标
+      const n = Math.min(99, a.pendingDecisions);
+      g.beginPath();
+      g.arc(198, 46, 20, 0, Math.PI * 2);
+      g.fillStyle = "rgba(239,68,68,.95)";
+      g.fill();
+      g.fillStyle = "#fff";
+      g.font = "700 20px system-ui, sans-serif";
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      g.fillText(String(n), 198, 47);
     }
     const tex = new T.CanvasTexture(cv);
     if (T.SRGBColorSpace) tex.colorSpace = T.SRGBColorSpace;
@@ -73,7 +120,7 @@
   }
 
   function texFor(a, short) {
-    const key = `${a.status}|${a.kind}|${a.name}|${short ? 1 : 0}`;
+    const key = `${a.status}|${a.kind}|${a.name}|${short ? 1 : 0}|${subText(a)}|${a.pendingDecisions || 0}`;
     let t = TEX.get(key);
     if (!t) { t = nodeTexture(a, colorOf(a), short); TEX.set(key, t); }
     return t;
@@ -99,7 +146,7 @@
     R = null;
   }
 
-  function mount(canvas, agents, edges, handlers) {
+  function mount(canvas, agents, edges, handlers, meta) {
     if (!canvas || !agents || !agents.length) return false;
     const mobile = matchMedia("(max-width: 720px)").matches;
     const probe = document.createElement("canvas");
@@ -169,7 +216,7 @@
       dragging: false, moved: false, lastX: 0, lastY: 0, pointers: new Map(), pinch: null,
       raf: 0, last: performance.now(), active: true, w: W(), h: H(),
       mode: "overview", focusId: null, hoverId: null, lookTarget: new T.Vector3(),
-      tip: null, hud: null,
+      tip: null, hud: null, meta: meta || {},
     };
     mountOverlays(canvas);
     R.reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -177,7 +224,7 @@
     R.onKey = e => { if (e.key === "Escape" && R && R.mode === "focus") exitFocus(); };
     document.addEventListener("keydown", R.onKey);
 
-    setData(agents, edges, true);
+    setData(agents, edges, true, meta);
     bindCanvas();
     const ro = new ResizeObserver(() => {
       if (!R) return;
@@ -212,6 +259,7 @@
         <span class="sb-status h-status" data-status="idle"></span>
       </div>
       <div class="net-hud-meta h-meta"></div>
+      <div class="net-hud-badge h-badge" hidden></div>
       <div class="net-hud-task"><span class="h-task">暂无任务</span></div>
       <div class="net-hud-bar h-bar" hidden><i></i></div>
       <h4>最近任务</h4>
@@ -227,9 +275,12 @@
   }
 
   function tipHTML(a) {
+    const pending = (a.pendingDecisions || 0) > 0
+      ? `<div class="net-tip-badge">关键决策待批示 ${a.pendingDecisions} 项</div>` : "";
     return `<div class="net-tip-title"><i style="background:#${colorOf(a).toString(16).padStart(6, "0")}"></i>
       <strong>${a.name}</strong><span>${statusLabel(a)}</span></div>
-      <div class="net-tip-meta">${a.role || ""} · ${a.kind === "chief" ? "指挥入口" : "执行者"}</div>
+      <div class="net-tip-meta">${roleText(a)} · ${accessText(a)} · ${onlineText(a)} · ${workText(a)}</div>
+      ${pending}
       <div class="net-tip-task">${a.currentTask || "当前无任务"}</div>
       <div class="net-tip-hint">最近活动：${a.lastActive || "—"} · 点击进入场景</div>`;
   }
@@ -260,7 +311,13 @@
     st.textContent = statusLabel(agent);
     st.dataset.status = agent.status;
     hud.querySelector(".h-meta").textContent =
-      `${agent.role || ""} · ${agent.kind === "chief" ? "指挥入口" : "执行者"} · 最近活动 ${agent.lastActive || "—"}`;
+      `${roleText(agent)} · ${accessText(agent)} · ${onlineText(agent)} · ${workText(agent)}`;
+    const badge = hud.querySelector(".h-badge");
+    if (badge) {
+      const dec = agent.pendingDecisions || 0;
+      badge.hidden = dec <= 0;
+      badge.textContent = dec > 0 ? `关键决策待批示 ${dec} 项` : "";
+    }
     const task = agent.currentTask || "暂无任务";
     hud.querySelector(".h-task").textContent = task;
     const pct = /(\d{1,3})\s*%/.exec(task);
@@ -271,9 +328,15 @@
     } else {
       bar.hidden = true;
     }
+    const more = hud.querySelector(".net-hud-more");
+    if (more) more.hidden = isHub(agent);
     const ul = hud.querySelector(".h-recent");
-    ul.innerHTML = '<li class="h-empty">加载中…</li>';
-    loadRecent(agent.id, ul);
+    if (isHub(agent)) {
+      ul.innerHTML = '<li class="h-empty">调度中枢无个人任务</li>';
+    } else {
+      ul.innerHTML = '<li class="h-empty">加载中…</li>';
+      loadRecent(agent.id, ul);
+    }
   }
 
   async function loadRecent(id, ul) {
@@ -339,11 +402,14 @@
   }
 
   /* ---------- 数据 → 场景（diff，不重建、不重置视角） ---------- */
-  function setData(agents, edges, initial) {
+  function setData(agents, edges, initial, meta) {
     if (!R) return;
-    const alive = new Set(agents.map(a => a.id));
+    if (meta) R.meta = meta;
+    const merged = agents.filter(a => a.id !== HUB_ID);
+    merged.push(hubAgent(R.meta));                 // 调度中枢随队列数据实时更新
+    const alive = new Set(merged.map(a => a.id));
     const fresh = [];
-    agents.forEach(a => {
+    merged.forEach(a => {
       let n = R.nodes.get(a.id);
       if (!n) {
         const mat = new T.SpriteMaterial({ map: texFor(a, R.mobile), transparent: true, opacity: 0, depthWrite: false });
@@ -358,7 +424,7 @@
       }
       n.removing = false;
       n.agent = a;
-      const key = `${a.status}|${a.kind}|${a.name}`;
+      const key = `${a.status}|${a.kind}|${a.name}|${subText(a)}|${a.pendingDecisions || 0}`;
       if (n.texKey !== key) {
         n.texKey = key;
         n.sprite.material.map = texFor(a, R.mobile);
@@ -394,7 +460,13 @@
     st.textContent = statusLabel(agent);
     st.dataset.status = agent.status;
     R.hud.querySelector(".h-meta").textContent =
-      `${agent.role || ""} · ${agent.kind === "chief" ? "指挥入口" : "执行者"} · 最近活动 ${agent.lastActive || "—"}`;
+      `${roleText(agent)} · ${accessText(agent)} · ${onlineText(agent)} · ${workText(agent)}`;
+    const badge = R.hud.querySelector(".h-badge");
+    if (badge) {
+      const dec = agent.pendingDecisions || 0;
+      badge.hidden = dec <= 0;
+      badge.textContent = dec > 0 ? `关键决策待批示 ${dec} 项` : "";
+    }
     const task = agent.currentTask || "暂无任务";
     R.hud.querySelector(".h-task").textContent = task;
     const pct = /(\d{1,3})\s*%/.exec(task);
@@ -420,26 +492,36 @@
 
   function layout() {
     if (!R) return;
-    const groups = { working: [], idle: [], offline: [] };
-    R.nodes.forEach(n => { if (!n.removing) groups[bucket(n.agent)].push(n); });
-    const rW = 2.0 + Math.max(0, groups.working.length - 6) * 0.16;
-    const rI = 4.0 + Math.max(0, groups.idle.length - 8) * 0.18;
-    const rO = 6.8 + Math.max(0, groups.offline.length - 10) * 0.2;
-    const ring = (list, radius, offset, scale, opacity) => {
-      list.forEach((n, i) => {
-        const ang = offset + (i / Math.max(1, list.length)) * Math.PI * 2;
-        const y = Math.cos(ang * 2.3) * 0.32;
-        n.tpos.set(Math.cos(ang) * radius, y, Math.sin(ang) * radius * 0.92);
-        const kindFactor = n.agent.kind === "chief" ? 1.06 : 1;
-        n.baseScale = 2.45 * kindFactor * scale;
-        n.baseOpacity = opacity;
-        n.tscale = n.baseScale;
-        n.topacity = n.baseOpacity;
-      });
+    const pin = (id, x, y, z, scale, opacity) => {
+      const n = R.nodes.get(id);
+      if (!n || n.removing) return;
+      n.tpos.set(x, y, z);
+      n.baseScale = scale; n.baseOpacity = opacity;
+      n.tscale = scale; n.topacity = opacity;
     };
-    ring(groups.working, rW, 0, 1.05, 1);
-    ring(groups.idle, rI, 0.4, 0.82, 0.48);
-    ring(groups.offline, rO, 0.75, 0.62, 0.1);
+    pin(STAFF_ID, 0, 5.5, 0, 3.9, 1);        // 顶层：幕僚长
+    pin(HUB_ID, 0, 0.9, 0, 3.2, 0.96);       // 中层：任务调度中枢
+
+    const groups = { working: [], idle: [], offline: [] };
+    R.nodes.forEach(n => {
+      if (n.removing || n.agent.id === STAFF_ID || n.agent.id === HUB_ID) return;
+      groups[bucket(n.agent)].push(n);
+    });
+    // 工作 → 内圈居中；空闲 → 中环淡化；离线 → 外缘近乎隐去
+    const order = [...groups.working, ...groups.idle, ...groups.offline];
+    order.forEach((node, i) => {
+      const total = Math.max(1, order.length);
+      const ang = (i / total) * Math.PI * 2 - Math.PI / 2;
+      const b = bucket(node.agent);
+      const r = b === "working" ? 3.6 : b === "idle" ? 5.9 : 8.4;
+      const y = -4.9 + (b === "offline" ? -0.45 : 0) + Math.cos(ang * 2) * 0.18;
+      node.tpos.set(Math.cos(ang) * r, y, Math.sin(ang) * r);
+      const chiefF = node.agent.kind === "chief" ? 1.05 : 1;
+      node.baseScale = (b === "working" ? 2.7 : b === "idle" ? 2.35 : 1.95) * chiefF;
+      node.baseOpacity = b === "working" ? 1 : b === "idle" ? 0.5 : 0.1;
+      node.tscale = node.baseScale;
+      node.topacity = node.baseOpacity;
+    });
     applyEmphasis();
   }
 
@@ -448,18 +530,33 @@
     R.edges.forEach(e => { R.world.remove(e.line); e.line.geometry.dispose(); e.line.material.dispose(); });
     R.edges = [];
     R.activePts = [];
-    edges.forEach(e => {
+    const list = edges.filter(e => e.evidence !== "default_route");   // 默认路由由中枢连线表达
+    const hubN = R.nodes.get(HUB_ID), staffN = R.nodes.get(STAFF_ID);
+    if (staffN && hubN && !staffN.removing && !hubN.removing) {
+      list.push({ from: STAFF_ID, to: HUB_ID, structural: true,
+        state: hubN.agent.status === "working" ? "active" : "idle" });
+    }
+    if (hubN && !hubN.removing) {
+      R.nodes.forEach(n => {
+        if (n.removing || n.agent.id === HUB_ID || n.agent.id === STAFF_ID) return;
+        list.push({ from: HUB_ID, to: n.agent.id, structural: true,
+          state: bucket(n.agent) === "working" ? "active" : "idle" });
+      });
+    }
+    list.forEach(e => {
       const a = R.nodes.get(e.from), b = R.nodes.get(e.to);
       if (!a || !b) return;
       const active = e.state === "active";
+      const structural = !!e.structural;
       const geo = new T.BufferGeometry().setFromPoints([new T.Vector3(), new T.Vector3()]);
       const mat = new T.LineBasicMaterial({
-        color: active ? 0x8b5cf6 : 0x64748b, transparent: true,
-        opacity: active ? 0.8 : 0.14, depthWrite: false,
+        color: active ? (structural ? 0x22d3ee : 0x8b5cf6) : 0x475569, transparent: true,
+        opacity: active ? (structural ? 0.5 : 0.8) : (structural ? 0.06 : 0.14),
+        depthWrite: false,
       });
       const line = new T.Line(geo, mat);
       R.world.add(line);
-      R.edges.push({ line, from: e.from, to: e.to, active, base: mat.opacity });
+      R.edges.push({ line, from: e.from, to: e.to, active, structural, base: mat.opacity });
       if (active) R.activePts.push({ from: e.from, to: e.to, t: Math.random() });
     });
     if (R.particles) {
@@ -486,7 +583,7 @@
     let max = 3.2;
     R.nodes.forEach(n => {
       if (n.removing) return;
-      max = Math.max(max, Math.hypot(n.tpos.x, n.tpos.z) + 1.3);
+      max = Math.max(max, Math.hypot(n.tpos.x, n.tpos.y, n.tpos.z) + 1.6);
     });
     const vFov = 45 * Math.PI / 180;
     const aspect = Math.max(0.4, R.w / R.h);
@@ -677,7 +774,7 @@
 
   window.SB3D = {
     mount, pause, resume, zoom, reset, resize, focus: focusAgent, exitFocus,
-    update: (agents, edges) => setData(agents, edges, false),
+    update: (agents, edges, meta) => setData(agents, edges, false, meta),
     select: () => {},
   };
 })();

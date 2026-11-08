@@ -132,7 +132,9 @@ function renderCommand(host) {
         </div>
         <span class="pt-net-hint">拖动平移 · 滚轮缩放 · 单击节点看详情 · Esc 关闭面板</span>
         <div class="net-legend" aria-hidden="true">
-          <span data-s="working">工作中</span><span data-s="idle">空闲</span><span data-s="offline">离线</span>
+          <span data-s="staff">幕僚长</span><span data-s="hub">调度中枢</span>
+          <span data-s="working">工作中</span><span data-s="idle">空闲</span>
+          <span data-s="offline">离线</span>
         </div>
       </div>
     </div>
@@ -231,12 +233,17 @@ function renderNetwork() {
   // 平移 / 缩放
   const net = $("#net");
   const FORCE_FLAT = /[?&]flat=1\b/.test(location.search);   // 排障用：?flat=1 强制 2D
+  const netMeta = () => ({
+    pending: DEMO.metrics.tasksPending || 0,
+    doing: DEMO.metrics.tasksRunning || 0,
+    pendingDecisions: DEMO.metrics.pendingDecisions || 0,
+  });
   const is3D = !FORCE_FLAT && !!(window.SB3D && SB3D.mount($("#net3d"), DEMO.agents, DEMO.edges,
-    { onAgent: selectAgent, onMore: id => openDetail({ type: "agent", id }) }));
+    { onAgent: selectAgent, onMore: id => openDetail({ type: "agent", id }) }, netMeta()));
   if (is3D) {
     net.classList.add("is-3d");
     const hint = net.querySelector(".pt-net-hint");
-    if (hint) hint.textContent = "工作中居中 · 空闲淡化 · 离线贴边 ｜ 悬停看概况 · 点击进入场景 · 拖动旋转";
+    if (hint) hint.textContent = "幕僚长 → 任务调度 → 执行层 ｜ 悬停看概况 · 点击进入场景 · 拖动旋转";
   } else if (window.SB3D) {
     const hint = net.querySelector(".pt-net-hint");
     if (hint) hint.textContent = "当前浏览器未启用 WebGL，已降级为 2D 视图 · 拖动平移 · 滚轮缩放";
@@ -1123,7 +1130,13 @@ function renderSettingsPage(host) {
 
 /* ---------- 数据更新：平滑刷新当前页 ---------- */
 document.addEventListener("sb:data", () => {
-  if (window.SB3D && state.view === "command") SB3D.update(DEMO.agents, DEMO.edges);
+  if (window.SB3D && state.view === "command") {
+    SB3D.update(DEMO.agents, DEMO.edges, {
+      pending: DEMO.metrics.tasksPending || 0,
+      doing: DEMO.metrics.tasksRunning || 0,
+      pendingDecisions: DEMO.metrics.pendingDecisions || 0,
+    });
+  }
   const host = $("#views");
   if (!host) return;
   const ae = document.activeElement;

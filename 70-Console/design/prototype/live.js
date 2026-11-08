@@ -132,6 +132,8 @@
         currentTask,
         lastActive: rel(a.last_seen),
         last_seen: a.last_seen,
+        everConnected: a.ever_connected !== false,
+        pendingDecisions: a.pending_decisions || 0,
         capabilities: a.capabilities || [],
         task_types: a.task_types || [],
         permissions: a.permissions || {},
@@ -185,6 +187,7 @@
       tasksRunning: d.ov.tasks_running,
       tasksPending: d.ov.tasks_pending,
       eventsToday: d.ov.events_today,
+      pendingDecisions: d.ov.pending_decisions || 0,
     };
     DEMO.real = {
       load: (d.monitor.system || {}).loadavg,

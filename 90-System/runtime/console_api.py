@@ -105,6 +105,8 @@ def handle_get(conn, raw_path):
         for a in agents:
             a["live_status"] = _agent_status(a["last_seen"], a["agent_id"] in busy, a["kind"])
         tasks = dict(conn.execute("SELECT status,COUNT(*) FROM tasks GROUP BY status").fetchall())
+        dec = conn.execute(
+            "SELECT COUNT(*) FROM tasks WHERE status='pending' AND priority>=1").fetchone()[0]
         today0 = int(time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1)))
         ev = conn.execute("SELECT COUNT(*) FROM events WHERE created_at>=?", (today0,)).fetchone()[0]
         return ok({
@@ -116,11 +118,15 @@ def handle_get(conn, raw_path):
             "tasks_pending": tasks.get("pending", 0),
             "tasks_failed": tasks.get("failed", 0) + tasks.get("dead", 0),
             "events_today": ev,
+            "pending_decisions": dec,
         })
 
     if path == "/api/agents":
         busy = {r[0]: r[1] for r in conn.execute(
             "SELECT lease_owner, id FROM tasks WHERE status='doing' AND lease_owner IS NOT NULL")}
+        dec = dict(conn.execute(
+            "SELECT e.source, COUNT(*) FROM tasks t JOIN events e ON t.event_id=e.event_id "
+            "WHERE t.status='pending' AND t.priority>=1 GROUP BY 1").fetchall())
         out = []
         for a in _rows(conn.execute("SELECT * FROM agents ORDER BY kind,agent_id")):
             try:
@@ -131,6 +137,8 @@ def handle_get(conn, raw_path):
                 pass
             a["live_status"] = _agent_status(a["last_seen"], a["agent_id"] in busy, a["kind"])
             a["current_task_id"] = busy.get(a["agent_id"])
+            a["ever_connected"] = a["last_seen"] is not None
+            a["pending_decisions"] = dec.get(a["agent_id"], 0)
             out.append(a)
         return ok(out)
 
