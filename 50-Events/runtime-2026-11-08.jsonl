@@ -1046,3 +1046,26 @@
 {"ts": "2026-11-08T15:00:03+0800", "kind": "task_enqueued", "type": "chat", "event": "evt_20261108_f22c56", "priority": 1}
 {"ts": "2026-11-08T15:00:06+0800", "kind": "task_claimed", "id": 211, "type": "chat", "by": "chat-worker", "token": 1}
 {"ts": "2026-11-08T15:00:11+0800", "kind": "task_done", "id": 211, "type": "chat", "by": "chat-worker", "result": "已答复 → 60-Outputs/chat/20261108-150011-test-agent-worker-心跳丢失事件确认与处置建议.md"}
+{"ts": "2026-11-08T15:41:18+0800", "kind": "api_auth_failed", "ip": "101.126.128.7", "path": "/api/overview"}
+{"ts": "2026-11-08T15:50:45+0800", "kind": "api_auth_failed", "ip": "101.126.128.7", "path": "/api/overview"}
+{"ts": "2026-11-08T15:51:08+0800", "kind": "api_auth_failed", "ip": "127.0.0.1", "path": "/api/overview"}
+{"ts": "2026-11-08T15:51:34+0800", "kind": "api_auth_failed", "ip": "127.0.0.1", "path": "/api/models/status"}
+{"ts": "2026-11-08T16:13:42+0800", "kind": "runtime_stopped", "pid": 17791}
+{"ts": "2026-11-08T16:13:42+0800", "kind": "api_started", "bind": "0.0.0.0", "port": 18765, "chiefs": ["deepseek-chief", "dsh-chief", "dsh2-chief", "grok-chief", "maus-chief", "maus2-chief", "trae-chief"], "viewers": ["console"]}
+{"ts": "2026-11-08T16:13:42+0800", "kind": "runtime_started", "version": "v2", "agents": ["router", "reaper", "analysis-worker", "archive-worker", "chat-worker", "code-worker", "knowledge-worker", "research-worker", "trae-developer"], "pid": 20006}
+{"ts": "2026-11-08T16:13:42+0800", "kind": "api_extra_port_started", "port": 80}
+{"ts": "2026-11-08T16:15:02+0800", "kind": "runtime_stopped", "pid": 20006}
+{"ts": "2026-11-08T16:15:02+0800", "kind": "api_started", "bind": "0.0.0.0", "port": 18765, "chiefs": ["deepseek-chief", "dsh-chief", "dsh2-chief", "grok-chief", "maus-chief", "maus2-chief", "trae-chief"], "viewers": ["console"]}
+{"ts": "2026-11-08T16:15:02+0800", "kind": "api_extra_port_started", "port": 80}
+{"ts": "2026-11-08T16:15:02+0800", "kind": "runtime_started", "version": "v2", "agents": ["router", "reaper", "analysis-worker", "archive-worker", "chat-worker", "code-worker", "knowledge-worker", "research-worker", "trae-developer"], "pid": 20197}
+{"ts": "2026-11-08T16:28:43+0800", "kind": "runtime_stopped", "pid": 20197}
+{"ts": "2026-11-08T16:28:43+0800", "kind": "api_started", "bind": "0.0.0.0", "port": 18765, "chiefs": ["deepseek-chief", "dsh-chief", "dsh2-chief", "grok-chief", "maus-chief", "maus2-chief", "trae-chief"], "viewers": ["console"]}
+{"ts": "2026-11-08T16:28:43+0800", "kind": "runtime_started", "version": "v2", "agents": ["router", "reaper", "analysis-worker", "archive-worker", "chat-worker", "code-worker", "knowledge-worker", "research-worker", "trae-developer"], "pid": 21003}
+{"ts": "2026-11-08T16:28:43+0800", "kind": "api_extra_port_started", "port": 80}
+{"ts": "2026-11-08T16:30:23+0800", "kind": "runtime_stopped", "pid": 21003}
+{"ts": "2026-11-08T16:30:23+0800", "kind": "api_started", "bind": "0.0.0.0", "port": 18765, "chiefs": ["deepseek-chief", "dsh-chief", "dsh2-chief", "grok-chief", "maus-chief", "maus2-chief", "trae-chief"], "viewers": ["console"]}
+{"ts": "2026-11-08T16:30:23+0800", "kind": "runtime_started", "version": "v2", "agents": ["router", "reaper", "analysis-worker", "archive-worker", "chat-worker", "code-worker", "knowledge-worker", "research-worker", "trae-developer"], "pid": 21240}
+{"ts": "2026-11-08T16:30:23+0800", "kind": "api_extra_port_started", "port": 80}
+{"ts": "2026-11-08T17:00:04+0800", "kind": "task_enqueued", "type": "chat", "event": "evt_20261108_5fb93e", "priority": 1}
+{"ts": "2026-11-08T17:00:08+0800", "kind": "task_claimed", "id": 213, "type": "chat", "by": "chat-worker", "token": 1}
+{"ts": "2026-11-08T17:00:14+0800", "kind": "task_done", "id": 213, "type": "chat", "by": "chat-worker", "result": "已答复 → 60-Outputs/chat/20261108-170014-test-agent-worker-心跳丢失事件确认与处理建议.md"}
