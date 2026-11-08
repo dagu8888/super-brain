@@ -80,6 +80,38 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None)
                 since = int(float(q.get("since", time.time())))
             except Exception:
                 since = int(time.time())
+            # S3 节点信使：?instance=<名册实例名> 以长连注册心跳（不写新表，沿用 heartbeats/agents）
+            instance = (q.get("instance") or "").strip()
+            if instance:
+                conn = db_fn()
+                try:
+                    hit = conn.execute(
+                        "SELECT status FROM registry WHERE name=? AND kind='instance'",
+                        (instance,)).fetchone()
+                except Exception:
+                    hit = None
+                finally:
+                    conn.close()
+                if not hit or hit[0] != "active":
+                    log_event("api_instance_rejected", ip=self.client_address[0], instance=instance[:60])
+                    return self._send(403, {"ok": False,
+                                            "error": f"{instance} 不在实例名册或已下线"})
+
+            def register_presence():
+                conn = db_fn()
+                try:
+                    now_ts = int(time.time())
+                    conn.execute(
+                        "INSERT INTO heartbeats(agent,ts,note) VALUES(?,?,'sse') "
+                        "ON CONFLICT(agent) DO UPDATE SET ts=excluded.ts, note=excluded.note",
+                        (instance, now_ts))
+                    conn.execute("UPDATE agents SET last_seen=? WHERE agent_id=?", (now_ts, instance))
+                    conn.commit()
+                finally:
+                    conn.close()
+
+            if instance:
+                register_presence()
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-cache, no-transform")
@@ -119,6 +151,11 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None)
                     if time.time() - beat > 15:
                         self.wfile.write(b": ping\n\n")
                         beat = time.time()
+                        if instance:               # S3：长连存续即在场，随保活节拍续心跳
+                            try:
+                                register_presence()
+                            except Exception:
+                                pass
                     self.wfile.flush()
                     stop_event.wait(1.0)
             except (BrokenPipeError, ConnectionResetError, OSError):
