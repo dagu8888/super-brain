@@ -79,6 +79,10 @@ CREATE TABLE IF NOT EXISTS perm_audit(
   ts INTEGER, agent TEXT, path TEXT, action TEXT, allowed INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS heartbeats(
+  agent TEXT PRIMARY KEY, ts INTEGER, note TEXT
+);
+
 CREATE TABLE IF NOT EXISTS registry(
   name TEXT PRIMARY KEY,           -- 名册条目：实例（DSH一号@主机）或角色别名
   kind TEXT NOT NULL,              -- instance|worker|chief
@@ -92,7 +96,7 @@ CREATE TABLE IF NOT EXISTS registry(
 # 内置角色注册（capabilities 以实际验证为准；trae-developer 未跑通探针前 verified=0）
 # 七入口统一能力：七命令 + 协作池（pull 领取 / renew 续租 / report 回传 / assist 提交）
 CHIEF_CAPS = ["submit", "status", "list", "progress", "delegate", "link", "cancel",
-              "pull", "report", "renew", "assist"]
+              "pull", "report", "renew", "assist", "kb_search", "kb_read", "heartbeat"]
 BUILTIN_AGENTS = [
     # (agent_id, kind, capabilities, task_types, permissions, verified)
     ("grok-chief", "chief", CHIEF_CAPS, None, {"write": [], "exec": False, "llm": False}, 1),

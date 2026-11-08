@@ -543,6 +543,71 @@ def chief_execute(conn, chief_id, cmd, args):
         log_event("assist_reported", by=chief_id, task=tid)
         return {"ok": True, "task_id": tid}
 
+    # ---- 知识库只读指令（2026-11-09 任务包 T4）：不写库、不触发任务、不经 router/模型层 ----
+    if cmd == "kb_search":
+        kw = str(args.get("q") or args.get("text") or args.get("keyword") or "").strip()
+        if not kw:
+            return {"ok": False, "error": "空关键词（q/text/keyword 任选其一）"}
+        try:
+            limit = max(1, min(int(args.get("limit", 10)), 20))
+        except (TypeError, ValueError):
+            limit = 10
+        hits, kwl = [], kw.lower()
+        skip_dirs = {".git", "__pycache__", "node_modules", "incoming"}
+        exts = {".md", ".txt", ".yaml", ".yml", ".py", ".js", ".json"}
+        for dirpath, dirnames, filenames in os.walk(ROOT):
+            dirnames[:] = [d for d in dirnames if d not in skip_dirs]
+            for fn in filenames:
+                if len(hits) >= limit:
+                    break
+                if Path(fn).suffix.lower() not in exts:
+                    continue
+                fp = Path(dirpath) / fn
+                try:
+                    if fp.stat().st_size > 2 * 1024 * 1024:
+                        continue
+                    text = fp.read_text(encoding="utf-8", errors="replace")
+                except Exception:
+                    continue
+                pos = text.lower().find(kwl)
+                if pos < 0:
+                    continue
+                start = max(0, pos - 60)
+                snippet = re.sub(r"\s+", " ", text[start:pos + 120]).strip()
+                hits.append({"path": str(fp.relative_to(ROOT)),
+                             "snippet": ("…" if start else "") + snippet + "…"})
+            if len(hits) >= limit:
+                break
+        return {"ok": True, "q": kw, "count": len(hits), "hits": hits}
+
+    if cmd == "kb_read":
+        rel = str(args.get("path", "")).strip()
+        if not rel:
+            return {"ok": False, "error": "path 必填（仓库根目录内相对路径）"}
+        root_real = ROOT.resolve()
+        fp = (root_real / rel).resolve()
+        if fp != root_real and root_real not in fp.parents:
+            return {"ok": False, "error": f"越界路径当场拒绝：{rel}（只允许仓库根目录内）"}
+        if not fp.is_file():
+            return {"ok": False, "error": f"文件不存在：{rel}"}
+        try:
+            max_chars = max(200, min(int(args.get("max_chars", 4000)), 8000))
+        except (TypeError, ValueError):
+            max_chars = 4000
+        text = fp.read_text(encoding="utf-8", errors="replace")
+        truncated = len(text) > max_chars
+        return {"ok": True, "path": str(fp.relative_to(root_real)), "chars": len(text),
+                "truncated": truncated,
+                "note": "正文过长已截断，可用 max_chars 调窗（上限 8000）" if truncated else "完整正文",
+                "content": text[:max_chars]}
+
+    # ---- 节点心跳（任务包 T6）：沿用现有 heartbeats 机制，不新造协议 ----
+    if cmd == "heartbeat":
+        agent = str(args.get("agent") or chief_id)[:64]
+        note = str(args.get("note", ""))[:200]
+        heartbeat(conn, agent, note)
+        return {"ok": True, "agent": agent, "ts": int(time.time())}
+
     # ---- 组织管理：Agent 可随时增减（以注册表为准，代码不写死名单） ----
     if cmd in ("add-agent", "disable-agent", "enable-agent"):
         aid = str(args.get("id", "")).strip()
