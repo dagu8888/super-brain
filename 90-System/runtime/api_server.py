@@ -9,16 +9,18 @@
 #   import api_server; api_server.maybe_start(stop, log_event, db, chief_execute)
 import hmac
 import json
+import mimetypes
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import console_api
 
 HERE = Path(__file__).parent
 CONF = HERE / "api_tokens.json"
+DESIGN = HERE.parents[1] / "70-Console" / "design"   # 控制台静态资源（只含前端文件）
 MAX_BODY = 64 * 1024                      # 请求体上限 64KB
 STREAM_MAX_CLIENTS = 8                    # SSE 并发连接上限
 STREAM_SECONDS = 600                      # 单连接最长 10 分钟后自动重连（浏览器原生支持）
@@ -125,6 +127,39 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None)
                 STREAM["active"] = max(0, STREAM["active"] - 1)
                 self.close_connection = True
 
+        def _static(self):
+            """托管控制台静态文件（仅 70-Console/design，防目录穿越，无目录列表）。"""
+            path = urlparse(self.path).path
+            if path in ("/", "/console", "/console/"):
+                self.send_response(302)
+                self.send_header("Location", "/console/prototype/index.html")
+                for k, v in CORS:
+                    self.send_header(k, v)
+                self.end_headers()
+                return
+            if not path.startswith("/console/"):
+                return self._send(404, {"ok": False, "error": "not found"})
+            target = (DESIGN / unquote(path[len("/console/"):])).resolve()
+            try:
+                target.relative_to(DESIGN.resolve())
+            except ValueError:
+                return self._send(404, {"ok": False, "error": "not found"})
+            if not target.is_file():
+                return self._send(404, {"ok": False, "error": "not found"})
+            data = target.read_bytes()
+            ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+            if ctype.startswith("text/") or ctype in ("application/javascript", "application/json"):
+                ctype += "; charset=utf-8"
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-cache")
+            for k, v in CORS:
+                self.send_header(k, v)
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(data)
+
         def do_GET(self):
             if self.path.startswith("/healthz"):        # 免鉴权探活
                 return self._send(200, {"ok": True, "service": "super-brain-api"})
@@ -142,6 +177,13 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None)
                 finally:
                     conn.close()
                 return self._send(code, obj)
+            if self.path == "/" or self.path.startswith("/console"):
+                return self._static()
+            self._send(404, {"ok": False, "error": "not found"})
+
+        def do_HEAD(self):
+            if self.path == "/" or self.path.startswith("/console"):
+                return self._static()
             self._send(404, {"ok": False, "error": "not found"})
 
         def do_POST(self):

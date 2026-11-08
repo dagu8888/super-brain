@@ -3,7 +3,9 @@
    约束：只读；口令仅存本机浏览器 localStorage，可随时"断开"清除。 */
 (function () {
   "use strict";
-  const API = "http://8.218.106.225:18765";
+  const API = location.port === "18765"
+    ? location.origin                                   // 由 API 服务托管时同源访问
+    : "http://8.218.106.225:18765";                     // 本地静态预览时连线上服务
   const LS = "sb-viewer-token";
   const POLL_MS = 6000;
   const FULL_REFRESH_MS = 20000;   // 兜底全量刷新（Agent 状态/进度变化）

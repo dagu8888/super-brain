@@ -110,16 +110,23 @@ data: {"event_id":"evt_xxx","source":"trae-chief","type":"task_delegated","prior
 3. 侧栏三态：`实时推送` / `轮询模式` / `连接中断`；断开时明确提示数据可能过期。
 4. 新事件到达时立即插入首页时间轴（不重置网络图视角），随后合并触发一次全量刷新。
 
-## 6. 已验证（2026-11-08 实测）
+## 6. 已验证（2026-11-08 实测，服务器本机）
 
 | 项 | 结果 |
 |---|---|
-| 九个端点 | 全部 200 |
+| `/healthz` | 200 |
+| overview / agents / tasks / events / monitor / knowledge / memory / relations | 全部 200 |
 | 无口令 / 错口令 | 401 |
-| 只读口令调 `/cmd` | 401（指挥权隔离生效） |
-| overview | 14 Agent 全在线（7 入口 + 7 执行） |
-| monitor | loadavg、内存 1194MB、alerts 空 |
-| 旧 `/cmd` | 七指令不受影响 |
+| 只读口令调 `POST /cmd` | 401（指挥权隔离生效） |
+| 不存在任务 `GET /api/tasks/999999` | 404 |
+| `limit=999` | 200，自动截断为 200 |
+| CORS 预检 `OPTIONS` | 204 |
+| `/api/stream` 建连 | 1.2ms，`event-stream` 正常 |
+| SSE 事件产生 → 客户端可读 | 407ms（服务端 1 秒增量轮询） |
+| SSE 不同 `event_id` 去重 | 生效（同事件只推一次） |
+| `/api/stream?token=bad` | 401 |
+
+接口延迟（服务器本机，20 次）：overview P50 2.0ms / P95 2.3ms；agents 2.0 / 2.1；tasks 2.7 / 2.7；monitor 2.2 / 2.3；knowledge（25 篇含正文摘要）14.9 / 15.2。
 
 ## 7. 已知限制（如实）
 
@@ -127,3 +134,4 @@ data: {"event_id":"evt_xxx","source":"trae-chief","type":"task_delegated","prior
 2. `/api/events` 与 `/api/tasks/{id}` 会返回任务/事件 payload 摘要，可能含用户私人笔记内容 → 只读口令视同隐私凭据保管。
 3. 无分页游标，超大结果集用 limit/offset 截断；知识列表最多 500。
 4. 协作线来自「历史真实派发记录 + 默认路由兜底」，只表示可委派通道；当前状态仅为 `active/idle` 两态，没有独立的协作事件表。
+5. SSE 并发上限 8、单连接 10 分钟；超出返回 429 / 自动重连。未做 IP 级限流（服务仅内网口径使用，公网暴露需另加网关）。
