@@ -264,6 +264,21 @@ def chief_execute(conn, chief_id, cmd, args):
         text = str(args.get("text", "")).strip()
         if not text:
             return {"ok": False, "error": "空指令"}
+        if args.get("assist"):
+            # 入口协作池（2026-11-08 口径）：入队后任一空闲 chief 可 pull 领取并 report 回传。
+            # 不 emit manual 事件，避免 Router 再派给 worker 造成重复执行。
+            cur = conn.execute(
+                """INSERT OR IGNORE INTO tasks
+                   (type,payload,status,priority,max_retries,canonical_user_id,created_at)
+                   VALUES('assist',?,'pending',?,?,?,?)""",
+                (json.dumps({"text": text, "from": chief_id}, ensure_ascii=False),
+                 int(args.get("priority", 0)), MAX_RETRIES, canon, int(time.time())))
+            conn.commit()
+            if not cur.rowcount:
+                return {"ok": False, "error": "重复任务被幂等忽略"}
+            log_event("assist_enqueued", by=chief_id, task=cur.lastrowid)
+            return {"ok": True, "task_id": cur.lastrowid, "mode": "assist",
+                    "note": "已入入口协作池，空闲入口可 pull 领取"}
         eid = emit_event(conn, chief_id, "manual", {"text": text},
                          priority=int(args.get("priority", 0)),
                          dedupe_key=args.get("dedupe_key"), source_user=chief_id)
@@ -339,6 +354,36 @@ def chief_execute(conn, chief_id, cmd, args):
             (int(args["id"]),))
         conn.commit()
         return {"ok": bool(cur.rowcount), "error": None if cur.rowcount else "任务已终态，不可取消"}
+
+    # ---- 入口协作池：空闲入口成为执行者（2026-11-08 口径，七入口协同） ----
+    if cmd == "pull":
+        task = claim_task(conn, chief_id, ["assist"])
+        if not task:
+            return {"ok": True, "task": None, "note": "协作池暂无任务"}
+        log_event("assist_pulled", by=chief_id, task=task["id"], token=task["token"])
+        return {"ok": True, "task": task, "lease_seconds": LEASE_SECONDS}
+
+    if cmd == "renew":
+        cur = conn.execute(
+            "UPDATE tasks SET lease_expires_at=? WHERE id=? AND lease_token=? AND status='doing'",
+            (int(time.time()) + LEASE_SECONDS, int(args["id"]), int(args["token"])))
+        conn.commit()
+        return {"ok": bool(cur.rowcount), "error": None if cur.rowcount else "租约已失效"}
+
+    if cmd == "report":
+        tid, token = int(args["id"]), int(args["token"])
+        result = str(args.get("result", ""))[:500]
+        cur = conn.execute(
+            "UPDATE tasks SET status='done', done_at=?, result=?, error=NULL "
+            "WHERE id=? AND lease_token=? AND status='doing'",
+            (int(time.time()), result or "done", tid, token))
+        conn.commit()
+        if not cur.rowcount:
+            return {"ok": False, "error": "租约已失效或任务不存在（可能已被回收）"}
+        emit_event(conn, chief_id, "task_completed", {"task_id": tid, "by": chief_id},
+                   source_user=chief_id)
+        log_event("assist_reported", by=chief_id, task=tid)
+        return {"ok": True, "task_id": tid}
 
     return {"ok": False, "error": f"未知指令 {cmd}"}
 
@@ -853,7 +898,9 @@ HANDLERS = {
     "code-test": handle_code,
 }
 
-WORKER_IDS = ["knowledge-worker", "chat-worker", "code-worker", "research-worker", "trae-developer"]
+WORKER_IDS = ["knowledge-worker", "chat-worker", "code-worker", "research-worker", "trae-developer",
+              # 2026-11-08 大古老师口径「7 入口 + 7 执行 agent」：新增两个执行者，复用已验证处理器
+              "analysis-worker", "archive-worker"]
 
 
 # ---------- Supervisor（E3：线程崩溃检测重启） ----------
