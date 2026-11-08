@@ -8,6 +8,7 @@
 #   - 失联判定沿用心跳 300 秒；D2 尺度：worker 内重试(既有) → 改派兄弟(attempt=2) → dead+assist 告警
 import json
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -367,10 +368,13 @@ def reconcile(conn):
     log_event("orch_reconcile", open_plans=n)
 
 
-def orchestrator_loop(stop):
+_STOP = threading.Event()          # 与 runtime 各 loop 同约定：无参循环，进程退出由 daemon 线程收尾
+
+
+def orchestrator_loop():
     conn = _db()
     reconcile(conn)
-    while not stop.is_set():
+    while not _STOP.is_set():
         try:
             now = int(time.time())
             _consume_plans(conn, now)
@@ -381,9 +385,8 @@ def orchestrator_loop(stop):
             _consume_reviews(conn, now)
         except Exception as e:
             log_event("orch_tick_error", error=str(e)[:200])
-        stop.wait(ORCH_INTERVAL)
+        _STOP.wait(ORCH_INTERVAL)
 
 
 if __name__ == "__main__":
-    import threading
-    orchestrator_loop(threading.Event())
+    orchestrator_loop()
