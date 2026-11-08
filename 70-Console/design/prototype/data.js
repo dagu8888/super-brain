@@ -13,6 +13,7 @@ const DEMO = {
     tasksRunning: 2,
     tasksPending: 0,
     eventsToday: 12,
+    pendingDecisions: 0,
   },
 
   /* kind: chief=指挥入口（非常驻，空闲可 pull 拉活） / worker=执行者（常驻线程）
