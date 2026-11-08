@@ -29,7 +29,7 @@ CORS：允许 `*`（只读接口；跨域便于本地控制台调试），预检
 |---|---|---|
 | `GET /healthz` | — | 免鉴权探活 |
 | `GET /api/overview` | — | 首页统计：Agent 总数/在线/工作中、任务各状态、今日事件数 |
-| `GET /api/agents` | — | Agent 列表（含 `live_status`、`current_task_id`） |
+| `GET /api/agents` | — | Agent 列表（含 `live_status`、`current_task_id`、`ever_connected`、`pending_decisions`） |
 | `GET /api/agents/{id}` | — | 单个 Agent + 最近 10 条任务 |
 | `GET /api/tasks` | `status`,`type`,`agent`,`q`,`limit`(≤200),`offset` | 任务列表（summary 截断 200 字；q 匹配 ID/类型/结果） |
 | `GET /api/tasks/{id}` | — | 任务全量（含 payload）+ 关联事件 20 条 |
@@ -52,6 +52,16 @@ CORS：允许 `*`（只读接口；跨域便于本地控制台调试），预检
 | `estimate_samples` | 参与估算的样本数（越多越准，随运行自动成长） |
 
 样本来自 `tasks` 表自身历史（`done_at - claimed_at`），无新增表、无迁移，越跑越准。
+
+## 3.1 接入 / 待批示字段（2026-11-08 追加）
+
+| 字段 | 来源 | 口径 |
+|---|---|---|
+| `ever_connected` | `agents.last_seen IS NOT NULL` | 是否接入过（曾经被调用/注册过） |
+| `pending_decisions` | 该 chief 名下 `tasks.status='pending' AND priority>=1` 的任务数 | 关键决策等待批示；无则为 0，不编造 |
+| `pending_decisions`（overview） | 同上，全局合计 | 供调度中枢节点展示 |
+
+在线判定：worker 以 `last_seen` 300 秒内为准；chief 为入口身份、不判离线，展示为「在线」或「久未使用」。
 
 ### 协作线口径（必须遵守）
 
