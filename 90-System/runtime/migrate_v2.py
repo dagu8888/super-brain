@@ -93,6 +93,8 @@ BUILTIN_AGENTS = [
     ("trae-chief", "chief", CHIEF_CAPS, None, {"write": [], "exec": False, "llm": False}, 1),
     ("maus2-chief", "chief", CHIEF_CAPS, None, {"write": [], "exec": False, "llm": False}, 1),
     ("dsh2-chief", "chief", CHIEF_CAPS, None, {"write": [], "exec": False, "llm": False}, 1),
+    # 2026-11-09 起入口不限数：随增随减、以真实注册为准；下线的入口留档（status='suspended'）
+    ("muse-chief", "chief", CHIEF_CAPS, None, {"write": [], "exec": False, "llm": False}, 1),
     ("knowledge-worker", "worker", ["inbox-triage", "kb-organize"], ["inbox-triage", "kb-organize"],
      {"write": ["00-Inbox/", "10-Knowledge/", "30-Reviews/"], "exec": False, "llm": True}, 1),
     ("chat-worker", "worker", ["chat"], ["chat"],
@@ -111,7 +113,7 @@ BUILTIN_AGENTS = [
      {"write": ["00-Inbox/", "10-Knowledge/", "30-Reviews/"], "exec": False, "llm": True}, 1),
 ]
 
-CHIEF_SOURCES = ["grok", "deepseek", "maus", "dsh", "trae", "maus2", "dsh2"]
+CHIEF_SOURCES = ["grok", "deepseek", "maus", "dsh", "trae", "maus2", "dsh2", "muse"]
 CANONICAL_USER = "dagu8888"  # 单用户系统：大古老师
 
 
@@ -150,7 +152,7 @@ def migrate(conn):
              json.dumps(ttypes) if ttypes else None,
              json.dumps(perms, ensure_ascii=False), verified, now, now))
 
-    # 五入口默认身份映射（未知 source_user 时运行时再兜底）
+    # 入口默认身份映射（未知 source_user 时运行时再兜底；入口随增随减，下线留档）
     for src in CHIEF_SOURCES:
         conn.execute(
             "INSERT OR IGNORE INTO user_identities(source,source_user,canonical_user_id) VALUES(?,?,?)",
