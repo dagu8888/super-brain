@@ -540,6 +540,36 @@
     }
   };
 
+  /* why 复盘时间线（借鉴 Agent-Autoloop）：点击任务行展开，展示该轮任务的事件链与执行记录 */
+  function toggleRound(x, host) {
+    if (host.style.display !== 'none') { host.style.display = 'none'; return; }
+    host.style.display = '';
+    if (host.dataset.loaded) return;
+    host.dataset.loaded = '1';
+    if (!x.event_id) { host.appendChild(empty('该任务无关联事件，暂无复盘数据')); return; }
+    host.appendChild(el('div', { className: 'pao-empty__hint', text: '复盘时间线加载中…' }));
+    PAO.SB.api('/api/round/' + encodeURIComponent(x.event_id)).then(function (r) {
+      D.clear(host);
+      var d = r.data || {};
+      var tl = d.timeline || [];
+      if (!tl.length) { host.appendChild(empty('暂无复盘数据')); return; }
+      host.appendChild(el('div', { className: 'pao-empty__hint', text: '共 ' + (d.chain_events || tl.length) + ' 个事件 · ' + (d.chain_tasks || 0) + ' 条任务（点击行可收起）' }));
+      tl.forEach(function (s) {
+        var isTask = s.kind === 'task';
+        var title = (isTask ? '任务 #' + s.task_id + ' · ' : '事件 · ') + (s.type || '未知');
+        var meta = t(s.ts) +
+          (s.source ? ' · 来源 ' + s.source : '') +
+          (s.lease_owner ? ' · ' + s.lease_owner + ' 接活' : '') +
+          (s.hop != null ? ' · 第 ' + s.hop + ' 跳' : '') +
+          (s.summary ? ' · ' + String(s.summary).slice(0, 50) : '');
+        host.appendChild(row(title, meta, chip(STATUS_ZH[s.status] || s.status || '未知', statusKind(s.status))));
+      });
+    }).catch(function () {
+      D.clear(host);
+      host.appendChild(empty('复盘时间线读取失败'));
+    });
+  }
+
   /* ======================= 任务 ======================= */
   PAO.panels.data = {
     id: 'data', kicker: 'TASKS', label: 'TASK QUEUE', zh: '任务 · 队列与进度',
@@ -563,12 +593,16 @@
               el('span', { className: 'sb-progress__text', text: (x.progress || 0) + '%' + (x.estimate_samples ? ' · 中位数样本 ' + x.estimate_samples : ' · 默认估算') })
             ]);
           }
+          var roundHost = el('div', { className: 'sb-list', style: { display: 'none', marginTop: '8px' } });
           listHost.appendChild(row(
             '#' + x.id + ' · ' + (x.type || '未命名任务'),
-            (x.lease_owner || '未派发') + ' · ' + t(x.created_at) + (x.retry_count ? ' · 重试 ' + x.retry_count : '') + (x.summary ? ' · ' + String(x.summary).slice(0, 40) : ''),
-            [chip(STATUS_ZH[x.status] || x.status || '未知', statusKind(x.status)), PRIORITY_ZH[x.priority] ? chip(PRIORITY_ZH[x.priority], x.priority >= 1 ? 'warn' : 'muted') : null],
-            null, extra
+            (x.lease_owner || '未派发') + ' · ' + t(x.created_at) + (x.retry_count ? ' · 重试 ' + x.retry_count : '') + (x.summary ? ' · ' + String(x.summary).slice(0, 40) : '') + (x.awaiting_note ? ' · ' + x.awaiting_note : ''),
+            [chip(STATUS_ZH[x.status] || x.status || '未知', statusKind(x.status)),
+             x.awaiting ? chip('挂起零消耗', 'cyan') : null,
+             PRIORITY_ZH[x.priority] ? chip(PRIORITY_ZH[x.priority], x.priority >= 1 ? 'warn' : 'muted') : null],
+            function () { toggleRound(x, roundHost); }, extra
           ));
+          listHost.appendChild(roundHost);
         });
       }
 
