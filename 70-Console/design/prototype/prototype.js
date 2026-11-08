@@ -228,11 +228,11 @@ function renderNetwork() {
   // 平移 / 缩放
   const net = $("#net");
   const is3D = !!(window.SB3D && SB3D.mount($("#net3d"), DEMO.agents, DEMO.edges,
-    { onAgent: selectAgent }));
+    { onAgent: selectAgent, onMore: id => openDetail({ type: "agent", id }) }));
   if (is3D) {
     net.classList.add("is-3d");
     const hint = net.querySelector(".pt-net-hint");
-    if (hint) hint.textContent = "工作中居中 · 空闲淡化 · 离线贴边隐藏 ｜ 拖动旋转 · 滚轮/双指缩放";
+    if (hint) hint.textContent = "工作中居中 · 空闲淡化 · 离线贴边 ｜ 悬停看概况 · 点击进入场景 · 拖动旋转";
   } else if (window.SB3D) {
     const hint = net.querySelector(".pt-net-hint");
     if (hint) hint.textContent = "当前浏览器未启用 WebGL，已降级为 2D 视图 · 拖动平移 · 滚轮缩放";
