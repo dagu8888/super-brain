@@ -406,7 +406,7 @@ def chief_execute(conn, chief_id, cmd, args):
             ttypes = ttypes if isinstance(ttypes, list) else (caps if kind == "worker" else [])
             verified = 1 if args.get("verified") in (1, True, "1", "true") else (1 if kind == "chief" else 0)
             perms = args.get("permissions") if isinstance(args.get("permissions"), dict) else \
-                {"write": [], "exec": False, "llm": False}
+                {"write": [], "exec": False, "llm": kind == "worker"}   # 新 worker 默认可用 LLM，否则接单即失败
             conn.execute(
                 """INSERT INTO agents
                    (agent_id,kind,capabilities,task_types,permissions,verified,status,registered_at,last_seen)
