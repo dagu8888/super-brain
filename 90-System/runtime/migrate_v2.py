@@ -91,6 +91,49 @@ CREATE TABLE IF NOT EXISTS registry(
   status TEXT DEFAULT 'active',    -- active|retired（下线留档，不删记录）
   registered_at INTEGER
 );
+
+-- Orchestrator 中台三表（任务包第4包 S1；老表一列不改；逆迁移见 migrate_orch_rollback.sql）
+CREATE TABLE IF NOT EXISTS orch_plans(
+  plan_id TEXT PRIMARY KEY,
+  root_event_id TEXT UNIQUE NOT NULL,   -- 防重闸：同一事件只许一份计划
+  chief TEXT NOT NULL,                  -- 发起幕僚长
+  canonical_user_id TEXT,               -- 归属用户（子任务入队沿用）
+  title TEXT,
+  mode TEXT DEFAULT 'all_required',     -- all_required|partial_ok
+  status TEXT DEFAULT 'running',        -- running|awaiting_review|done|rework|failed|cancelled
+  review_reason TEXT,                   -- reject 理由落库
+  summary_path TEXT,
+  created_at INTEGER,
+  updated_at INTEGER,
+  done_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS task_links(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  plan_id TEXT NOT NULL,
+  step_key TEXT NOT NULL,
+  child_task_id INTEGER,                -- 当前在执行的子任务（改派/返工时换绑）
+  link_type TEXT DEFAULT 'child',       -- child 子任务（depends_on 以 JSON 列表达，语义同设计稿）
+  depends_on TEXT DEFAULT '[]',         -- JSON：前置 step_key 列表
+  target TEXT,                          -- 点名目标（worker type / 实例 / 幕僚长）
+  task_type TEXT,
+  payload TEXT,                         -- 子任务 payload JSON
+  attempt INTEGER DEFAULT 1,            -- 1=首派 2=改派（D2 尺度）
+  round INTEGER DEFAULT 1,              -- 返工轮次（plan_reject 后 +1，区分新旧子任务 payload）
+  status TEXT DEFAULT 'waiting',        -- waiting|enqueued|terminal
+  created_at INTEGER,
+  UNIQUE(plan_id, step_key)             -- 防重复生成锚
+);
+CREATE INDEX IF NOT EXISTS idx_task_links_plan ON task_links(plan_id);
+
+CREATE TABLE IF NOT EXISTS agent_caps(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_ref TEXT NOT NULL,              -- registry/agents 条目
+  capability TEXT NOT NULL,             -- 自由文本（新能力不改表）
+  max_parallel INTEGER DEFAULT 1,
+  note TEXT,
+  UNIQUE(agent_ref, capability)
+);
 """
 
 # 内置角色注册（capabilities 以实际验证为准；trae-developer 未跑通探针前 verified=0）
@@ -184,6 +227,21 @@ def migrate(conn):
         conn.execute(
             "INSERT OR IGNORE INTO registry(name,kind,location,agent_ref,status,registered_at) "
             "VALUES(?,?,?,?,'active',?)", (name, kind, loc, ref, now))
+
+    # agent_caps 首批数据（任务包第4包 S1-2）：Trae 按身份卡导入；DSH 占位待回执确认，不编造
+    CAPS_SEED = [
+        ("trae-chief", "代码施工", 1, "Trae 身份卡回执（2026-11-09 T1）"),
+        ("trae-chief", "架构审计", 1, "同上"),
+        ("trae-chief", "运维排障", 1, "同上；云服务器运维权限在 Trae"),
+        ("trae-chief", "知识整理", 1, "同上"),
+        ("trae-chief", "文档撰写", 1, "同上"),
+        ("dsh-chief", "待回执确认", 1, "占位：能力待 DSH 回执确认，不编造"),
+        ("dsh2-chief", "待回执确认", 1, "占位：能力待 DSH 回执确认，不编造"),
+    ]
+    for ref, cap, par, note in CAPS_SEED:
+        conn.execute(
+            "INSERT OR IGNORE INTO agent_caps(agent_ref,capability,max_parallel,note) VALUES(?,?,?,?)",
+            (ref, cap, par, note))
     conn.commit()
 
 
