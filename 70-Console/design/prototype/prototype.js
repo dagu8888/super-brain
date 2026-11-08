@@ -118,6 +118,7 @@ function renderCommand(host) {
       <div class="pt-net-head">
         <h3>Agent 协作网络</h3>
         <div class="pt-net-tools">
+          <button class="sb-button sb-button-secondary" data-net-fs type="button" title="只显示协作网络">⛶ 全屏</button>
           <button class="sb-button sb-button-secondary" data-zoom="out" type="button">−</button>
           <button class="sb-button sb-button-secondary" data-zoom="in" type="button">＋</button>
           <button class="sb-button sb-button-secondary" data-zoom="fit" type="button">适配</button>
@@ -231,10 +232,21 @@ function renderNetwork() {
   if (is3D) {
     net.classList.add("is-3d");
     const hint = net.querySelector(".pt-net-hint");
-    if (hint) hint.textContent = "拖动旋转 · 滚轮/双指缩放 · 单击节点看详情 · Esc 关闭面板";
+    if (hint) hint.textContent = "工作中居中 · 空闲淡化 · 离线贴边隐藏 ｜ 拖动旋转 · 滚轮/双指缩放";
   } else if (window.SB3D) {
     const hint = net.querySelector(".pt-net-hint");
     if (hint) hint.textContent = "当前浏览器未启用 WebGL，已降级为 2D 视图 · 拖动平移 · 滚轮缩放";
+  }
+  const netCard = net.closest(".pt-net-card");
+  const fsBtn = netCard && netCard.querySelector("[data-net-fs]");
+  if (fsBtn && !fsBtn.dataset.bound) {
+    fsBtn.dataset.bound = "1";
+    fsBtn.addEventListener("click", () => {
+      const on = netCard.classList.toggle("net-fullscreen");
+      document.body.classList.toggle("net-fs", on);
+      fsBtn.textContent = on ? "退出全屏" : "⛶ 全屏";
+      setTimeout(() => window.SB3D && SB3D.resize && SB3D.resize(), 60);
+    });
   }
   if (!is3D && !state.net.inited) { fitNet(); state.net.inited = true; }   // 定时刷新时保留用户视角
   else if (!is3D) applyNet();
@@ -507,6 +519,16 @@ function renderDetail() {
 }
 
 document.addEventListener("keydown", e => {
+  if (e.key === "Escape") {
+    const fs = document.querySelector(".pt-net-card.net-fullscreen");
+    if (fs) {
+      fs.classList.remove("net-fullscreen");
+      document.body.classList.remove("net-fs");
+      const b = fs.querySelector("[data-net-fs]");
+      if (b) b.textContent = "⛶ 全屏";
+      if (window.SB3D) SB3D.resize();
+    }
+  }
   if (e.key === "Escape" && state.panel.target) closeDetail();
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
     e.preventDefault();
@@ -1092,7 +1114,7 @@ function renderSettingsPage(host) {
 
 /* ---------- 数据更新：平滑刷新当前页 ---------- */
 document.addEventListener("sb:data", () => {
-  if (window.SB3D && state.view === "command") SB3D.refresh(DEMO.agents);
+  if (window.SB3D && state.view === "command") SB3D.update(DEMO.agents, DEMO.edges);
   const host = $("#views");
   if (!host) return;
   const ae = document.activeElement;

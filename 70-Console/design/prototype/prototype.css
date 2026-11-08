@@ -113,6 +113,18 @@
 }
 .pt-net.is-3d .pt-net-3d { display: block; }
 .pt-net.is-3d .pt-net-canvas { display: none; }
+
+/* 全屏：只保留协作网络 */
+.pt-net-card.net-fullscreen {
+  position: fixed; inset: 0; z-index: 3000; margin: 0; border-radius: 0;
+  display: flex; flex-direction: column; background: #05070f;
+}
+.pt-net-card.net-fullscreen .pt-net { flex: 1; height: auto; border-radius: 0; }
+.pt-net-card.net-fullscreen .pt-net-head {
+  padding: 12px 20px; background: rgba(5, 7, 15, .92);
+  border-bottom: 1px solid rgba(148, 163, 184, .16);
+}
+body.net-fs { overflow: hidden; }
 .pt-net-svg { position: absolute; top: 0; left: 0; overflow: visible; }
 .pt-edge { cursor: pointer; }
 .pt-edge .pt-edge-line { transition: opacity var(--sb-motion-fast) var(--sb-ease), stroke-width var(--sb-motion-fast) var(--sb-ease); }
