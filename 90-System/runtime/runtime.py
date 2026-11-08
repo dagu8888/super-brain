@@ -391,11 +391,20 @@ def router_loop():
     conn = db()
     rules = RuleEngine()
     conf = load_llm()
+    circuit = {"open": False}                     # LLM 熔断状态（本线程内记忆，用于跳变留痕）
     while not stop.is_set():
         heartbeat(conn, "router", "routing")
         inbox_adapter(conn)
         cron_adapter(conn)
         watchdog_adapter(conn)
+        # LLM 熔断（设计书 §7）：近 10min ≥2 个任务因 LLM 失败重试 → 暂停 inbox-triage 入队
+        llm_fails = conn.execute(
+            "SELECT COUNT(*) FROM tasks WHERE error LIKE '%LLM%' AND claimed_at>?",
+            (int(time.time()) - 600,)).fetchone()[0]
+        llm_down = llm_fails >= 2
+        if llm_down != circuit["open"]:
+            circuit["open"] = llm_down
+            log_event("circuit_open" if llm_down else "circuit_closed", recent_llm_fails=llm_fails)
         # 内部留痕事件（进度/回执/指令结果等）不参与路由，直接归档
         conn.execute(
             "UPDATE events SET status='done' WHERE status='new' AND type IN "
@@ -414,6 +423,8 @@ def router_loop():
                 log_event("event_dropped", event=eid, rule=rname, source=source)
                 continue
             if dispatch and task_type:
+                if llm_down and task_type == "inbox-triage":
+                    continue                        # 熔断：事件留 new，恢复后自动续
                 # 规则直派：URGENT 提优先级+回执；ALLOW+dispatch 为确定性映射（不调模型）
                 enqueue_task(conn, ev, task_type, ev["payload"], priority=2 if action == "URGENT" else prio)
                 if action == "URGENT":
@@ -525,7 +536,7 @@ def worker_loop(worker_id):
             ctx.progress("开始执行")
             result = handler(task["payload"], ctx)
             cur = conn.execute(
-                "UPDATE tasks SET status='done', done_at=?, result=? "
+                "UPDATE tasks SET status='done', done_at=?, result=?, error=NULL "
                 "WHERE id=? AND lease_token=? AND status='doing'",
                 (int(time.time()), str(result)[:500], task["id"], task["token"]))
             conn.commit()
