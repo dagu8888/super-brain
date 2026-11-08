@@ -1,3 +1,183 @@
 {"ts": "2026-11-09T00:00:08+0800", "kind": "task_enqueued", "type": "chat", "event": "evt_20261109_a2a991", "priority": 1}
 {"ts": "2026-11-09T00:00:09+0800", "kind": "task_claimed", "id": 220, "type": "chat", "by": "chat-worker", "token": 1}
 {"ts": "2026-11-09T00:00:11+0800", "kind": "task_done", "id": 220, "type": "chat", "by": "chat-worker", "result": "已答复 → 60-Outputs/chat/20261109-000011-test-agent-worker-心跳丢失事件确认.md"}
+{"ts": "2026-11-09T00:33:19+0800", "kind": "api_auth_failed", "ip": "123.113.170.230", "path": "/api/v1/settings/public"}
+{"ts": "2026-11-09T01:35:31+0800", "kind": "runtime_stopped", "pid": 21240}
+{"ts": "2026-11-09T01:35:31+0800", "kind": "api_started", "bind": "0.0.0.0", "port": 18765, "chiefs": ["deepseek-chief", "dsh-chief", "dsh2-chief", "grok-chief", "maus-chief", "maus2-chief", "trae-chief"], "viewers": ["console"]}
+{"ts": "2026-11-09T01:35:33+0800", "kind": "runtime_started", "version": "v2", "agents": ["router", "reaper", "analysis-worker", "archive-worker", "chat-worker", "code-worker", "knowledge-worker", "research-worker", "trae-developer"], "pid": 25405}
+{"ts": "2026-11-09T01:35:33+0800", "kind": "api_extra_port_started", "port": 80}
+{"ts": "2026-11-09T02:26:56+0800", "kind": "api_auth_failed", "ip": "104.28.240.139", "path": "/api/review/fractal?days=30"}
+{"ts": "2026-11-09T02:27:29+0800", "kind": "api_auth_failed", "ip": "104.28.240.139", "path": "/api/review/annual?year=2026"}
+{"ts": "2026-11-09T03:00:05+0800", "kind": "task_enqueued", "type": "chat", "event": "evt_20261109_ddef2e", "priority": 1}
+{"ts": "2026-11-09T03:00:07+0800", "kind": "task_claimed", "id": 223, "type": "chat", "by": "chat-worker", "token": 1}
+{"ts": "2026-11-09T03:00:12+0800", "kind": "task_done", "id": 223, "type": "chat", "by": "chat-worker", "result": "已答复 → 60-Outputs/chat/20261109-030012-test-agent-worker-心跳丢失排查建议.md"}
+{"ts": "2026-11-09T03:11:28+0800", "kind": "runtime_stopped", "pid": 25405}
+{"ts": "2026-11-09T03:11:28+0800", "kind": "api_started", "bind": "0.0.0.0", "port": 18765, "chiefs": ["deepseek-chief", "dsh-chief", "dsh2-chief", "grok-chief", "maus-chief", "maus2-chief", "trae-chief"], "viewers": ["console"]}
+{"ts": "2026-11-09T03:11:28+0800", "kind": "api_extra_port_started", "port": 80}
+{"ts": "2026-11-09T03:11:28+0800", "kind": "runtime_started", "version": "v2", "agents": ["router", "reaper", "analysis-worker", "archive-worker", "chat-worker", "code-worker", "knowledge-worker", "research-worker", "trae-developer"], "pid": 26344}
+{"ts": "2026-11-09T04:00:10+0800", "kind": "task_enqueued", "type": "chat", "event": "evt_20261109_6be9fb", "priority": 1}
+{"ts": "2026-11-09T04:00:14+0800", "kind": "task_claimed", "id": 224, "type": "chat", "by": "chat-worker", "token": 1}
+{"ts": "2026-11-09T04:00:17+0800", "kind": "task_done", "id": 224, "type": "chat", "by": "chat-worker", "result": "已答复 → 60-Outputs/chat/20261109-040017-test-agent-worker-心跳丢失：知识库无记录.md"}
+{"ts": "2026-11-09T04:06:13+0800", "kind": "api_auth_failed", "ip": "80.94.95.211", "path": "/api/.env"}
+{"ts": "2026-11-09T04:07:57+0800", "kind": "api_auth_failed", "ip": "80.94.95.211", "path": "/api/test"}
+{"ts": "2026-11-09T04:09:02+0800", "kind": "api_auth_failed", "ip": "80.94.95.211", "path": "/api/v2/.env"}
+{"ts": "2026-11-09T04:24:35+0800", "kind": "runtime_stopped", "pid": 26344}
+{"ts": "2026-11-09T04:24:35+0800", "kind": "api_started", "bind": "0.0.0.0", "port": 18765, "chiefs": ["deepseek-chief", "dsh-chief", "dsh2-chief", "grok-chief", "maus-chief", "maus2-chief", "muse-chief", "trae-chief"], "viewers": ["console"]}
+{"ts": "2026-11-09T04:24:35+0800", "kind": "runtime_started", "version": "v2", "agents": ["router", "reaper", "analysis-worker", "archive-worker", "chat-worker", "code-worker", "knowledge-worker", "research-worker", "trae-developer"], "pid": 27492}
+{"ts": "2026-11-09T04:24:35+0800", "kind": "api_extra_port_started", "port": 80}
+{"ts": "2026-11-09T04:24:50+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "list", "ok": true}
+{"ts": "2026-11-09T04:47:14+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "list", "ok": true}
+{"ts": "2026-11-09T04:50:48+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "status", "ok": true}
+{"ts": "2026-11-09T04:50:48+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "progress", "ok": true}
+{"ts": "2026-11-09T05:00:07+0800", "kind": "task_enqueued", "type": "chat", "event": "evt_20261109_ad5342", "priority": 1}
+{"ts": "2026-11-09T05:00:10+0800", "kind": "task_claimed", "id": 225, "type": "chat", "by": "chat-worker", "token": 1}
+{"ts": "2026-11-09T05:00:14+0800", "kind": "task_done", "id": 225, "type": "chat", "by": "chat-worker", "result": "已答复 → 60-Outputs/chat/20261109-050014-test-agent-worker-心跳丢失：知识库无记录.md"}
+{"ts": "2026-11-09T05:43:32+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "submit", "ok": true}
+{"ts": "2026-11-09T05:43:35+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "list", "ok": true}
+{"ts": "2026-11-09T05:43:39+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "status", "ok": true}
+{"ts": "2026-11-09T05:43:39+0800", "kind": "task_enqueued", "type": "chat", "event": "evt_20261109_bca22b", "priority": 0}
+{"ts": "2026-11-09T05:43:39+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "progress", "ok": true}
+{"ts": "2026-11-09T05:43:40+0800", "kind": "task_claimed", "id": 226, "type": "chat", "by": "chat-worker", "token": 1}
+{"ts": "2026-11-09T05:43:45+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "list", "ok": true}
+{"ts": "2026-11-09T05:43:47+0800", "kind": "task_done", "id": 226, "type": "chat", "by": "chat-worker", "result": "已答复 → 60-Outputs/chat/20261109-054347-V2.0-共建回执：knowledge-worker.md"}
+{"ts": "2026-11-09T05:43:52+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "status", "ok": true}
+{"ts": "2026-11-09T05:43:52+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "progress", "ok": true}
+{"ts": "2026-11-09T05:55:05+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "list", "ok": true}
+{"ts": "2026-11-09T05:55:08+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "status", "ok": true}
+{"ts": "2026-11-09T05:59:56+0800", "kind": "runtime_stopped", "pid": 27492}
+{"ts": "2026-11-09T05:59:57+0800", "kind": "api_started", "bind": "0.0.0.0", "port": 18765, "chiefs": ["deepseek-chief", "dsh-chief", "dsh2-chief", "grok-chief", "maus-chief", "maus2-chief", "muse-chief", "trae-chief"], "viewers": ["console"]}
+{"ts": "2026-11-09T05:59:57+0800", "kind": "api_extra_port_started", "port": 80}
+{"ts": "2026-11-09T05:59:57+0800", "kind": "runtime_started", "version": "v2", "agents": ["router", "reaper", "analysis-worker", "archive-worker", "chat-worker", "code-worker", "knowledge-worker", "research-worker", "trae-developer"], "pid": 28373}
+{"ts": "2026-11-09T06:00:06+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "submit", "ok": false}
+{"ts": "2026-11-09T06:00:06+0800", "kind": "assist_enqueued", "by": "muse-chief", "task": 227, "to": "DSH一号@主机"}
+{"ts": "2026-11-09T06:00:06+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "submit", "ok": true}
+{"ts": "2026-11-09T06:00:06+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "delegate", "ok": false}
+{"ts": "2026-11-09T06:00:08+0800", "kind": "task_enqueued", "type": "chat", "event": "evt_20261109_73240d", "priority": 1}
+{"ts": "2026-11-09T06:00:12+0800", "kind": "task_claimed", "id": 228, "type": "chat", "by": "chat-worker", "token": 1}
+{"ts": "2026-11-09T06:00:13+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "delegate", "ok": true}
+{"ts": "2026-11-09T06:00:13+0800", "kind": "task_done", "id": 228, "type": "chat", "by": "chat-worker", "result": "已答复 → 60-Outputs/chat/20261109-060013-test-agent-worker-心跳丢失确认.md"}
+{"ts": "2026-11-09T06:00:14+0800", "kind": "task_claimed", "id": 227, "type": "chat", "by": "chat-worker", "token": 1}
+{"ts": "2026-11-09T06:00:17+0800", "kind": "task_done", "id": 227, "type": "chat", "by": "chat-worker", "result": "已答复 → 60-Outputs/chat/20261109-060017-T3验收：名册校验正向用例（知识库未收录）.md"}
+{"ts": "2026-11-09T06:08:46+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "list", "ok": true}
+{"ts": "2026-11-09T06:08:46+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "submit", "ok": false}
+{"ts": "2026-11-09T06:08:47+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "list", "ok": true}
+{"ts": "2026-11-09T06:08:47+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "status", "ok": true}
+{"ts": "2026-11-09T06:12:03+0800", "kind": "assist_enqueued", "by": "muse-chief", "task": 229, "to": "DSH一号@主机"}
+{"ts": "2026-11-09T06:12:03+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "submit", "ok": true}
+{"ts": "2026-11-09T06:12:03+0800", "kind": "assist_enqueued", "by": "muse-chief", "task": 230, "to": "DSH二号@笔记本"}
+{"ts": "2026-11-09T06:12:03+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "submit", "ok": true}
+{"ts": "2026-11-09T06:14:54+0800", "kind": "runtime_stopped", "pid": 28373}
+{"ts": "2026-11-09T06:14:54+0800", "kind": "api_started", "bind": "0.0.0.0", "port": 18765, "chiefs": ["deepseek-chief", "dsh-chief", "dsh2-chief", "grok-chief", "maus-chief", "maus2-chief", "muse-chief", "trae-chief"], "viewers": ["console"]}
+{"ts": "2026-11-09T06:14:54+0800", "kind": "runtime_started", "version": "v2", "agents": ["router", "reaper", "analysis-worker", "archive-worker", "chat-worker", "code-worker", "knowledge-worker", "research-worker", "trae-developer"], "pid": 28786}
+{"ts": "2026-11-09T06:14:54+0800", "kind": "api_extra_port_started", "port": 80}
+{"ts": "2026-11-09T06:14:57+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "kb_search", "ok": true}
+{"ts": "2026-11-09T06:14:57+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "kb_read", "ok": true}
+{"ts": "2026-11-09T06:14:57+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "kb_read", "ok": false}
+{"ts": "2026-11-09T06:16:47+0800", "kind": "api_call", "chief": "trae-chief", "cmd": "heartbeat", "ok": true}
+{"ts": "2026-11-09T06:16:52+0800", "kind": "api_call", "chief": "trae-chief", "cmd": "heartbeat", "ok": true}
+{"ts": "2026-11-09T06:17:52+0800", "kind": "api_call", "chief": "trae-chief", "cmd": "heartbeat", "ok": true}
+{"ts": "2026-11-09T06:17:57+0800", "kind": "api_call", "chief": "trae-chief", "cmd": "heartbeat", "ok": true}
+{"ts": "2026-11-09T06:18:02+0800", "kind": "api_call", "chief": "trae-chief", "cmd": "heartbeat", "ok": true}
+{"ts": "2026-11-09T06:18:07+0800", "kind": "api_call", "chief": "trae-chief", "cmd": "heartbeat", "ok": true}
+{"ts": "2026-11-09T06:18:53+0800", "kind": "api_call", "chief": "trae-chief", "cmd": "heartbeat", "ok": true}
+{"ts": "2026-11-09T06:18:54+0800", "kind": "api_call", "chief": "trae-chief", "cmd": "heartbeat", "ok": true}
+{"ts": "2026-11-09T06:18:54+0800", "kind": "api_call", "chief": "trae-chief", "cmd": "heartbeat", "ok": true}
+{"ts": "2026-11-09T06:22:54+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "list", "ok": true}
+{"ts": "2026-11-09T06:22:55+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "status", "ok": true}
+{"ts": "2026-11-09T06:22:55+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "status", "ok": true}
+{"ts": "2026-11-09T06:22:56+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "status", "ok": true}
+{"ts": "2026-11-09T06:22:56+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "status", "ok": true}
+{"ts": "2026-11-09T06:22:57+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "status", "ok": true}
+{"ts": "2026-11-09T06:22:57+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "status", "ok": true}
+{"ts": "2026-11-09T06:22:58+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "status", "ok": true}
+{"ts": "2026-11-09T06:22:58+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "status", "ok": true}
+{"ts": "2026-11-09T06:22:59+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "status", "ok": true}
+{"ts": "2026-11-09T06:22:59+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "status", "ok": true}
+{"ts": "2026-11-09T06:23:00+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "list", "ok": true}
+{"ts": "2026-11-09T06:34:06+0800", "kind": "task_enqueued", "type": "chat", "event": "evt_20261109_0df8e2", "priority": 1}
+{"ts": "2026-11-09T06:34:09+0800", "kind": "task_claimed", "id": 231, "type": "chat", "by": "chat-worker", "token": 1}
+{"ts": "2026-11-09T06:34:12+0800", "kind": "task_done", "id": 231, "type": "chat", "by": "chat-worker", "result": "已答复 → 60-Outputs/chat/20261109-063412-Trae@笔记本-心跳丢失处理提示.md"}
+{"ts": "2026-11-09T06:41:17+0800", "kind": "runtime_stopped", "pid": 28786}
+{"ts": "2026-11-09T06:41:19+0800", "kind": "thread_crashed", "thread": "router", "error": "database is locked"}
+{"ts": "2026-11-09T06:41:19+0800", "kind": "api_started", "bind": "0.0.0.0", "port": 18765, "chiefs": ["deepseek-chief", "dsh-chief", "dsh2-chief", "grok-chief", "maus-chief", "maus2-chief", "muse-chief", "trae-chief"], "viewers": ["console"]}
+{"ts": "2026-11-09T06:41:19+0800", "kind": "api_extra_port_started", "port": 80}
+{"ts": "2026-11-09T06:41:19+0800", "kind": "runtime_started", "version": "v2", "agents": ["router", "reaper", "analysis-worker", "archive-worker", "chat-worker", "code-worker", "knowledge-worker", "research-worker", "trae-developer"], "pid": 39379}
+{"ts": "2026-11-09T06:41:19+0800", "kind": "worker_restarted", "thread": "router"}
+{"ts": "2026-11-09T06:41:36+0800", "kind": "runtime_stopped", "pid": 39379}
+{"ts": "2026-11-09T06:41:36+0800", "kind": "thread_crashed", "thread": "router", "error": "database is locked"}
+{"ts": "2026-11-09T06:41:36+0800", "kind": "api_started", "bind": "0.0.0.0", "port": 18765, "chiefs": ["deepseek-chief", "dsh-chief", "dsh2-chief", "grok-chief", "maus-chief", "maus2-chief", "muse-chief", "trae-chief"], "viewers": ["console"]}
+{"ts": "2026-11-09T06:41:36+0800", "kind": "api_extra_port_started", "port": 80}
+{"ts": "2026-11-09T06:41:36+0800", "kind": "runtime_started", "version": "v2", "agents": ["router", "reaper", "analysis-worker", "archive-worker", "chat-worker", "code-worker", "knowledge-worker", "research-worker", "trae-developer"], "pid": 40065}
+{"ts": "2026-11-09T06:41:36+0800", "kind": "worker_restarted", "thread": "router"}
+{"ts": "2026-11-09T06:42:27+0800", "kind": "runtime_stopped", "pid": 40065}
+{"ts": "2026-11-09T06:42:29+0800", "kind": "api_started", "bind": "0.0.0.0", "port": 18765, "chiefs": ["deepseek-chief", "dsh-chief", "dsh2-chief", "grok-chief", "maus-chief", "maus2-chief", "muse-chief", "trae-chief"], "viewers": ["console"]}
+{"ts": "2026-11-09T06:42:29+0800", "kind": "api_extra_port_started", "port": 80}
+{"ts": "2026-11-09T06:42:29+0800", "kind": "runtime_started", "version": "v2", "agents": ["router", "reaper", "analysis-worker", "archive-worker", "chat-worker", "code-worker", "knowledge-worker", "research-worker", "trae-developer"], "pid": 46008}
+{"ts": "2026-11-09T06:43:44+0800", "kind": "runtime_stopped", "pid": 46008}
+{"ts": "2026-11-09T06:43:45+0800", "kind": "api_started", "bind": "0.0.0.0", "port": 18765, "chiefs": ["deepseek-chief", "dsh-chief", "dsh2-chief", "grok-chief", "maus-chief", "maus2-chief", "muse-chief", "trae-chief"], "viewers": ["console"]}
+{"ts": "2026-11-09T06:43:45+0800", "kind": "api_extra_port_started", "port": 80}
+{"ts": "2026-11-09T06:43:45+0800", "kind": "runtime_started", "version": "v2", "agents": ["router", "reaper", "analysis-worker", "archive-worker", "chat-worker", "code-worker", "knowledge-worker", "research-worker", "trae-developer"], "pid": 48864}
+{"ts": "2026-11-09T06:45:56+0800", "kind": "runtime_stopped", "pid": 48864}
+{"ts": "2026-11-09T06:45:56+0800", "kind": "thread_crashed", "thread": "orchestrator", "error": "orchestrator_loop() missing 1 required positional argument: 'stop'"}
+{"ts": "2026-11-09T06:45:56+0800", "kind": "thread_crashed", "thread": "router", "error": "database is locked"}
+{"ts": "2026-11-09T06:45:56+0800", "kind": "api_started", "bind": "0.0.0.0", "port": 18765, "chiefs": ["deepseek-chief", "dsh-chief", "dsh2-chief", "grok-chief", "maus-chief", "maus2-chief", "muse-chief", "trae-chief"], "viewers": ["console"]}
+{"ts": "2026-11-09T06:45:56+0800", "kind": "api_extra_port_started", "port": 80}
+{"ts": "2026-11-09T06:45:56+0800", "kind": "runtime_started", "version": "v2", "agents": ["router", "reaper", "orchestrator", "analysis-worker", "archive-worker", "chat-worker", "code-worker", "knowledge-worker", "research-worker", "trae-developer"], "pid": 56505}
+{"ts": "2026-11-09T06:45:56+0800", "kind": "worker_restarted", "thread": "router"}
+{"ts": "2026-11-09T06:45:56+0800", "kind": "worker_restarted", "thread": "orchestrator"}
+{"ts": "2026-11-09T06:45:56+0800", "kind": "thread_crashed", "thread": "orchestrator", "error": "orchestrator_loop() missing 1 required positional argument: 'stop'"}
+{"ts": "2026-11-09T06:46:13+0800", "kind": "api_call", "chief": "trae-chief", "cmd": "submit", "ok": true}
+{"ts": "2026-11-09T06:46:26+0800", "kind": "runtime_stopped", "pid": 56505}
+{"ts": "2026-11-09T06:46:27+0800", "kind": "thread_crashed", "thread": "orchestrator", "error": "orchestrator_loop() missing 1 required positional argument: 'stop'"}
+{"ts": "2026-11-09T06:46:27+0800", "kind": "api_started", "bind": "0.0.0.0", "port": 18765, "chiefs": ["deepseek-chief", "dsh-chief", "dsh2-chief", "grok-chief", "maus-chief", "maus2-chief", "muse-chief", "trae-chief"], "viewers": ["console"]}
+{"ts": "2026-11-09T06:46:27+0800", "kind": "api_extra_port_started", "port": 80}
+{"ts": "2026-11-09T06:46:27+0800", "kind": "runtime_started", "version": "v2", "agents": ["router", "reaper", "orchestrator", "analysis-worker", "archive-worker", "chat-worker", "code-worker", "knowledge-worker", "research-worker", "trae-developer"], "pid": 57186}
+{"ts": "2026-11-09T06:46:27+0800", "kind": "worker_restarted", "thread": "orchestrator"}
+{"ts": "2026-11-09T06:46:27+0800", "kind": "thread_crashed", "thread": "orchestrator", "error": "orchestrator_loop() missing 1 required positional argument: 'stop'"}
+{"ts": "2026-11-09T06:46:57+0800", "kind": "thread_crashed", "thread": "orchestrator", "error": "orchestrator_loop() missing 1 required positional argument: 'stop'"}
+{"ts": "2026-11-09T06:46:57+0800", "kind": "worker_restarted", "thread": "orchestrator"}
+{"ts": "2026-11-09T06:47:07+0800", "kind": "runtime_stopped", "pid": 57186}
+{"ts": "2026-11-09T06:47:08+0800", "kind": "thread_crashed", "thread": "orchestrator", "error": "orchestrator_loop() missing 1 required positional argument: 'stop'"}
+{"ts": "2026-11-09T06:47:08+0800", "kind": "api_started", "bind": "0.0.0.0", "port": 18765, "chiefs": ["deepseek-chief", "dsh-chief", "dsh2-chief", "grok-chief", "maus-chief", "maus2-chief", "muse-chief", "trae-chief"], "viewers": ["console"]}
+{"ts": "2026-11-09T06:47:08+0800", "kind": "api_extra_port_started", "port": 80}
+{"ts": "2026-11-09T06:47:08+0800", "kind": "runtime_started", "version": "v2", "agents": ["router", "reaper", "orchestrator", "analysis-worker", "archive-worker", "chat-worker", "code-worker", "knowledge-worker", "research-worker", "trae-developer"], "pid": 57995}
+{"ts": "2026-11-09T06:47:08+0800", "kind": "thread_crashed", "thread": "orchestrator", "error": "orchestrator_loop() missing 1 required positional argument: 'stop'"}
+{"ts": "2026-11-09T06:47:08+0800", "kind": "worker_restarted", "thread": "orchestrator"}
+{"ts": "2026-11-09T06:47:32+0800", "kind": "runtime_stopped", "pid": 57995}
+{"ts": "2026-11-09T06:47:32+0800", "kind": "orch_reconcile", "open_plans": 0}
+{"ts": "2026-11-09T06:47:32+0800", "kind": "orch_plan_started", "plan": "plan_20261109_84bf18", "event": "evt_20261109_733415", "by": "trae-chief", "steps": 1, "mode": "all_required"}
+{"ts": "2026-11-09T06:47:32+0800", "kind": "orch_step_enqueued", "plan": "plan_20261109_84bf18", "step": "ping", "task": 232, "type": "chat"}
+{"ts": "2026-11-09T06:47:32+0800", "kind": "task_claimed", "id": 232, "type": "chat", "by": "chat-worker", "token": 1}
+{"ts": "2026-11-09T06:47:32+0800", "kind": "api_started", "bind": "0.0.0.0", "port": 18765, "chiefs": ["deepseek-chief", "dsh-chief", "dsh2-chief", "grok-chief", "maus-chief", "maus2-chief", "muse-chief", "trae-chief"], "viewers": ["console"]}
+{"ts": "2026-11-09T06:47:32+0800", "kind": "api_extra_port_started", "port": 80}
+{"ts": "2026-11-09T06:47:32+0800", "kind": "runtime_started", "version": "v2", "agents": ["router", "reaper", "orchestrator", "analysis-worker", "archive-worker", "chat-worker", "code-worker", "knowledge-worker", "research-worker", "trae-developer"], "pid": 58557}
+{"ts": "2026-11-09T06:47:33+0800", "kind": "task_done", "id": 232, "type": "chat", "by": "chat-worker", "result": "已答复 → 60-Outputs/chat/20261109-064733-冒烟测试.md"}
+{"ts": "2026-11-09T06:47:37+0800", "kind": "orch_plan_awaiting_review", "plan": "plan_20261109_84bf18", "summary": "/root/super-brain/60-Outputs/orch/plan_20261109_84bf18.md"}
+{"ts": "2026-11-09T06:47:49+0800", "kind": "plan_review_intent", "plan": "plan_20261109_84bf18", "decision": "plan_approve", "by": "trae-chief"}
+{"ts": "2026-11-09T06:47:49+0800", "kind": "api_call", "chief": "trae-chief", "cmd": "plan_approve", "ok": true}
+{"ts": "2026-11-09T06:47:52+0800", "kind": "orch_plan_done", "plan": "plan_20261109_84bf18", "by": "plan_review"}
+{"ts": "2026-11-09T06:47:56+0800", "kind": "api_call", "chief": "trae-chief", "cmd": "submit", "ok": true}
+{"ts": "2026-11-09T06:48:03+0800", "kind": "task_enqueued", "type": "chat", "event": "evt_20261109_26b014", "priority": 0}
+{"ts": "2026-11-09T06:48:04+0800", "kind": "task_claimed", "id": 233, "type": "chat", "by": "chat-worker", "token": 1}
+{"ts": "2026-11-09T06:48:06+0800", "kind": "task_done", "id": 233, "type": "chat", "by": "chat-worker", "result": "已答复 → 60-Outputs/chat/20261109-064806-正常.md"}
+{"ts": "2026-11-09T06:51:41+0800", "kind": "runtime_stopped", "pid": 58557}
+{"ts": "2026-11-09T06:51:42+0800", "kind": "orch_reconcile", "open_plans": 0}
+{"ts": "2026-11-09T06:51:42+0800", "kind": "api_started", "bind": "0.0.0.0", "port": 18765, "chiefs": ["deepseek-chief", "dsh-chief", "dsh2-chief", "grok-chief", "maus-chief", "maus2-chief", "muse-chief", "trae-chief"], "viewers": ["console"]}
+{"ts": "2026-11-09T06:51:42+0800", "kind": "runtime_started", "version": "v2", "agents": ["router", "reaper", "orchestrator", "analysis-worker", "archive-worker", "chat-worker", "code-worker", "knowledge-worker", "research-worker", "trae-developer"], "pid": 76857}
+{"ts": "2026-11-09T06:51:42+0800", "kind": "api_extra_port_started", "port": 80}
+{"ts": "2026-11-09T06:52:48+0800", "kind": "runtime_stopped", "pid": 76857}
+{"ts": "2026-11-09T06:52:49+0800", "kind": "orch_reconcile", "open_plans": 0}
+{"ts": "2026-11-09T06:52:49+0800", "kind": "thread_crashed", "thread": "router", "error": "database is locked"}
+{"ts": "2026-11-09T06:52:49+0800", "kind": "api_started", "bind": "0.0.0.0", "port": 18765, "chiefs": ["deepseek-chief", "dsh-chief", "dsh2-chief", "grok-chief", "maus-chief", "maus2-chief", "muse-chief", "trae-chief"], "viewers": ["console"]}
+{"ts": "2026-11-09T06:52:49+0800", "kind": "runtime_started", "version": "v2", "agents": ["router", "reaper", "orchestrator", "analysis-worker", "archive-worker", "chat-worker", "code-worker", "knowledge-worker", "research-worker", "trae-developer"], "pid": 78185}
+{"ts": "2026-11-09T06:52:49+0800", "kind": "api_extra_port_started", "port": 80}
+{"ts": "2026-11-09T06:52:49+0800", "kind": "worker_restarted", "thread": "router"}
+{"ts": "2026-11-09T06:59:07+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "kb_read", "ok": true}
+{"ts": "2026-11-09T06:59:07+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "kb_search", "ok": true}
+{"ts": "2026-11-09T06:59:34+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "list", "ok": true}
+{"ts": "2026-11-09T06:59:34+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "submit", "ok": true}
+{"ts": "2026-11-09T06:59:39+0800", "kind": "orch_plan_rejected", "event": "evt_20261109_17a525", "reason": "环形依赖: A -> B -> A"}
+{"ts": "2026-11-09T06:59:50+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "list", "ok": true}
+{"ts": "2026-11-09T06:59:55+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "kb_read", "ok": true}
+{"ts": "2026-11-09T06:59:55+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "kb_search", "ok": true}
+{"ts": "2026-11-09T06:59:56+0800", "kind": "api_call", "chief": "muse-chief", "cmd": "kb_search", "ok": true}
