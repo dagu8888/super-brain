@@ -15,7 +15,7 @@ function layoutAgents() {
   const chiefs = DEMO.agents.filter(a => a.kind === "chief");
   const workers = DEMO.agents.filter(a => a.kind === "worker");
   const cols = Math.max(chiefs.length, workers.length, 1);
-  WORLD_W = PAD_X * 2 + NODE_W + (cols - 1) * GAP_X;
+  WORLD_W = PAD_X * 2 + cols * NODE_W + (cols - 1) * GAP_X;
   const place = (list, y) => {
     const total = list.length;
     if (!total) return;
