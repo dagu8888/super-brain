@@ -4,3 +4,4 @@ state.db-wal
 state.db-shm
 __pycache__/
 llm.json
+api_tokens.json
