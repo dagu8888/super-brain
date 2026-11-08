@@ -12,6 +12,11 @@
   const rgba = (c, a) => `rgba(${(c >> 16) & 255},${(c >> 8) & 255},${c & 255},${a})`;
 
   const bucket = a => (a.status === "offline" ? "offline" : (a.status === "working" ? "working" : "idle"));
+  const STATUS_LABEL = {
+    working: "工作中", idle: "空闲", offline: "离线", collaborating: "协作中",
+    waiting: "等待", completed: "已完成", error: "异常",
+  };
+  const statusLabel = a => STATUS_LABEL[a.status] || a.status || "未知";
   const colorOf = a => (a.status === "offline" ? 0x64748b
     : a.status === "working" ? 0xfbbf24
       : (a.kind === "chief" ? 0x8b5cf6 : 0x2dd4bf));
@@ -76,6 +81,9 @@
     cancelAnimationFrame(R.raf);
     R.active = false;
     if (R.ro) R.ro.disconnect();
+    if (R.onKey) document.removeEventListener("keydown", R.onKey);
+    if (R.tip) R.tip.remove();
+    if (R.hud) R.hud.remove();
     if (R.particles) { R.particles.geometry.dispose(); R.particles.material.dispose(); }
     R.scene.traverse(o => {
       if (o.geometry) o.geometry.dispose();
@@ -157,7 +165,12 @@
       fit: 12, zoom: 1, theta: 0.42, phi: 0.18, auto: true,
       dragging: false, moved: false, lastX: 0, lastY: 0, pointers: new Map(), pinch: null,
       raf: 0, last: performance.now(), active: true, w: W(), h: H(),
+      mode: "overview", focusId: null, hoverId: null, lookTarget: new T.Vector3(),
+      tip: null, hud: null,
     };
+    mountOverlays(canvas);
+    R.onKey = e => { if (e.key === "Escape" && R && R.mode === "focus") exitFocus(); };
+    document.addEventListener("keydown", R.onKey);
 
     setData(agents, edges, true);
     bindCanvas();
@@ -172,8 +185,152 @@
     ro.observe(canvas);
     R.ro = ro;
     computeFit();
+    R.lookTarget.set(0, 0, 0);
     start();
     return true;
+  }
+
+  /* ---------- 浮层：hover 概况 + 聚焦 HUD ---------- */
+  function mountOverlays(canvas) {
+    const host = canvas.parentElement;
+    const tip = document.createElement("div");
+    tip.className = "net-tip";
+    tip.hidden = true;
+    host.appendChild(tip);
+    const hud = document.createElement("div");
+    hud.className = "net-hud";
+    hud.hidden = true;
+    hud.innerHTML = `
+      <button class="net-hud-back" type="button">← 返回全景（Esc）</button>
+      <div class="net-hud-head">
+        <strong class="h-name"></strong>
+        <span class="sb-status h-status" data-status="idle"></span>
+      </div>
+      <div class="net-hud-meta h-meta"></div>
+      <div class="net-hud-task"><span class="h-task">暂无任务</span></div>
+      <div class="net-hud-bar h-bar" hidden><i></i></div>
+      <h4>最近任务</h4>
+      <ul class="net-hud-recent h-recent"><li class="h-empty">暂无数据</li></ul>
+      <button class="net-hud-more" type="button">查看完整详情</button>`;
+    host.appendChild(hud);
+    R.tip = tip;
+    R.hud = hud;
+    hud.querySelector(".net-hud-back").addEventListener("click", () => exitFocus());
+    hud.querySelector(".net-hud-more").addEventListener("click", () => {
+      if (R.focusId && R.handlers.onMore) R.handlers.onMore(R.focusId);
+    });
+  }
+
+  function tipHTML(a) {
+    return `<div class="net-tip-title"><i style="background:#${colorOf(a).toString(16).padStart(6, "0")}"></i>
+      <strong>${a.name}</strong><span>${statusLabel(a)}</span></div>
+      <div class="net-tip-meta">${a.role || ""} · ${a.kind === "chief" ? "指挥入口" : "执行者"}</div>
+      <div class="net-tip-task">${a.currentTask || "当前无任务"}</div>
+      <div class="net-tip-hint">最近活动：${a.lastActive || "—"} · 点击进入场景</div>`;
+  }
+
+  function showTip(agent, ev) {
+    if (!R || !R.tip) return;
+    const host = R.canvas.parentElement;
+    const rect = host.getBoundingClientRect();
+    R.tip.innerHTML = tipHTML(agent);
+    R.tip.hidden = false;
+    const x = Math.max(8, Math.min(rect.width - R.tip.offsetWidth - 10, ev.clientX - rect.left + 16));
+    const y = Math.max(8, Math.min(rect.height - R.tip.offsetHeight - 10, ev.clientY - rect.top + 16));
+    R.tip.style.left = x + "px";
+    R.tip.style.top = y + "px";
+  }
+
+  function hideTip() {
+    if (R && R.tip) R.tip.hidden = true;
+    if (R) R.hoverId = null;
+  }
+
+  function showHUD(agent) {
+    if (!R || !R.hud) return;
+    const hud = R.hud;
+    hud.hidden = false;
+    hud.querySelector(".h-name").textContent = agent.name;
+    const st = hud.querySelector(".h-status");
+    st.textContent = statusLabel(agent);
+    st.dataset.status = agent.status;
+    hud.querySelector(".h-meta").textContent =
+      `${agent.role || ""} · ${agent.kind === "chief" ? "指挥入口" : "执行者"} · 最近活动 ${agent.lastActive || "—"}`;
+    const task = agent.currentTask || "暂无任务";
+    hud.querySelector(".h-task").textContent = task;
+    const pct = /(\d{1,3})\s*%/.exec(task);
+    const bar = hud.querySelector(".h-bar");
+    if (pct && +pct[1] <= 100) {
+      bar.hidden = false;
+      bar.querySelector("i").style.width = pct[1] + "%";
+    } else {
+      bar.hidden = true;
+    }
+    const ul = hud.querySelector(".h-recent");
+    ul.innerHTML = '<li class="h-empty">加载中…</li>';
+    loadRecent(agent.id, ul);
+  }
+
+  async function loadRecent(id, ul) {
+    let d = null;
+    try {
+      if (window.SB && SB.api) d = (await SB.api("/api/agents/" + encodeURIComponent(id))).data;
+    } catch (e) { d = null; }
+    if (!R || !ul.isConnected) return;
+    const list = (d && d.recent_tasks) || [];
+    if (!list.length) { ul.innerHTML = '<li class="h-empty">暂无数据</li>'; return; }
+    const LBL = { done: "完成", doing: "进行中", pending: "待处理", failed: "失败", dead: "死信", cancelled: "取消" };
+    ul.innerHTML = list.slice(0, 5).map(t =>
+      `<li><span>#${t.id}</span><b>${t.type || "任务"}</b><em data-s="${t.status}">${LBL[t.status] || t.status}</em></li>`
+    ).join("");
+  }
+
+  function focusAgent(id) {
+    if (!R) return;
+    const n = R.nodes.get(id);
+    if (!n) return;
+    R.mode = "focus";
+    R.focusId = id;
+    R.auto = false;
+    hideTip();
+    applyEmphasis();
+    showHUD(n.agent);
+  }
+
+  function exitFocus() {
+    if (!R || R.mode !== "focus") return;
+    R.mode = "overview";
+    R.focusId = null;
+    R.auto = true;
+    R.zoom = 1;
+    if (R.hud) R.hud.hidden = true;
+    applyEmphasis();
+  }
+
+  function applyEmphasis() {
+    if (!R) return;
+    const fid = R.mode === "focus" ? R.focusId : null;
+    const related = new Set();
+    if (fid) {
+      related.add(fid);
+      R.edges.forEach(e => {
+        if (e.from === fid) related.add(e.to);
+        if (e.to === fid) related.add(e.from);
+      });
+    }
+    R.nodes.forEach(n => {
+      if (n.removing) { n.topacity = 0; return; }
+      const base = n.baseOpacity ?? 1;
+      const s = n.baseScale ?? n.tscale;
+      if (!fid) { n.topacity = base; n.tscale = s; return; }
+      if (n.agent.id === fid) { n.topacity = 1; n.tscale = s * 1.28; }
+      else if (related.has(n.agent.id) && base > 0.2) { n.topacity = Math.max(base, 0.5); n.tscale = s; }
+      else { n.topacity = 0.1; n.tscale = s * 0.95; }
+    });
+    R.edges.forEach(e => {
+      const on = !fid || e.from === fid || e.to === fid;
+      e.line.material.opacity = !fid ? e.base : (on ? Math.max(e.base, 0.55) : e.base * 0.18);
+    });
   }
 
   /* ---------- 数据 → 场景（diff，不重建、不重置视角） ---------- */
@@ -244,13 +401,16 @@
         const y = Math.cos(ang * 2.3) * 0.32;
         n.tpos.set(Math.cos(ang) * radius, y, Math.sin(ang) * radius * 0.92);
         const kindFactor = n.agent.kind === "chief" ? 1.06 : 1;
-        n.tscale = 2.45 * kindFactor * scale;
-        n.topacity = opacity;
+        n.baseScale = 2.45 * kindFactor * scale;
+        n.baseOpacity = opacity;
+        n.tscale = n.baseScale;
+        n.topacity = n.baseOpacity;
       });
     };
     ring(groups.working, rW, 0, 1.05, 1);
     ring(groups.idle, rI, 0.4, 0.82, 0.48);
     ring(groups.offline, rO, 0.75, 0.62, 0.1);
+    applyEmphasis();
   }
 
   function rebuildEdges(edges) {
@@ -288,6 +448,7 @@
       R.particles = new T.Points(g, m);
       R.world.add(R.particles);
     }
+    applyEmphasis();
   }
 
   function computeFit() {
@@ -307,6 +468,7 @@
   function bindCanvas() {
     const canvas = R.canvas;
     canvas.addEventListener("pointerdown", ev => {
+      hideTip();
       canvas.setPointerCapture(ev.pointerId);
       R.pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
       if (R.pointers.size === 2) {
@@ -328,7 +490,22 @@
         R.moved = true;
         return;
       }
-      if (!R.dragging) return;
+      if (!R.dragging) {
+        if (ev.pointerType === "mouse" && R.mode === "overview" && performance.now() - (R.hoverAt || 0) > 60) {
+          R.hoverAt = performance.now();
+          const id = pick(ev);
+          if (id !== R.hoverId) R.hoverId = id;
+          if (id) {
+            const n = R.nodes.get(id);
+            if (n) showTip(n.agent, ev);
+            canvas.style.cursor = "pointer";
+          } else {
+            hideTip();
+            canvas.style.cursor = "grab";
+          }
+        }
+        return;
+      }
       const dx = ev.clientX - R.lastX, dy = ev.clientY - R.lastY;
       R.lastX = ev.clientX;
       R.lastY = ev.clientY;
@@ -344,12 +521,13 @@
       canvas.style.cursor = "grab";
       if (was && !R.moved && ev.type === "pointerup") {
         const hit = pick(ev);
-        if (hit && R.handlers.onAgent) R.handlers.onAgent(hit);
+        if (hit) focusAgent(hit);
+        else if (R.mode === "focus") exitFocus();
       }
     };
     canvas.addEventListener("pointerup", end);
     canvas.addEventListener("pointercancel", end);
-    canvas.addEventListener("pointerleave", () => { canvas.style.cursor = "grab"; });
+    canvas.addEventListener("pointerleave", () => { canvas.style.cursor = "grab"; hideTip(); });
     canvas.addEventListener("wheel", ev => {
       ev.preventDefault();
       R.zoom = clamp(R.zoom * (ev.deltaY > 0 ? 1.1 : 0.9), 0.55, 2.2);
@@ -378,15 +556,28 @@
       const dt = Math.min(0.05, (now - R.last) / 1000) || 0.016;
       R.last = now;
 
-      if (!R.dragging) R.theta += dt * 0.02;
+      if (!R.dragging && R.mode === "overview") R.theta += dt * 0.02;
       const d = R.fit * R.zoom;
-      const goal = new T.Vector3(
-        Math.cos(R.phi) * Math.sin(R.theta) * d,
-        Math.sin(R.phi) * d + d * 0.1,
-        Math.cos(R.phi) * Math.cos(R.theta) * d
-      );
-      R.camera.position.lerp(goal, 1 - Math.exp(-dt * 5));
-      R.camera.lookAt(0, 0, 0);
+      let goal, look = new T.Vector3(0, 0, 0);
+      if (R.mode === "focus" && R.nodes.get(R.focusId)) {
+        const p = R.nodes.get(R.focusId).sprite.position;
+        const fd = 2.9 * R.zoom;
+        goal = p.clone().add(new T.Vector3(
+          Math.cos(R.phi) * Math.sin(R.theta) * fd,
+          Math.sin(R.phi) * fd + 0.9,
+          Math.cos(R.phi) * Math.cos(R.theta) * fd
+        ));
+        look.copy(p);
+      } else {
+        goal = new T.Vector3(
+          Math.cos(R.phi) * Math.sin(R.theta) * d,
+          Math.sin(R.phi) * d + d * 0.1,
+          Math.cos(R.phi) * Math.cos(R.theta) * d
+        );
+      }
+      R.camera.position.lerp(goal, 1 - Math.exp(-dt * 4.5));
+      R.lookTarget.lerp(look, 1 - Math.exp(-dt * 6));
+      R.camera.lookAt(R.lookTarget);
 
       const k = 1 - Math.exp(-dt * 6);
       R.nodes.forEach((n, id) => {
@@ -455,7 +646,7 @@
   }
 
   window.SB3D = {
-    mount, pause, resume, zoom, reset, resize,
+    mount, pause, resume, zoom, reset, resize, focus: focusAgent, exitFocus,
     update: (agents, edges) => setData(agents, edges, false),
     select: () => {},
   };
