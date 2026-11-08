@@ -1261,7 +1261,9 @@ def main():
         threads[wid] = t
 
     from orchestrator import orchestrator_loop   # 中台引擎（任务包第4包）；延迟导入避免循环依赖
-    targets = {"router": router_loop, "reaper": reaper_loop, "orchestrator": orchestrator_loop}
+    from messenger import messenger_loop         # 节点信使（任务包第5包 S3）
+    targets = {"router": router_loop, "reaper": reaper_loop,
+               "orchestrator": orchestrator_loop, "messenger": messenger_loop}
     for n, f in targets.items():
         t = threading.Thread(target=guard_run, args=(f, n), name=n, daemon=True)
         t.start()

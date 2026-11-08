@@ -10,3 +10,7 @@ Thumbs.db
 # 本地临时区（仅工作副本，禁止上云）
 99-Local/
 90-System/node_watchdog.log
+
+# S3 节点队列工作文件（交接面，不上云；README 保留）
+90-System/queue/*/
+!90-System/queue/README.md
