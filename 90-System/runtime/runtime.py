@@ -875,6 +875,12 @@ def main():
                for n, f in targets.items()}
     for t in threads.values():
         t.start()
+    # 批示#5：五入口在线接入——api_tokens.json 存在才启动 HTTP API（缺失不影响主干）
+    try:
+        import api_server
+        api_server.maybe_start(stop, log_event, db, chief_execute)
+    except Exception as e:                                  # noqa
+        log_event("api_start_failed", error=str(e)[:200])
     log_event("runtime_started", version="v2", agents=list(targets), pid=os.getpid())
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
