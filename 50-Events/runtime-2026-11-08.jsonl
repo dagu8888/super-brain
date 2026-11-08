@@ -1069,3 +1069,5 @@
 {"ts": "2026-11-08T17:00:04+0800", "kind": "task_enqueued", "type": "chat", "event": "evt_20261108_5fb93e", "priority": 1}
 {"ts": "2026-11-08T17:00:08+0800", "kind": "task_claimed", "id": 213, "type": "chat", "by": "chat-worker", "token": 1}
 {"ts": "2026-11-08T17:00:14+0800", "kind": "task_done", "id": 213, "type": "chat", "by": "chat-worker", "result": "已答复 → 60-Outputs/chat/20261108-170014-test-agent-worker-心跳丢失事件确认与处理建议.md"}
+{"ts": "2026-11-08T18:24:58+0800", "kind": "api_auth_failed", "ip": "27.202.28.119", "path": "/api/api/get_setting"}
+{"ts": "2026-11-08T18:52:31+0800", "kind": "api_auth_failed", "ip": "64.205.72.227", "path": "/api/mcp"}
