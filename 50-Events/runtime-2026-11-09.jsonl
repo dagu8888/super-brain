@@ -485,3 +485,9 @@
 {"ts": "2026-11-09T11:00:15+0800", "kind": "task_done", "id": 263, "type": "chat", "by": "chat-worker", "result": "已答复 → 60-Outputs/chat/20261109-110015-Trae@笔记本-心跳丢失告警处理.md"}
 {"ts": "2026-11-09T11:00:16+0800", "kind": "task_claimed", "id": 264, "type": "chat", "by": "chat-worker", "token": 1}
 {"ts": "2026-11-09T11:00:19+0800", "kind": "task_done", "id": 264, "type": "chat", "by": "chat-worker", "result": "已答复 → 60-Outputs/chat/20261109-110019-test-agent-worker-心跳丢失事件确认.md"}
+{"ts": "2026-11-09T12:00:07+0800", "kind": "task_enqueued", "type": "chat", "event": "evt_20261109_45df85", "priority": 1}
+{"ts": "2026-11-09T12:00:11+0800", "kind": "task_claimed", "id": 266, "type": "chat", "by": "chat-worker", "token": 1}
+{"ts": "2026-11-09T12:00:15+0800", "kind": "task_done", "id": 266, "type": "chat", "by": "chat-worker", "result": "已答复 → 60-Outputs/chat/20261109-120015-test-agent-worker-心跳丢失事件确认.md"}
+{"ts": "2026-11-09T14:00:03+0800", "kind": "task_enqueued", "type": "chat", "event": "evt_20261109_5eda6a", "priority": 1}
+{"ts": "2026-11-09T14:00:07+0800", "kind": "task_claimed", "id": 269, "type": "chat", "by": "chat-worker", "token": 1}
+{"ts": "2026-11-09T14:00:10+0800", "kind": "task_done", "id": 269, "type": "chat", "by": "chat-worker", "result": "已答复 → 60-Outputs/chat/20261109-140010-心跳丢失事件确认.md"}
