@@ -7,6 +7,7 @@
 #   - 单写者：orch_plans/task_links 派生状态只由本模块写；多行写入同事务；写事务内无网络/LLM 调用
 #   - 失联判定沿用心跳 300 秒；D2 尺度：worker 内重试(既有) → 改派兄弟(attempt=2) → dead+assist 告警
 import json
+import re
 import sqlite3
 import threading
 import time
@@ -81,14 +82,12 @@ def _consume_plans(conn, now):
                 raise ValueError(f"依赖了不存在的 step_key: {sorted(unknown)}")
             cycle = _topo_cycle(steps)
             if cycle:
-                raise ValueError("环形依赖: " + " -> ".join(cycle))
+                raise ValueError("环形依赖：" + " -> ".join(cycle))
         except (ValueError, json.JSONDecodeError) as e:
-            conn.execute("UPDATE events SET status='orch_rejected' WHERE event_id=?", (eid,))
-            conn.commit()
-            log_event("orch_plan_rejected", event=eid, reason=str(e)[:300])
+            _reject(conn, eid, str(e)[:300])
             continue
 
-        plan_id = now_id("plan")
+        plan_id = str(orch.get("plan_id") or "").strip() or now_id("plan")  # F4：沿用网关预生成号
         conn.execute("BEGIN IMMEDIATE")
         try:
             conn.execute(
@@ -107,13 +106,20 @@ def _consume_plans(conn, now):
             conn.commit()
         except sqlite3.IntegrityError:             # root_event_id 唯一约束：同事件只许一份计划
             conn.rollback()
-            conn.execute("UPDATE events SET status='orch_rejected' WHERE event_id=?", (eid,))
-            conn.commit()
-            log_event("orch_plan_rejected", event=eid, reason="root_event_id 重复，计划已存在")
+            _reject(conn, eid, "root_event_id 重复，计划已存在")
             continue
         log_event("orch_plan_started", plan=plan_id, event=eid, by=source,
                   steps=len(steps), mode=mode)
         _release_ready(conn, plan_id, now)
+
+
+def _reject(conn, eid, reason):
+    """F2：拒收原因写回事件 payload（plan_status 可查），状态置 orch_rejected。"""
+    conn.execute(
+        "UPDATE events SET status='orch_rejected', "
+        "payload=json_set(payload,'$.orch_rejected',?) WHERE event_id=?", (reason, eid))
+    conn.commit()
+    log_event("orch_plan_rejected", event=eid, reason=reason)
 
 
 # ---------- 子任务入队与依赖释放 ----------
@@ -184,8 +190,48 @@ def _release_ready(conn, plan_id, now):
             _step_terminal(conn, plan_id, link["step_key"], None, f"skipped: 依赖 {bad[0]} 终态 {bad[1]}",
                            mode, chief, canon, now)
             continue
+        link["payload"] = _inject_upstream(conn, plan_id, link)   # F5：步间传参（零依赖步骤原样）
         _enqueue_child(conn, plan_id, link, canon, now)
     conn.commit()
+
+
+def _inject_upstream(conn, plan_id, link):
+    """F5（任务包第6包）：释放有依赖的步骤时，把上游结果路径+摘要附进 payload 正文头部。
+    只在释放时注入（DB 里 link payload 保持原样），幂等、不串行；零依赖步骤零变化。"""
+    deps = json.loads(link["depends_on"] or "[]")
+    if not deps:
+        return link["payload"]
+    items = []
+    for d in deps:
+        row = conn.execute(
+            "SELECT l.child_task_id,t.result FROM task_links l "
+            "LEFT JOIN tasks t ON t.id=l.child_task_id WHERE l.plan_id=? AND l.step_key=?",
+            (plan_id, d)).fetchone()
+        if not row:
+            continue
+        m = re.search(r"(60-Outputs/[^\s，。）)]+)", row[1] or "")
+        path = m.group(1) if m else None
+        preview = ""
+        if path:
+            try:
+                preview = re.sub(r"\s+", " ", (ROOT / path).read_text(
+                    encoding="utf-8", errors="replace")).strip()[:500]
+            except Exception:
+                pass
+        items.append({"step_key": d, "task_id": row[0], "result_path": path,
+                      "preview": preview[:160]})
+    if not items:
+        return link["payload"]
+    p = json.loads(link["payload"] or "{}")
+    p["upstream_results"] = items
+    head = ["【系统注入】开始前先读取以下上游结果再执行："]
+    for u in items:
+        line = f"- 步骤 {u['step_key']}（任务 #{u['task_id']}）：{u['result_path'] or '（无结果文件）'}"
+        if u["preview"]:
+            line += f"｜摘要：{u['preview']}"
+        head.append(line)
+    p["text"] = "\n".join(head) + "\n\n" + str(p.get("text") or "")
+    return json.dumps(p, ensure_ascii=False)
 
 
 # ---------- 终态处置 / 改派 / 告警 ----------
@@ -358,6 +404,40 @@ def _consume_reviews(conn, now):
         conn.commit()
 
 
+# ---------- 取消意向消费（F3，任务包第6包） ----------
+
+def _consume_cancels(conn, now):
+    """plan_cancel 意向：计划置 cancelled；waiting 链接直接终局；pending 子任务取消；
+    doing 中的子任务不硬拽（完成结果自然丢弃），如实留痕；已生成汇总文件保留不删。"""
+    rows = conn.execute(
+        "SELECT event_id,payload FROM events WHERE type='plan_cancel' AND status IN ('new','done') "
+        "ORDER BY created_at LIMIT 10").fetchall()
+    for eid, raw in rows:
+        plan_id = (json.loads(raw) or {}).get("plan_id")
+        conn.execute("UPDATE events SET status='orch_consumed' WHERE event_id=?", (eid,))
+        plan = conn.execute(
+            "SELECT status FROM orch_plans WHERE plan_id=?", (plan_id,)).fetchone()
+        if not plan or plan[0] in TERMINAL:
+            conn.commit()
+            continue
+        conn.execute(
+            "UPDATE orch_plans SET status='cancelled', updated_at=?, done_at=? WHERE plan_id=?",
+            (now, now, plan_id))
+        links = conn.execute(
+            "SELECT id,step_key,status,child_task_id FROM task_links WHERE plan_id=? AND status!='terminal'",
+            (plan_id,)).fetchall()
+        for lid, step_key, lstatus, tid in links:
+            if lstatus == "enqueued" and tid:
+                cur = conn.execute(
+                    "UPDATE tasks SET status='cancelled' WHERE id=? AND status='pending'", (tid,))
+                if not cur.rowcount:
+                    log_event("orch_cancel_task_busy", plan=plan_id, step=step_key, task=tid,
+                              note="子任务非 pending（执行中），取消标记未强压，完成结果将被丢弃")
+            conn.execute("UPDATE task_links SET status='terminal' WHERE id=?", (lid,))
+        log_event("orch_plan_cancelled", plan=plan_id, links_closed=len(links))
+        conn.commit()
+
+
 # ---------- 主循环 ----------
 
 def reconcile(conn):
@@ -383,6 +463,7 @@ def orchestrator_loop():
             _watch_children(conn, now)
             _summarize(conn, now)
             _consume_reviews(conn, now)
+            _consume_cancels(conn, now)
         except Exception as e:
             log_event("orch_tick_error", error=str(e)[:200])
         _STOP.wait(ORCH_INTERVAL)
