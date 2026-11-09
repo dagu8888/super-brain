@@ -221,9 +221,20 @@ def test_t92():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_kb_guard():
+    blocking = ("api_tokens.json", "api_tokens.json.bak.20261109", "llm.json",
+                "state.db", "state.db-wal", "server.pem", "id.key", ".env")
+    passing = ("README.md", "runtime.py", "tokens.yaml", "state.json")
+    bad = [n for n in blocking if not runtime._is_sensitive(n)]
+    leaked = [n for n in passing if runtime._is_sensitive(n)]
+    check("KB-1 凭据类一律拦截", not bad, bad)
+    check("KB-2 普通文件不误伤", not leaked, leaked)
+
+
 if __name__ == "__main__":
     test_f1_to_f5()
     test_t91()
     test_t92()
+    test_kb_guard()
     print(f"\n== {len(FAILS)} 项失败 ==" if FAILS else "\n== 全部通过 ==")
     sys.exit(1 if FAILS else 0)

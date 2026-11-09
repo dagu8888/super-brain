@@ -90,6 +90,16 @@ def now_id(prefix):
     return f"{prefix}_{time.strftime('%Y%m%d')}_{uuid.uuid4().hex[:6]}"
 
 
+# ---- 敏感文件过滤（kb_search / kb_read）：凭据、密钥、库文件一律不检索 ----
+SENSITIVE_NAMES = ("api_tokens", "llm.json", "state.db", ".env")
+SENSITIVE_SUFFIXES = (".db", ".db-wal", ".db-shm", ".pem", ".key")
+
+
+def _is_sensitive(name):
+    n = (name or "").lower()
+    return n.startswith(SENSITIVE_NAMES) or n.endswith(SENSITIVE_SUFFIXES)
+
+
 # ---------- 事件与身份 ----------
 
 def resolve_user(conn, source, source_user):
@@ -584,6 +594,8 @@ def chief_execute(conn, chief_id, cmd, args):
             for fn in filenames:
                 if len(hits) >= limit:
                     break
+                if _is_sensitive(fn):        # 凭据/密钥文件不参与检索（2026-11-09 止血包）
+                    continue
                 if Path(fn).suffix.lower() not in exts:
                     continue
                 fp = Path(dirpath) / fn
@@ -612,6 +624,8 @@ def chief_execute(conn, chief_id, cmd, args):
         fp = (root_real / rel).resolve()
         if fp != root_real and root_real not in fp.parents:
             return {"ok": False, "error": f"越界路径当场拒绝：{rel}（只允许仓库根目录内）"}
+        if _is_sensitive(fp.name):
+            return {"ok": False, "error": "敏感文件拒绝读取（凭据/密钥类不参与知识库检索）"}
         if not fp.is_file():
             return {"ok": False, "error": f"文件不存在：{rel}"}
         try:

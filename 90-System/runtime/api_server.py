@@ -10,6 +10,7 @@
 import hmac
 import json
 import mimetypes
+import os
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,6 +21,12 @@ import console_api
 
 HERE = Path(__file__).parent
 CONF = HERE / "api_tokens.json"
+# 口令正本可移出仓库工作区（2026-11-09 止血包）：环境变量优先，其次 /etc/super-brain/
+_env_conf = os.environ.get("SUPER_BRAIN_TOKENS")
+if _env_conf and Path(_env_conf).is_file():
+    CONF = Path(_env_conf)
+elif Path("/etc/super-brain/api_tokens.json").is_file():
+    CONF = Path("/etc/super-brain/api_tokens.json")
 DESIGN = HERE.parents[1] / "70-Console" / "design"   # 控制台静态资源（只含前端文件）
 MAX_BODY = 64 * 1024                      # 请求体上限 64KB
 STREAM_MAX_CLIENTS = 8                    # SSE 并发连接上限
