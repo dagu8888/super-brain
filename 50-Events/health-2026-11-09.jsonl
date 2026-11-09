@@ -64,3 +64,9 @@
 {"ts": "2026-11-09T10:30:01+0800", "kind": "health_check", "alerts": ["C:队列积压 pending=2 最老257min"], "actions": []}
 {"ts": "2026-11-09T10:40:01+0800", "kind": "health_check", "alerts": ["C:队列积压 pending=2 最老267min"], "actions": []}
 {"ts": "2026-11-09T10:50:01+0800", "kind": "health_check", "alerts": ["C:队列积压 pending=2 最老277min"], "actions": []}
+{"ts": "2026-11-09T11:00:01+0800", "kind": "health_check", "alerts": ["C:队列积压 pending=2 最老287min"], "actions": []}
+{"ts": "2026-11-09T11:10:01+0800", "kind": "health_check", "alerts": ["C:队列积压 pending=2 最老297min"], "actions": []}
+{"ts": "2026-11-09T11:20:01+0800", "kind": "health_check", "alerts": ["C:队列积压 pending=2 最老307min"], "actions": []}
+{"ts": "2026-11-09T11:30:01+0800", "kind": "health_check", "alerts": ["C:队列积压 pending=2 最老317min"], "actions": []}
+{"ts": "2026-11-09T11:40:02+0800", "kind": "health_check", "alerts": ["C:队列积压 pending=2 最老327min"], "actions": []}
+{"ts": "2026-11-09T11:50:01+0800", "kind": "health_check", "alerts": ["C:队列积压 pending=2 最老337min"], "actions": []}
