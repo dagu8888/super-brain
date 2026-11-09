@@ -64,3 +64,9 @@
 {"ts":"2026-11-09T10:30:02+08:00","behind":0,"unpushed":0,"stale_h":1,"inbox":0,"alert":0,"note":"skip_locked(sync运行中)"}
 {"ts":"2026-11-09T10:40:02+08:00","behind":0,"unpushed":0,"stale_h":1,"inbox":0,"alert":0,"note":""}
 {"ts":"2026-11-09T10:50:02+08:00","behind":0,"unpushed":0,"stale_h":1,"inbox":0,"alert":0,"note":""}
+{"ts":"2026-11-09T11:00:02+08:00","behind":0,"unpushed":1,"stale_h":0,"inbox":0,"alert":0,"note":"skip_locked(sync运行中)"}
+{"ts":"2026-11-09T11:10:02+08:00","behind":0,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":""}
+{"ts":"2026-11-09T11:20:02+08:00","behind":0,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":""}
+{"ts":"2026-11-09T11:30:02+08:00","behind":0,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":"skip_locked(sync运行中)"}
+{"ts":"2026-11-09T11:40:02+08:00","behind":0,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":""}
+{"ts":"2026-11-09T11:50:02+08:00","behind":0,"unpushed":0,"stale_h":0,"inbox":0,"alert":0,"note":""}
