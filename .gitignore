@@ -19,3 +19,5 @@ api_tokens.json.bak*
 90-System/runtime/state.db*
 *.pyc
 __pycache__/
+50-Events/*.jsonl
+50-Events/*.log
