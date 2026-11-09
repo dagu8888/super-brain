@@ -46,6 +46,8 @@ SUPERVISOR_INTERVAL = 30         # 线程存活检查
 WORKER_IDLE_WAIT = 5
 MAX_RETRIES = 3
 BACKOFF_BASE = 30                # 退避：2^retry * 30s
+CLAIM_TIMEOUT = 600              # 认领超时（任务包第9包 T9-1）：pending 超过该秒数仍无人认领 → 进 D2
+OFFLINE_GRACE = 300              # 兄弟实例"在线"判定沿用 5 分钟心跳阈值
 MAX_HOP = 8                      # 跳数熔断（借鉴 IP TTL）：事件链超过 8 跳自动熔断止损
 DETACH_THRESHOLD = 3000          # 指令数据分离：超过该长度的外部文本落 incoming/ 单文件
 # 内部留痕事件不参与路由、不会派活，豁免跳数熔断（豁免名单与 router 归档清单一致）
@@ -996,6 +998,107 @@ def worker_loop(worker_id, agent_stop=None):
 
 # ---------- Reaper（租约回收；lease_token 不变 → 旧 Worker 提交被 fencing 拒绝） ----------
 
+def _chief_of_task(conn, p):
+    """告警收件人：优先编排计划发起人 → payload.from（须为幕僚长）→ 名册 agent_ref → trae-chief。"""
+    pid = (p.get("orch") or {}).get("plan_id")
+    if pid:
+        row = conn.execute("SELECT chief FROM orch_plans WHERE plan_id=?", (pid,)).fetchone()
+        if row and row[0]:
+            return row[0]
+    frm = str(p.get("from") or "")
+    if frm.endswith("-chief"):
+        return frm
+    ref = p.get("to_agent") or p.get("to")
+    if ref:
+        row = conn.execute("SELECT agent_ref FROM registry WHERE name=? AND status='active'",
+                           (ref,)).fetchone()
+        if row and row[0]:
+            return row[0]
+    return "trae-chief"
+
+
+def _alert_chief(conn, chief, text, priority=2):
+    """告警落成一条 assist 任务（信使会写进该幕僚长队列，与其现有告警同一姿势）。"""
+    import json as _json
+    conn.execute(
+        "INSERT INTO tasks(event_id,type,payload,status,priority,max_retries,created_at) "
+        "VALUES(NULL,'assist',?,'pending',?,3,?)",
+        (_json.dumps({"kind": "告警", "from": "内核", "to": chief, "to_agent": chief,
+                      "text": text}, ensure_ascii=False), priority, int(time.time())))
+
+
+def _online_sibling(conn, p, now):
+    """同能力兄弟实例：名册中活跃实例、排除原目标、其幕僚长心跳在离线阈值内。
+    当前名册无能力字段，故以「实例类 + 心跳在线」为候选口径（回写中已注明）。"""
+    target = p.get("to_agent") or p.get("to")
+    rows = conn.execute(
+        "SELECT name,agent_ref FROM registry WHERE kind='instance' AND status='active' AND name!=?",
+        (target,)).fetchall()
+    for name, ref in rows:
+        hb = conn.execute("SELECT ts FROM heartbeats WHERE agent=? ORDER BY ts DESC LIMIT 1",
+                          (ref,)).fetchone()
+        if hb and now - int(hb[0]) <= OFFLINE_GRACE:
+            return name, ref
+    return None
+
+
+def _claim_timeout_sweep(conn, now):
+    """D2 认领超时（任务包第9包 T9-1）：pending 超过 CLAIM_TIMEOUT 秒且从未被认领 → 进 D2 链。
+    ① 告警发起 chief；② 有在线兄弟实例则改派一次；③ 无候选或改派后仍超时 → 死信 + 再次告警。
+    豁免：payload.no_claim_timeout 为真；已认领过（claimed_at 非空）不受影响。"""
+    rows = conn.execute(
+        "SELECT id,payload,created_at FROM tasks WHERE status='pending' AND claimed_at IS NULL "
+        "AND created_at<?", (now - CLAIM_TIMEOUT,)).fetchall()
+    for tid, raw, created in rows:
+        try:
+            p = json.loads(raw or "{}")
+        except Exception:
+            continue
+        if p.get("no_claim_timeout"):
+            continue
+        target = p.get("to_agent") or p.get("to")
+        if not target:                       # 未点名（worker 池任务）不属"无人认领"场景
+            continue
+        chief = _chief_of_task(conn, p)
+        mark = p.get("_claim_timeout") or {}
+        if not mark.get("alerted_at"):
+            minutes = max(1, (now - int(created)) // 60)
+            _alert_chief(conn, chief,
+                         f"【认领超时告警】任务 #{tid} 点名「{target}」已 {minutes} 分钟无人认领"
+                         f"（阈值 {CLAIM_TIMEOUT} 秒）。\n内容：{str(p.get('text', ''))[:120]}")
+            sib = _online_sibling(conn, p, now)
+            if sib:                          # 改派一次，计时重置
+                name, ref = sib
+                np = {**p, "to": name, "to_agent": ref,
+                      "_claim_timeout": {"alerted_at": now, "reassigned_to": name}}
+                conn.execute("UPDATE tasks SET payload=?, created_at=? WHERE id=? AND status='pending'",
+                             (json.dumps(np, ensure_ascii=False), now, tid))
+                log_event("task_claim_timeout_reassigned", id=tid, to=name, chief=chief)
+            else:
+                np = {**p, "_claim_timeout": {"alerted_at": now, "stage": "dead"}}
+                conn.execute(
+                    "UPDATE tasks SET status='dead', done_at=?, error=?, payload=? "
+                    "WHERE id=? AND status='pending'",
+                    (now, f"认领超时：{CLAIM_TIMEOUT} 秒无人认领且无在线兄弟实例", 
+                     json.dumps(np, ensure_ascii=False), tid))
+                _alert_chief(conn, chief,
+                             f"【死信告警】任务 #{tid} 点名「{target}」无人认领，无在线兄弟实例，已转死信。"
+                             f"\n内容：{str(p.get('text', ''))[:120]}")
+                log_event("task_dead_claim_timeout", id=tid, target=target, chief=chief)
+        elif mark.get("stage") != "dead":    # 已改派过又超时 → 死信 + 再次告警
+            np = {**p, "_claim_timeout": {**mark, "stage": "dead"}}
+            conn.execute(
+                "UPDATE tasks SET status='dead', done_at=?, error=?, payload=? "
+                "WHERE id=? AND status='pending'",
+                (now, f"认领超时：改派至「{mark.get('reassigned_to')}」后仍超时",
+                 json.dumps(np, ensure_ascii=False), tid))
+            _alert_chief(conn, chief,
+                         f"【死信告警】任务 #{tid} 改派后仍无人认领，已转死信。"
+                         f"\n内容：{str(p.get('text', ''))[:120]}")
+            log_event("task_dead_claim_timeout", id=tid, target=target, chief=chief, stage="after_reassign")
+    conn.commit()
+
+
 def reaper_loop():
     conn = db()
     while not stop.is_set():
@@ -1006,6 +1109,7 @@ def reaper_loop():
         conn.commit()
         if cur.rowcount:
             log_event("lease_recovered", count=cur.rowcount)
+        _claim_timeout_sweep(conn, now)
         stop.wait(REAPER_INTERVAL)
 
 

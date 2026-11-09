@@ -14,3 +14,8 @@ Thumbs.db
 # S3 节点队列工作文件（交接面，不上云；README 保留）
 90-System/queue/*/
 !90-System/queue/README.md
+api_tokens.json
+api_tokens.json.bak*
+90-System/runtime/state.db*
+*.pyc
+__pycache__/

@@ -87,6 +87,29 @@ def _write_queue_files(conn, now):
         log_event("messenger_queue_written", task=tid, node=node, file=f.name)
 
 
+def _cleanup_cancelled(conn):
+    """T9-2（任务包第9包）：任务已取消 → 队列文件挪进该队列 done/（与收口锚点同一姿势），
+    避免节点上线取到已取消任务；done/ 同名文件同时是写手的幂等依据，不会二次写出。"""
+    if not QUEUE_DIR.exists():
+        return
+    for d in QUEUE_DIR.iterdir():
+        if not d.is_dir():
+            continue
+        for f in list(d.glob("task-*-*.md")):
+            m = re.match(r"task-(\d+)-", f.name)
+            if not m:
+                continue
+            row = conn.execute("SELECT status FROM tasks WHERE id=?", (int(m.group(1)),)).fetchone()
+            if not row or row[0] != "cancelled":
+                continue
+            (d / "done").mkdir(exist_ok=True)
+            try:
+                f.replace(d / "done" / f.name)
+                log_event("messenger_cancel_file_moved", task=int(m.group(1)), node=d.name, file=f.name)
+            except OSError:
+                pass
+
+
 def _collect_results(conn, now):
     """结果收口：results/task-<id>-*.md → 任务 done + 结果归档 + 任务文件归档。"""
     if not QUEUE_DIR.exists():
@@ -192,6 +215,7 @@ def messenger_loop():
             conn = _db()
             try:
                 _write_queue_files(conn, now)
+                _cleanup_cancelled(conn)
                 _collect_results(conn, now)
                 _move_asks(conn, now)
             finally:
