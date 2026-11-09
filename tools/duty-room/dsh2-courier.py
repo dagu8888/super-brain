@@ -42,6 +42,13 @@ def token():
     try:
         return json.loads(TOKEN_FILE.read_text(encoding="utf-8")).get("viewer_token", "").strip()
     except Exception:
+        pass
+    try:  # fallback: user env var persisted via setx (not inherited by long-lived sessions)
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
+            v, _ = winreg.QueryValueEx(k, "SB_VIEWER_TOKEN")
+        return (v or "").strip()
+    except Exception:
         return ""
 
 
