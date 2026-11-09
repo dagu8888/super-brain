@@ -1,16 +1,33 @@
-# [变更请求] Super-Brain 网关 HTTPS 化与令牌治理（DSH#1 节点侧发起）
+---
+id: kn_20261109_f5b6d0
+title: Super-Brain 网关 HTTPS 化与令牌治理变更请求
+category: Decisions
+tags: [网关安全, HTTPS, 令牌治理, 变更请求, DSH#1]
+source: 00-Inbox/2026-11-09-DSH1-网关HTTPS化与令牌治理变更请求.md
+created: 2026-11-09
+updated: 2026-11-09
+version: 1
+quality: auto-triaged
+---
 
-> 提交方：AI 节点管家项目组（DSH#1 主机值班长视角）
-> 日期：2026-11-09
-> 性质：**仅提出，云端零改动**；等中台排期后配合实施。
-> 关联任务书条款：网卡/网关"该改就改，该向中台反应就反应"。
+# Super-Brain 网关 HTTPS 化与令牌治理变更请求
+
+> DSH#1 节点提议网关启用 TLS、令牌短期化并开放上报端点
+> 来源：00-Inbox/2026-11-09-DSH1-网关HTTPS化与令牌治理变更请求.md ｜ 2026-11-09 knowledge-worker 自动整理
+
+# Super-Brain 网关 HTTPS 化与令牌治理（变更请求）
+
+- **提交方**：AI 节点管家项目组（DSH#1 主机值班长视角）
+- **日期**：2026-11-09
+- **性质**：仅提出，云端零改动；等中台排期后配合实施
+- **关联条款**：网卡/网关“该改就改，该向中台反应就反应”
 
 ## 现状（审计证据）
 
-1. 值班室信使 `tools/duty-room/dsh1-courier.py` 以**明文 HTTP** 连接云网关 `http://8.218.106.225:18765`，SSE 长连 + 任务轮询。
+1. 值班室信使 `tools/duty-room/dsh1-courier.py` 以**明文 HTTP** 连接云网关 `http://8.218.106.225:18765`，使用 SSE 长连 + 任务轮询。
 2. 认证为**长期 Bearer Token**（viewer token，本地落 `~/.dsh1-courier.json`），无过期、无轮换机制。
-3. 节点侧暴露面（同机）：0.0.0.0:5432（PostgreSQL 对公网口监听）、0.0.0.0:8810（MAUS）、C$/D$/E$ 管理共享开启——网关一旦被中间人利用，横向可达性很高。
-4. 节点管家即将成为常驻组件，未来对接点：`POST /api/guardian/report`（metrics + agent 状态 + 事件分级），当前在节点侧仅入本地 outbox 队列（`bridge.enabled=false`），**等网关具备 TLS 后一次性打开**。
+3. 节点侧暴露面（同机）：`0.0.0.0:5432`（PostgreSQL 对公网口监听）、`0.0.0.0:8810`（MAUS）、C$/D$/E$ 管理共享开启——网关一旦被中间人利用，横向可达性很高。
+4. 节点管家即将成为常驻组件，未来对接 `POST /api/guardian/report`（metrics + agent 状态 + 事件分级）；当前节点侧仅入本地 outbox 队列（`bridge.enabled=false`），**等网关具备 TLS 后一次性打开**。
 
 ## 请求内容（按优先级）
 
@@ -40,4 +57,5 @@
 4. 旧 HTTP 端口按中台排期关闭。
 
 ---
-（此文件由 DSH#1 节点写入 00-Inbox，未做 git commit；中台认领后请移入对应 Projects 分区。）
+
+> 备注：本文件由 DSH#1 节点写入 00-Inbox，未做 git commit；中台认领后请移入对应 Projects 分区。
