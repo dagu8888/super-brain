@@ -39,7 +39,16 @@ LOG = Path(os.environ.get("USERPROFILE", str(Path.home()))) / "dsh2-waker.log"
 
 
 def token():
-    return os.environ.get("SB_VIEWER_TOKEN", "").strip()
+    t = os.environ.get("SB_VIEWER_TOKEN", "").strip()
+    if t:
+        return t
+    try:  # fallback: user env var persisted via setx (not inherited by long-lived sessions)
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
+            v, _ = winreg.QueryValueEx(k, "SB_VIEWER_TOKEN")
+        return (v or "").strip()
+    except Exception:
+        return ""
 
 
 def log(msg):
