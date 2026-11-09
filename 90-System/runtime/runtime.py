@@ -1009,11 +1009,12 @@ def _chief_of_task(conn, p):
     if frm.endswith("-chief"):
         return frm
     ref = p.get("to_agent") or p.get("to")
-    if ref:
-        row = conn.execute("SELECT agent_ref FROM registry WHERE name=? AND status='active'",
-                           (ref,)).fetchone()
-        if row and row[0]:
-            return row[0]
+    for key in (p.get("to"), p.get("to_agent")):
+        if key:
+            row = conn.execute("SELECT agent_ref FROM registry WHERE name=? AND status='active'",
+                               (key,)).fetchone()
+            if row and row[0]:
+                return row[0]
     return "trae-chief"
 
 
@@ -1057,14 +1058,23 @@ def _claim_timeout_sweep(conn, now):
         if p.get("no_claim_timeout"):
             continue
         target = p.get("to_agent") or p.get("to")
+        display = p.get("to") or target        # 告警里用实例名，比 agent_ref 好认
         if not target:                       # 未点名（worker 池任务）不属"无人认领"场景
             continue
         chief = _chief_of_task(conn, p)
         mark = p.get("_claim_timeout") or {}
         if not mark.get("alerted_at"):
+            # 原子占位：多进程/多线程同时扫到同一条也只告警一次
+            cur = conn.execute(
+                "UPDATE tasks SET payload=? WHERE id=? AND status='pending' AND "
+                "json_extract(payload,'$._claim_timeout.alerted_at') IS NULL",
+                (json.dumps({**p, "_claim_timeout": {"alerted_at": now}}, ensure_ascii=False), tid))
+            conn.commit()
+            if not cur.rowcount:
+                continue
             minutes = max(1, (now - int(created)) // 60)
             _alert_chief(conn, chief,
-                         f"【认领超时告警】任务 #{tid} 点名「{target}」已 {minutes} 分钟无人认领"
+                         f"【认领超时告警】任务 #{tid} 点名「{display}」已 {minutes} 分钟无人认领"
                          f"（阈值 {CLAIM_TIMEOUT} 秒）。\n内容：{str(p.get('text', ''))[:120]}")
             sib = _online_sibling(conn, p, now)
             if sib:                          # 改派一次，计时重置
