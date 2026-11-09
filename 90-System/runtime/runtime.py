@@ -717,8 +717,10 @@ def chief_execute(conn, chief_id, cmd, args):
             "FROM orch_plans WHERE plan_id=? OR root_event_id=?", (pid, eid)).fetchone()
         if not row:
             rej = conn.execute(
-                "SELECT event_id,payload FROM events WHERE (event_id=? OR event_id=?) "
-                "AND status='orch_rejected'", (eid, pid)).fetchone()
+                "SELECT event_id,payload FROM events WHERE status='orch_rejected' AND "
+                "(event_id=? OR event_id=? OR json_extract(payload,'$.orchestrate.plan_id')=? "
+                "OR json_extract(payload,'$.orchestrate.plan_id')=?)",
+                (eid, pid, eid, pid)).fetchone()
             if rej:
                 try:
                     reason = json.loads(rej[1]).get("orch_rejected", "（原因缺失）")
