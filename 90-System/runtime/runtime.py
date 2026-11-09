@@ -48,6 +48,7 @@ MAX_RETRIES = 3
 BACKOFF_BASE = 30                # 退避：2^retry * 30s
 CLAIM_TIMEOUT = 600              # 认领超时（任务包第9包 T9-1）：pending 超过该秒数仍无人认领 → 进 D2
 OFFLINE_GRACE = 300              # 兄弟实例"在线"判定沿用 5 分钟心跳阈值
+ALERTS_ENABLED = False           # 认领超时/死信告警总开关（2026-11-09 止血：递归告警；恢复待去重修复包）
 MAX_HOP = 8                      # 跳数熔断（借鉴 IP TTL）：事件链超过 8 跳自动熔断止损
 DETACH_THRESHOLD = 3000          # 指令数据分离：超过该长度的外部文本落 incoming/ 单文件
 # 内部留痕事件不参与路由、不会派活，豁免跳数熔断（豁免名单与 router 归档清单一致）
@@ -1019,7 +1020,15 @@ def _chief_of_task(conn, p):
 
 
 def _alert_chief(conn, chief, text, priority=2):
-    """告警落成一条 assist 任务（信使会写进该幕僚长队列，与其现有告警同一姿势）。"""
+    """告警落成一条 assist 任务（信使会写进该幕僚长队列，与其现有告警同一姿势）。
+
+    ALERTS_ENABLED=False 时整体短路（2026-11-09 止血，任务 #134294，古大裁定）：
+    告警任务本身也会成为 pending 点名任务，被认领超时扫描再告警，形成递归放大；
+    去重/自豁免/熔断属后续修复包，本次只停增量。认领超时判定、改派、死信转移不受影响。
+    """
+    if not ALERTS_ENABLED:
+        log_event("alert_suppressed", chief=chief, text=str(text)[:200])
+        return
     import json as _json
     conn.execute(
         "INSERT INTO tasks(event_id,type,payload,status,priority,max_retries,created_at) "

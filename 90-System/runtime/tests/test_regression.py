@@ -148,15 +148,16 @@ def _mk_assist(conn, to, text=None, created_ago=0, claimed=None, extra=None):
 def test_t91():
     d, conn = fresh()
     now = int(time.time())
-    # 场景一：无在线兄弟 → 告警 + 直接死信
+    # 2026-11-09 止血后：告警生成关闭（ALERTS_ENABLED=False），但超时判定/死信转移保留
+    runtime.ALERTS_ENABLED = False
+    # 场景一：无在线兄弟 → 死信（不再产生告警任务）
     t1 = _mk_assist(conn, "DSH一号@主机", created_ago=runtime.CLAIM_TIMEOUT + 60)
     runtime._claim_timeout_sweep(conn, now)
     st = conn.execute("SELECT status,error FROM tasks WHERE id=?", (t1,)).fetchone()
-    alerts = conn.execute("SELECT COUNT(*) FROM tasks WHERE type='assist' AND payload LIKE '%认领超时告警%'").fetchone()[0]
+    alerts = conn.execute("SELECT COUNT(*) FROM tasks WHERE type='assist' AND "
+                          "(payload LIKE '%认领超时告警%' OR payload LIKE '%死信告警%')").fetchone()[0]
     check("T9-1-1 无候选 → 死信", st[0] == "dead" and "认领超时" in (st[1] or ""), st)
-    check("T9-1-2 无候选 → 已告警发起 chief", alerts >= 1, alerts)
-    dead_alerts = conn.execute("SELECT COUNT(*) FROM tasks WHERE payload LIKE '%死信告警%'").fetchone()[0]
-    check("T9-1-3 死信再次告警", dead_alerts >= 1, dead_alerts)
+    check("T9-1-2 止血：不再生成任何告警任务", alerts == 0, f"告警任务数={alerts}")
 
     # 场景二：有在线兄弟 → 改派一次，再超时 → 死信
     conn.execute("INSERT INTO heartbeats(agent,ts,note) VALUES('trae-chief',?,'active')", (now,))
