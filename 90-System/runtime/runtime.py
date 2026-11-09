@@ -50,7 +50,7 @@ MAX_HOP = 8                      # 跳数熔断（借鉴 IP TTL）：事件链�
 DETACH_THRESHOLD = 3000          # 指令数据分离：超过该长度的外部文本落 incoming/ 单文件
 # 内部留痕事件不参与路由、不会派活，豁免跳数熔断（豁免名单与 router 归档清单一致）
 _INTERNAL_TYPES = ("task_progress", "receipt", "chief_result", "task_delegated",
-                   "task_linked", "agent_verified", "plan_review")
+                   "task_linked", "agent_verified", "plan_review", "plan_cancel")
 
 stop = threading.Event()
 
@@ -417,13 +417,29 @@ def chief_execute(conn, chief_id, cmd, args):
                     "note": "已入入口协作池，空闲入口可 pull 领取"}
         payload = {"text": text}
         orch = args.get("orchestrate")          # 中台编排标记（任务包第4包）：老调用不带此字段，零感知
+        plan_id = None
         if isinstance(orch, dict):
+            orch = dict(orch)
+            plan_id = now_id("plan")            # F4（任务包第6包）：网关预生成 plan_id，引擎落库沿用
+            orch["plan_id"] = plan_id
             payload["orchestrate"] = orch
         eid = emit_event(conn, chief_id, "manual", payload,
                          priority=int(args.get("priority", 0)),
                          dedupe_key=args.get("dedupe_key"), source_user=chief_id)
+        if eid is None and args.get("dedupe_key"):
+            # 幂等重放：查回原始事件，返回当时预生成的 plan_id，绝不产生第二个
+            orig = conn.execute("SELECT event_id,payload FROM events WHERE dedupe_key=?",
+                                (args["dedupe_key"],)).fetchone()
+            if orig:
+                try:
+                    plan_id = (json.loads(orig[1]).get("orchestrate") or {}).get("plan_id")
+                except Exception:
+                    plan_id = None
+                return {"ok": True, "event_id": orig[0], "canonical_user_id": canon,
+                        "orchestrated": bool(plan_id) or None, "plan_id": plan_id,
+                        "duplicate": True, "error": "重复指令被幂等忽略（返回原计划号）"}
         return {"ok": bool(eid), "event_id": eid, "canonical_user_id": canon,
-                "orchestrated": isinstance(orch, dict) or None,
+                "orchestrated": isinstance(orch, dict) or None, "plan_id": plan_id,
                 "error": None if eid else "重复指令被幂等忽略"}
 
     if cmd == "status":
@@ -690,6 +706,57 @@ def chief_execute(conn, chief_id, cmd, args):
         return {"ok": True, "plan_id": plan_id,
                 "note": "验收意向已记账，orchestrator 消费后生效（约 5 秒内）"}
 
+    if cmd == "plan_status":
+        # F1（任务包第6包）：只读查询，按 plan_id 或 root_event_id；拒收的计划也能查到原因
+        pid = str(args.get("plan_id", "") or "").strip()
+        eid = str(args.get("root_event_id", "") or "").strip()
+        if not pid and not eid:
+            return {"ok": False, "error": "缺 plan_id 或 root_event_id"}
+        row = conn.execute(
+            "SELECT plan_id,root_event_id,chief,status,mode,summary_path,created_at,updated_at "
+            "FROM orch_plans WHERE plan_id=? OR root_event_id=?", (pid, eid)).fetchone()
+        if not row:
+            rej = conn.execute(
+                "SELECT event_id,payload FROM events WHERE (event_id=? OR event_id=?) "
+                "AND status='orch_rejected'", (eid, pid)).fetchone()
+            if rej:
+                try:
+                    reason = json.loads(rej[1]).get("orch_rejected", "（原因缺失）")
+                except Exception:
+                    reason = "（原因不可解析）"
+                return {"ok": True, "found": False, "rejected": True,
+                        "root_event_id": rej[0], "reason": reason}
+            return {"ok": False, "error": "计划不存在（未落库且无拒收记录）"}
+        steps = [dict(zip(("step_key", "task_id", "target", "link_status", "task_status", "result"), r))
+                 for r in conn.execute(
+                     "SELECT l.step_key,l.child_task_id,l.target,l.status,t.status,"
+                     "substr(COALESCE(t.result,t.error,''),1,200) "
+                     "FROM task_links l LEFT JOIN tasks t ON t.id=l.child_task_id "
+                     "WHERE l.plan_id=? ORDER BY l.rowid", (row[0],))]
+        return {"ok": True, "found": True, "plan": {
+            "plan_id": row[0], "root_event_id": row[1], "chief": row[2],
+            "status": row[3], "mode": row[4], "summary_path": row[5],
+            "created_at": row[6], "updated_at": row[7], "steps": steps}}
+
+    if cmd == "plan_cancel":
+        # F3（任务包第6包）：只写取消意向经 events 账本，orchestrator 消费后生效（与验收同一安全姿势）
+        pid = str(args.get("plan_id", "") or "").strip()
+        eid = str(args.get("root_event_id", "") or "").strip()
+        if not pid and not eid:
+            return {"ok": False, "error": "缺 plan_id 或 root_event_id"}
+        row = conn.execute(
+            "SELECT plan_id,status FROM orch_plans WHERE plan_id=? OR root_event_id=?",
+            (pid, eid)).fetchone()
+        if not row:
+            return {"ok": False, "error": "计划不存在（或已被拒收，无需取消）"}
+        if row[1] in ("done", "failed", "cancelled"):
+            return {"ok": False, "error": f"计划已是终态 {row[1]}，不可取消"}
+        emit_event(conn, chief_id, "plan_cancel", {"plan_id": row[0]},
+                   priority=1, source_user=chief_id)
+        log_event("plan_cancel_intent", plan=row[0], by=chief_id)
+        return {"ok": True, "plan_id": row[0],
+                "note": "取消意向已记账，orchestrator 消费后生效（约 5 秒内）"}
+
     return {"ok": False, "error": f"未知指令 {cmd}"}
 
 
@@ -759,7 +826,7 @@ def router_loop():
         # 内部留痕事件（进度/回执/指令结果等）不参与路由，直接归档
         conn.execute(
             "UPDATE events SET status='done' WHERE status='new' AND type IN "
-            "('task_progress','receipt','chief_result','task_delegated','task_linked','agent_verified','plan_review')")
+            "('task_progress','receipt','chief_result','task_delegated','task_linked','agent_verified','plan_review','plan_cancel')")
         conn.commit()
         rows = conn.execute(
             "SELECT event_id,source,type,payload,priority,canonical_user_id FROM events "
