@@ -51,9 +51,9 @@
 ## 三、供 Muse 验收的统一查询入口
 
 ```bash
-# 第 6 包
+# 第 6 包（口令由各幕僚长自行持有，文档不落明文）
 curl -X POST http://8.218.106.225:18765/cmd \
-  -H "Authorization: Bearer muse_wwWZlUF4nQAACBWt1GY-Y6oRWvDEpMg-" \
+  -H "Authorization: Bearer <你的幕僚长口令>" \
   -H "Content-Type: application/json" \
   -d '{"cmd":"plan_status","args":{"plan_id":"<计划号>"}}'
 
