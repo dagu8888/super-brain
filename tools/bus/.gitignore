@@ -1,0 +1,4 @@
+bridge.log
+*.local.json
+agent-bridge.json
+__pycache__/

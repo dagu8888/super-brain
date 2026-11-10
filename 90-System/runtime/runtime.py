@@ -19,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from migrate_v2 import migrate, CANONICAL_USER, CHIEF_CAPS as CHIEF_CAPS_DEFAULT  # noqa: E402
 from path_guard import PathGuard, PermissionDenied      # noqa: E402
+import message_bus                                      # noqa: E402
 
 try:
     import yaml
@@ -775,6 +776,10 @@ def chief_execute(conn, chief_id, cmd, args):
         log_event("plan_cancel_intent", plan=row[0], by=chief_id)
         return {"ok": True, "plan_id": row[0],
                 "note": "取消意向已记账，orchestrator 消费后生效（约 5 秒内）"}
+
+    # ---- 消息总线 v1：不进 events，不触发 chat-worker / 任何 LLM worker ----
+    if cmd in ("msg", "reply"):
+        return message_bus.handle_cmd(conn, chief_id, cmd, args)
 
     return {"ok": False, "error": f"未知指令 {cmd}"}
 
