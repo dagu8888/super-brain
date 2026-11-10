@@ -3,56 +3,57 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Super-Brain 3.0 · 指挥中心原型</title>
+<title>Super-Brain · 多 Agent 操作台</title>
 <link rel="stylesheet" href="../tokens.css">
 <link rel="stylesheet" href="../base.css">
-<link rel="stylesheet" href="prototype.css">
+<link rel="stylesheet" href="ops.css?v=20261110">
 </head>
 <body>
-
-<div class="sb-app">
-  <!-- 左侧导航（248px，玻璃） -->
-  <aside class="sb-sidebar sb-glass">
-    <div class="pt-brand">
-      <span class="pt-brand-mark">S</span>
+<div id="gate" class="ops-gate">
+  <form id="gate-form" class="ops-gate-card sb-card" autocomplete="on">
+    <div class="ops-brand">
+      <span class="ops-mark" aria-hidden="true">S</span>
       <div>
-        <strong>SUPER-BRAIN</strong>
-        <span class="pt-badge">3.0 原型</span>
+        <strong>多 Agent 操作台</strong>
+        <span>Super-Brain · 只读观察</span>
       </div>
     </div>
-    <nav class="pt-nav" id="nav" aria-label="主导航"></nav>
-    <div class="pt-side-foot">
-      <div class="pt-conn">
-        <span class="sb-status" data-status="idle" id="conn-state">演示数据</span>
-        <small class="sb-text-tertiary" id="conn-mode">SSE 实时推送 · 只读</small>
+    <p class="ops-lead">输入只读口令或指挥口令。口令只保存在这台浏览器里，页面源码中没有口令。</p>
+    <label class="ops-label" for="token">口令</label>
+    <input id="token" name="token" type="password" autocomplete="current-password" required
+           placeholder="只读口令或指挥口令" aria-describedby="gate-error">
+    <p id="gate-error" class="ops-error" role="alert"></p>
+    <button id="enter" class="sb-button sb-button-primary" type="submit">进入操作台</button>
+  </form>
+</div>
+
+<div id="app" class="sb-app" hidden>
+  <aside class="sb-sidebar sb-glass ops-side">
+    <div class="ops-brand">
+      <span class="ops-mark" aria-hidden="true">S</span>
+      <div class="ops-brand-text">
+        <strong>操作台</strong>
+        <span>v1 · 轨迹视图</span>
       </div>
-      <button class="sb-button sb-button-secondary" id="theme-toggle" type="button">切换深 / 浅色</button>
+    </div>
+    <nav id="nav" class="ops-nav" aria-label="主导航"></nav>
+    <div class="ops-side-foot">
+      <button id="logout" class="sb-button sb-button-secondary" type="button">退出登录</button>
     </div>
   </aside>
-
-  <!-- 主区 -->
   <main class="sb-main">
-    <div class="sb-topbar sb-glass">
-      <h1 id="page-title">指挥中心</h1>
-      <div class="pt-search">
-        <input id="global-search" type="search" placeholder="搜索 Agent / 任务 / 事件…（⌘K）" aria-label="全局搜索">
-      </div>
-      <span class="sb-status" data-status="completed">系统正常</span>
-      <button class="pt-demo-pill" id="live-badge" type="button" data-live="0"
-              title="点击接入真实数据（只读口令）">演示数据</button>
-      <div class="pt-avatar" aria-label="当前用户">古</div>
-    </div>
+    <header class="sb-topbar sb-glass">
+      <h1 id="page-title">总览</h1>
+      <span class="sb-status" id="health-pill" data-status="idle">检查中</span>
+      <span class="sb-status" id="conn-state" data-status="idle">未连接</span>
+      <button id="theme-toggle" class="sb-button sb-button-secondary" type="button">深色</button>
+    </header>
     <div class="sb-content" id="views"></div>
   </main>
 </div>
 
-<!-- 右侧详情面板（380px，滑入滑出） -->
-<aside class="sb-detail-panel" id="detail" data-open="false" aria-label="详情面板"></aside>
-
-<script src="../vendor/three.min.js"></script>
-<script src="scene3d.js?v=8"></script>
-<script src="data.js?v=2"></script>
-<script src="prototype.js?v=13"></script>
-<script src="live.js?v=4"></script>
+<div id="backdrop" class="ops-backdrop" hidden></div>
+<aside id="drawer" class="sb-detail-panel ops-drawer" data-open="false" aria-label="上下文"></aside>
+<script src="ops.js?v=20261110"></script>
 </body>
 </html>
