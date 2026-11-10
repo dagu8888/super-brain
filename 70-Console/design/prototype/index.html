@@ -6,28 +6,10 @@
 <title>Super-Brain · 多 Agent 操作台</title>
 <link rel="stylesheet" href="../tokens.css">
 <link rel="stylesheet" href="../base.css">
-<link rel="stylesheet" href="ops.css?v=20261110">
+<link rel="stylesheet" href="ops.css?v=20261111">
 </head>
 <body>
-<div id="gate" class="ops-gate">
-  <form id="gate-form" class="ops-gate-card sb-card" autocomplete="on">
-    <div class="ops-brand">
-      <span class="ops-mark" aria-hidden="true">S</span>
-      <div>
-        <strong>多 Agent 操作台</strong>
-        <span>Super-Brain · 只读观察</span>
-      </div>
-    </div>
-    <p class="ops-lead">输入只读口令或指挥口令。口令只保存在这台浏览器里，页面源码中没有口令。</p>
-    <label class="ops-label" for="token">口令</label>
-    <input id="token" name="token" type="password" autocomplete="current-password" required
-           placeholder="只读口令或指挥口令" aria-describedby="gate-error">
-    <p id="gate-error" class="ops-error" role="alert"></p>
-    <button id="enter" class="sb-button sb-button-primary" type="submit">进入操作台</button>
-  </form>
-</div>
-
-<div id="app" class="sb-app" hidden>
+<div id="app" class="sb-app">
   <aside class="sb-sidebar sb-glass ops-side">
     <div class="ops-brand">
       <span class="ops-mark" aria-hidden="true">S</span>
@@ -37,9 +19,6 @@
       </div>
     </div>
     <nav id="nav" class="ops-nav" aria-label="主导航"></nav>
-    <div class="ops-side-foot">
-      <button id="logout" class="sb-button sb-button-secondary" type="button">退出登录</button>
-    </div>
   </aside>
   <main class="sb-main">
     <header class="sb-topbar sb-glass">
@@ -54,6 +33,6 @@
 
 <div id="backdrop" class="ops-backdrop" hidden></div>
 <aside id="drawer" class="sb-detail-panel ops-drawer" data-open="false" aria-label="上下文"></aside>
-<script src="ops.js?v=20261110"></script>
+<script src="ops.js?v=20261111"></script>
 </body>
 </html>

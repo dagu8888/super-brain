@@ -1,10 +1,9 @@
 /* Super-Brain 多 Agent 操作台 v1
    范式：LangSmith 的 trace 时间线（任务=一条 span，展开看输入/留痕/输出）
          + CrewAI / AutoGen Studio 的 Agent 看板。
-   只读。口令只进 localStorage。全程最多一条 SSE，失败则 6 秒轮询。 */
+   只读。2026-11-11 起无需口令，打开即可查看。全程最多一条 SSE，失败则 6 秒轮询。 */
 "use strict";
 
-const LS = "sb-viewer-token";
 const OFFLINE_S = 300;
 const API = location.protocol === "http:" || location.protocol === "https:"
   ? ""
@@ -30,7 +29,6 @@ const ROLE = {
 };
 
 const state = {
-  token: "",
   serverNow: 0,
   serverNowAt: 0,
   consoleRev: 0,
@@ -143,14 +141,9 @@ function setHealth(monitor) {
 }
 
 async function apiGet(path) {
-  const res = await fetch(API + path, { headers: { Authorization: "Bearer " + state.token } });
+  const res = await fetch(API + path);
   let body = null;
   try { body = await res.json(); } catch (e) { body = null; }
-  if (res.status === 401) {
-    const err = new Error("口令无效");
-    err.status = 401;
-    throw err;
-  }
   if (!res.ok || !body || body.ok === false) {
     const err = new Error((body && body.error) || ("HTTP " + res.status));
     err.status = res.status;
@@ -220,8 +213,7 @@ async function refreshQuiet() {
     await refreshStatus();
     renderIfIdle();
   } catch (e) {
-    if (e.status === 401) return logout("口令已失效，请重新输入");
-    setConn("error", "连接中断", "数据可能已过期");
+    setConn("error", "连接中断", e.message || "数据可能已过期");
   }
 }
 
@@ -232,7 +224,7 @@ function connectStream() {
   const since = state.lastEventTs || Math.floor(nowSec()) - 3600;
   let es;
   try {
-    es = new EventSource(API + "/api/stream?token=" + encodeURIComponent(state.token) + "&since=" + since);
+    es = new EventSource(API + "/api/stream?since=" + since);
   } catch (e) {
     startPoll();
     return;
@@ -267,11 +259,8 @@ function connectStream() {
       setConn("poll", "轮询模式", "实时推送不可用，已改为 6 秒轮询");
       startPoll();
     }).catch((e) => {
-      if (e.status === 401) logout("口令已失效，请重新输入");
-      else {
-        setConn("error", "连接中断", "数据可能已过期，将继续重试");
-        startPoll();
-      }
+      setConn("error", "连接中断", e.message || "数据可能已过期，将继续重试");
+      startPoll();
     });
   };
   stopSlow();
@@ -289,24 +278,9 @@ function startPoll() {
       const body = await apiGet("/api/events?limit=40" + (state.lastEventTs ? "&since=" + state.lastEventTs : ""));
       mergeEvents(body.data);
       renderIfIdle();
-    } catch (e) {
-      if (e.status === 401) logout("口令已失效，请重新输入");
-    }
+    } catch (e) { /* 轮询失败时保留上次数据，下轮再试 */ }
   };
   state.poll = setInterval(tick, 6000);
-}
-
-function logout(msg) {
-  localStorage.removeItem(LS);
-  if (state.es) state.es.close();
-  state.es = null;
-  stopPoll();
-  stopSlow();
-  state.token = "";
-  $("#app").hidden = true;
-  $("#gate").hidden = false;
-  $("#gate-error").textContent = msg || "";
-  closeDrawer();
 }
 
 function parseRoute() {
@@ -810,7 +784,6 @@ async function openAgent(id) {
   } catch (e) {
     if (seq !== state.drawerSeq) return;
     const local = state.agents.find((a) => a.agent_id === id);
-    if (e.status === 401) return logout("口令已失效，请重新输入");
     showDrawer(`<div class="ops-drawer-head"><div><h2>${esc(id)}</h2></div>
       <button class="sb-button sb-button-secondary" type="button" data-close>关闭</button></div>
       <p class="ops-note">详情接口没有返回（${esc(e.message)}）。下面是列表里已有的字段。</p>
@@ -864,7 +837,6 @@ async function openTask(id) {
     bindTrace($("#drawer"));
   } catch (e) {
     if (seq !== state.drawerSeq) return;
-    if (e.status === 401) return logout("口令已失效，请重新输入");
     showDrawer(`<div class="ops-drawer-head"><h2>任务 #${esc(id)}</h2>
       <button class="sb-button sb-button-secondary" type="button" data-close>关闭</button></div>
       <p class="ops-error">${esc(e.message)}</p>`);
@@ -887,7 +859,6 @@ function render() {
       if (parseRoute().page !== "knowledge") return;
       paintK();
     }).catch((e) => {
-      if (e.status === 401) return logout("口令已失效，请重新输入");
       host.innerHTML = `<p class="ops-error">${esc(e.message)}</p>`;
     });
   } else if (route.page === "network") {
@@ -898,7 +869,6 @@ function render() {
       if (parseRoute().page !== "network") return;
       paintN();
     }).catch((e) => {
-      if (e.status === 401) return logout("口令已失效，请重新输入");
       host.innerHTML = `<p class="ops-error">${esc(e.message)}</p>`;
     });
   }
@@ -907,28 +877,20 @@ function render() {
   else if (!route.arg) closeDrawer();
 }
 
-async function enter(token) {
-  state.token = token;
-  $("#gate-error").textContent = "";
-  $("#enter").disabled = true;
+async function boot() {
   try {
     await refreshStatus();
     const ev = await apiGet("/api/events?limit=40");
     state.events = [];
     state.seen = new Set();
     mergeEvents(ev.data);
-    localStorage.setItem(LS, token);
-    $("#token").value = "";
-    $("#gate").hidden = true;
-    $("#app").hidden = false;
     if (!location.hash) location.hash = "#/overview";
     render();
     connectStream();
   } catch (e) {
-    state.token = "";
-    $("#gate-error").textContent = e.status === 401 ? "口令无效" : ("进不去：" + e.message);
-  } finally {
-    $("#enter").disabled = false;
+    setConn("error", "连接失败", e.message || "");
+    const host = $("#views");
+    if (host) host.innerHTML = `<p class="ops-error">进不去：${esc(e.message)}</p>`;
   }
 }
 
@@ -946,12 +908,6 @@ function initTheme() {
   });
 }
 
-$("#gate-form").addEventListener("submit", (e) => {
-  e.preventDefault();
-  const token = $("#token").value.trim();
-  if (token) enter(token);
-});
-$("#logout").addEventListener("click", () => logout(""));
 $("#backdrop").addEventListener("click", () => {
   const route = parseRoute();
   if (route.arg) location.hash = "#/" + route.page;
@@ -964,8 +920,7 @@ document.addEventListener("keydown", (e) => {
     else closeDrawer();
   }
 });
-window.addEventListener("hashchange", () => { if (state.token && !$("#app").hidden) render(); });
+window.addEventListener("hashchange", () => { if (!$("#app").hidden) render(); });
 
 initTheme();
-const saved = localStorage.getItem(LS);
-if (saved) enter(saved);
+boot();
