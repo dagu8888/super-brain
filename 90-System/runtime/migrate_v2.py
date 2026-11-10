@@ -134,12 +134,30 @@ CREATE TABLE IF NOT EXISTS agent_caps(
   note TEXT,
   UNIQUE(agent_ref, capability)
 );
+
+-- 实时消息总线 v1（不进 events 路由，不触发 LLM worker）
+CREATE TABLE IF NOT EXISTS messages(
+  msg_id TEXT PRIMARY KEY,
+  from_agent TEXT NOT NULL,
+  from_instance TEXT,
+  "to" TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'chat',
+  text TEXT NOT NULL,
+  reply_to TEXT,
+  thread_id TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_messages_since ON messages(created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_reply ON messages(reply_to);
+CREATE INDEX IF NOT EXISTS idx_messages_to ON messages("to", created_at);
 """
 
 # 内置角色注册（capabilities 以实际验证为准；trae-developer 未跑通探针前 verified=0）
 # 七入口统一能力：七命令 + 协作池（pull 领取 / renew 续租 / report 回传 / assist 提交）
 CHIEF_CAPS = ["submit", "status", "list", "progress", "delegate", "link", "cancel",
-              "pull", "report", "renew", "assist", "kb_search", "kb_read", "heartbeat"]
+              "pull", "report", "renew", "assist", "kb_search", "kb_read", "heartbeat",
+              "msg", "reply"]
 BUILTIN_AGENTS = [
     # (agent_id, kind, capabilities, task_types, permissions, verified)
     ("grok-chief", "chief", CHIEF_CAPS, None, {"write": [], "exec": False, "llm": False}, 1),
@@ -183,6 +201,11 @@ REGISTRY_SEED = [
 
 def migrate(conn):
     conn.executescript(SCHEMA_V2)
+    try:
+        import message_bus
+        message_bus.ensure_schema(conn)
+    except Exception:
+        pass
 
     # task_queue → tasks（状态 doing 重置为 pending；结果/错误映射）
     has_old = conn.execute(
@@ -266,3 +289,5 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+

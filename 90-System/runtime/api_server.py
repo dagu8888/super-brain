@@ -18,6 +18,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 import console_api
+import message_bus
 
 HERE = Path(__file__).parent
 CONF = HERE / "api_tokens.json"
@@ -29,7 +30,7 @@ elif Path("/etc/super-brain/api_tokens.json").is_file():
     CONF = Path("/etc/super-brain/api_tokens.json")
 DESIGN = HERE.parents[1] / "70-Console" / "design"   # 控制台静态资源（只含前端文件）
 MAX_BODY = 64 * 1024                      # 请求体上限 64KB
-STREAM_MAX_CLIENTS = 8                    # SSE 并发连接上限
+STREAM_MAX_CLIENTS = 32                   # SSE 并发上限（每条节点桥占 1 路长连）
 STREAM_SECONDS = 600                      # 单连接最长 10 分钟后自动重连（浏览器原生支持）
 CORS = (("Access-Control-Allow-Origin", "*"),
         ("Access-Control-Allow-Headers", "Authorization, Content-Type"),
@@ -115,6 +116,15 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None)
 
             if instance:
                 register_presence()
+            # 连接身份：口令→chief；无 instance 的连接也能收发给其 chief 的消息
+            ident = message_bus.identity_from_token(tokens, token, conn=None, instance=instance)
+            if instance and not ident.get("agent_ref"):
+                ctmp = db_fn()
+                try:
+                    ident = message_bus.identity_from_token(tokens, token, conn=ctmp, instance=instance)
+                finally:
+                    ctmp.close()
+            agent_ref = ident.get("agent_ref") or ident.get("chief")
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-cache, no-transform")
@@ -124,7 +134,8 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None)
                 self.send_header(k, v)
             self.end_headers()
             STREAM["active"] += 1
-            seen, beat, deadline = set(), time.time(), time.time() + STREAM_SECONDS
+            seen, seen_msg, beat, deadline = set(), set(), time.time(), time.time() + STREAM_SECONDS
+            msg_since = since
             try:
                 self.wfile.write(b": connected\n\n")
                 self.wfile.flush()
@@ -135,6 +146,11 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None)
                             "SELECT event_id,source,type,priority,status,parent_id,created_at "
                             "FROM events WHERE created_at>=? ORDER BY created_at ASC, rowid ASC "
                             "LIMIT 200", (since,)).fetchall()
+                        try:
+                            msgs = message_bus.poll_for_connection(
+                                conn, msg_since, agent_ref, instance)
+                        except Exception:
+                            msgs = []
                     finally:
                         conn.close()
                     for r in rows:
@@ -149,8 +165,19 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None)
                             f"id: {eid}\nevent: event\ndata: "
                             f"{json.dumps(payload, ensure_ascii=False)}\n\n".encode())
                         since = max(since, int(r[6] or 0))
+                    for m in msgs:
+                        mid = m.get("msg_id")
+                        if not mid or mid in seen_msg:
+                            continue
+                        seen_msg.add(mid)
+                        self.wfile.write(
+                            f"id: {mid}\nevent: msg\ndata: "
+                            f"{json.dumps(m, ensure_ascii=False)}\n\n".encode())
+                        msg_since = max(msg_since, int(m.get("created_at") or 0))
                     if len(seen) > 20000:          # 去重集合封顶，防止长连接内存膨胀
                         seen.clear()
+                    if len(seen_msg) > 20000:
+                        seen_msg.clear()
                     if time.time() - beat > 15:
                         self.wfile.write(b": ping\n\n")
                         beat = time.time()

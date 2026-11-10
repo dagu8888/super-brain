@@ -15,6 +15,7 @@ Super-agent 的全部运行配置放在这里，纳入版本管理，改动即�
 ├── 权限与同步规则.md     ✅ 权限矩阵 + 署名提交 + 分区写入
 ├── 接入授权-Grok-Maus.md ✅ 两个 bot 的 Deploy Key / PAT 授权步骤
 ├── 事件驱动机制.md       ✅ 快过滤→慢判断→直通全流程 + 路由表 + 场景走查
+├── 实时消息总线-v1.md    ✅ Agent 经中台实时双向收发（msg / reply / SSE / rollcall）
 └── watchdog.yaml         ✅ 看门狗：心跳/队列积压/同步状态/回写审计 + 告警
 ```
 
