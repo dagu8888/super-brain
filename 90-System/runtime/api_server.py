@@ -105,14 +105,10 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None)
                                             "error": f"{instance} 不在实例名册或已下线"})
 
             def register_presence():
+                # heartbeats.agent 保持实例名；last_seen 写到 registry.agent_ref（如 dsh2-chief）
                 conn = db_fn()
                 try:
-                    now_ts = int(time.time())
-                    conn.execute(
-                        "INSERT INTO heartbeats(agent,ts,note) VALUES(?,?,'sse') "
-                        "ON CONFLICT(agent) DO UPDATE SET ts=excluded.ts, note=excluded.note",
-                        (instance, now_ts))
-                    conn.execute("UPDATE agents SET last_seen=? WHERE agent_id=?", (now_ts, instance))
+                    console_api.touch_instance_presence(conn, instance)
                     conn.commit()
                 finally:
                     conn.close()
