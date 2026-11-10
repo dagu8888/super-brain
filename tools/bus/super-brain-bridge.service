@@ -1,0 +1,25 @@
+# Super-Brain 节点桥 systemd 模板（给 box / 服务器用）
+# 安装：
+#   1. 把本文件拷到 /etc/systemd/system/super-brain-bridge.service
+#   2. 按实际路径改 WorkingDirectory / ExecStart / User
+#   3. 口令写入 /etc/super-brain/bridge.env（权限 600），不要写进本 unit 正文
+#      例：SUPERBRAIN_GATEWAY_TOKEN=……
+#   4. systemctl daemon-reload && systemctl enable --now super-brain-bridge
+# 验证：journalctl -u super-brain-bridge -f
+#       应看到「SSE 已建立（在场心跳中）」；bridge.log 同目录，不含口令。
+[Unit]
+Description=Super-Brain agent message-bus bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/super-brain/tools/bus
+EnvironmentFile=-/etc/super-brain/bridge.env
+ExecStart=/usr/bin/python3 /root/super-brain/tools/bus/agent-bridge.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
