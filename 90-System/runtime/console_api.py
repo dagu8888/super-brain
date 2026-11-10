@@ -4,11 +4,14 @@
 # 认证：api_tokens.json 中 viewers 字段里的口令（只读），或任意 chief 口令（兼容调试）。
 # 端点：/api/overview /api/agents /api/agents/{id} /api/tasks /api/tasks/{id}
 #       /api/events /api/monitor /api/knowledge /api/memory
+#       /api/messages /api/rollcall/{msg_id}（消息总线 v1，只读查询）
 import json
 import re
 import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+
+import message_bus
 
 ROOT = Path(__file__).resolve().parents[2]
 KNOWLEDGE = ROOT / "10-Knowledge"
@@ -821,4 +824,29 @@ def handle_get(conn, raw_path):
                   for m in sorted(set(mo_ev) | set(mo_done) | set(mo_fail))]
         return ok({"days": days, "weeks": weeks, "months": months})
 
+    if path == "/api/messages":
+        try:
+            since = q.get("since", "")
+            since = int(since) if since not in (None, "") else None
+        except (TypeError, ValueError):
+            return 400, {"ok": False, "error": "since 必须是 unix 时间戳"}
+        limit = _qp_int(q, "limit", 100, 1, 500)
+        if limit is None:
+            return 400, {"ok": False, "error": "limit 必须是整数"}
+        data = message_bus.list_messages(
+            conn, thread=q.get("thread") or None, since=since,
+            to=q.get("to") or None, limit=limit)
+        return ok(data, total=len(data))
+
+    if path.startswith("/api/rollcall/"):
+        msg_id = path[len("/api/rollcall/"):].strip()
+        if not msg_id or "/" in msg_id:
+            return 400, {"ok": False, "error": "缺 msg_id"}
+        data = message_bus.rollcall(conn, msg_id)
+        if not data:
+            return 404, {"ok": False, "error": f"消息 {msg_id} 不存在"}
+        return ok(data)
+
     return 404, {"ok": False, "error": "not found"}
+
+

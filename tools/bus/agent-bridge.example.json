@@ -1,0 +1,17 @@
+{
+  "gateway": "http://8.218.106.225:18765",
+  "token_env": "SUPERBRAIN_GATEWAY_TOKEN",
+  "instance": "DSH一号@主机",
+  "agent_id": "dsh-chief",
+  "handler": "none",
+  "openmaus": {
+    "mode": "auto",
+    "base_url": "http://127.0.0.1:8799",
+    "bot_id": "maus1",
+    "http_path": "/api/bots/{bot_id}/messages",
+    "cli": ["openmausbot", "run", "{bot_id}", "{text}"]
+  },
+  "shell": {
+    "command": ["cat"]
+  }
+}
