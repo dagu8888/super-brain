@@ -78,18 +78,23 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None)
             auth = self.headers.get("Authorization", "")
             token = q.get("token") or (auth[7:] if auth.startswith("Bearer ") else "")
             allowed = list(tokens.values()) + list(viewers.values())
-            if not token or not any(
-                    t and hmac.compare_digest(str(t).encode(), token.encode()) for t in allowed):
+            authed = bool(token) and any(
+                    t and hmac.compare_digest(str(t).encode(), token.encode()) for t in allowed)
+            # S3 节点信使：?instance=<名册实例名> 以长连注册心跳（不写新表，沿用 heartbeats/agents）
+            # 带 instance 的连接可冒充在场、收取定向消息，必须持有口令。
+            # 不带 instance 的连接是操作台只读推送，按 2026-11-11 批示免口令。
+            instance = (q.get("instance") or "").strip()
+            if instance and not authed:
                 log_event("api_auth_failed", ip=self.client_address[0], path="/api/stream")
                 return self._send(401, {"ok": False, "error": "无效口令"})
+            if not authed:
+                token = ""
             if STREAM["active"] >= STREAM_MAX_CLIENTS:
                 return self._send(429, {"ok": False, "error": "推送连接已达上限"})
             try:
                 since = int(float(q.get("since", time.time())))
             except Exception:
                 since = int(time.time())
-            # S3 节点信使：?instance=<名册实例名> 以长连注册心跳（不写新表，沿用 heartbeats/agents）
-            instance = (q.get("instance") or "").strip()
             if instance:
                 conn = db_fn()
                 try:
@@ -232,10 +237,7 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None)
                 return self._send(200, {"ok": True, "service": "super-brain-api"})
             if self.path.startswith("/api/stream"):     # 实时推送（SSE）
                 return self._stream()
-            if self.path.startswith("/api/"):           # 只读控制台接口（viewers 或 chief 口令）
-                if not self._authed(list(tokens.values()) + list(viewers.values())):
-                    log_event("api_auth_failed", ip=self.client_address[0], path=self.path[:80])
-                    return self._send(401, {"ok": False, "error": "无效口令"})
+            if self.path.startswith("/api/"):           # 只读控制台接口：2026-11-11 起免口令（写入仍走 /cmd）
                 conn = db_fn()
                 try:
                     code, obj = console_api.handle_get(conn, self.path)

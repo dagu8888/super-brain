@@ -246,16 +246,61 @@ def _sse(port, instance):
     return data
 
 
+def _get_plain(port, path):
+    req = urllib.request.Request("http://127.0.0.1:%s%s" % (port, path))
+    with urllib.request.urlopen(req, timeout=8) as res:
+        return res.status, json.loads(res.read().decode())
+
+
+def _post_cmd(port, token=None):
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    req = urllib.request.Request(
+        "http://127.0.0.1:%s/cmd" % port,
+        data=b'{"cmd":"status","args":{}}',
+        headers=headers,
+        method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=8) as res:
+            return res.status, json.loads(res.read().decode())
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode()
+
+
+def _sse_query(port, query):
+    sock = socket.create_connection(("127.0.0.1", port), 5)
+    sock.settimeout(5)
+    sock.sendall(("GET /api/stream?%s HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n" % query).encode())
+    data = b""
+    try:
+        while b"\r\n\r\n" not in data and len(data) < 800:
+            chunk = sock.recv(200)
+            if not chunk:
+                break
+            data += chunk
+    except socket.timeout:
+        pass
+    sock.close()
+    return data
+
+
 def test_http_and_pages(db_path, port):
     code, health = _get(port, "/healthz", token="x")
     check("healthz 免鉴权", code == 200 and health.get("ok"), health)
-    try:
-        _get(port, "/api/overview", token="nope")
-        check("错口令 401", False)
-    except urllib.error.HTTPError as e:
-        check("错口令 401", e.code == 401, e.code)
+    code, ov = _get_plain(port, "/api/overview")
+    check("只读 overview 免口令", code == 200 and ov.get("ok") is not False, ov if code != 200 else "ok")
+    code, ov = _get(port, "/api/overview", token="nope")
+    check("错口令仍可只读", code == 200 and "data" in ov, code)
+    cmd_code, _body = _post_cmd(port, token=None)
+    check("写入 /cmd 无口令 401", cmd_code == 401, cmd_code)
+    pub = _sse_query(port, "since=1")
+    check("操作台 SSE 免口令", b"200" in pub.split(b"\r\n", 1)[0] or b"connected" in pub, pub[:180])
+    denied = _sse_query(port, urllib.parse.urlencode({"instance": "幕僚长@云端", "since": "1"}))
+    check("带 instance 的 SSE 无口令 401", b"401" in denied[:80], denied[:120])
     text = urllib.request.urlopen("http://127.0.0.1:%s/console/prototype/index.html" % port, timeout=8).read().decode()
     check("入口仍是 prototype", "多 Agent 操作台" in text and "ops.js" in text and "three.min.js" not in text)
+    check("前端无口令框", 'id="token"' not in text and "gate-form" not in text)
     raw = _sse(port, "幕僚长@云端")
     check("SSE 实例连接", b"200" in raw.split(b"\r\n", 1)[0] or b"connected" in raw, raw[:180])
     conn = sqlite3.connect(db_path)
@@ -302,11 +347,6 @@ def shoot(port):
             page.locator('#nav button[data-page="%s"]' % page_id).click()
 
         page.goto(url)
-        page.wait_for_selector("#token")
-        page.screenshot(path=str(art / "console-login.png"))
-        shots.append("console-login.png")
-        page.fill("#token", VIEWER)
-        page.click("#enter")
         page.wait_for_selector("#feed")
         page.screenshot(path=str(art / "console-overview.png"))
         shots.append("console-overview.png")

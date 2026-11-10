@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Super-Brain 3.0 控制台只读适配层（console_api）
 # 设计原则：只读、不解耦 Runtime、不改 /cmd；由 api_server 的 GET 路由调用。
-# 认证：api_tokens.json 中 viewers 字段里的口令（只读），或任意 chief 口令（兼容调试）。
+# 认证：GET 只读接口 2026-11-11 起免口令；写入仍走 /cmd，需 chief 口令。viewers 字段保留兼容，不再拦查看。
 # 端点：/api/overview /api/agents /api/agents/{id} /api/tasks /api/tasks/{id}
 #       /api/events /api/monitor /api/knowledge /api/memory
 #       /api/messages /api/rollcall/{msg_id}（消息总线 v1，只读查询）
