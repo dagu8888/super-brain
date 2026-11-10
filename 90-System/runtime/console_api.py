@@ -15,7 +15,17 @@ KNOWLEDGE = ROOT / "10-Knowledge"
 EVENTS_DIR = ROOT / "50-Events"
 OFFLINE_SECONDS = 300          # 心跳超过 5 分钟视为离线
 DEFAULT_ESTIMATE = 120         # 无历史样本时的默认预计耗时（秒）
+# 列表默认排除 dead：历史风暴在这一态，必须走 status= 索引，禁止无条件下扫全表
+OPEN_STATUSES = ("pending", "doing", "done", "failed", "cancelled")
+# 控制台全文只读这些知识类目录，其余（含 90-System、.git）一律拒绝
+KB_READ_PREFIXES = (
+    "00-Inbox/", "10-Knowledge/", "20-Skills/", "30-Reviews/",
+    "40-Agents/", "60-Outputs/",
+)
+KB_READ_SUFFIXES = (".md", ".txt", ".markdown")
+KB_READ_MAX_BYTES = 1_500_000
 _EST_CACHE = {}                # type -> (中位耗时, 样本数, 计算时刻)
+_RESULT_PATH = re.compile(r"60-Outputs/[\w./+\-\u4e00-\u9fff（）()]+\.md")
 
 
 def _estimate(conn, ttype):
@@ -81,11 +91,195 @@ def _rows(cur):
     return [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
 
 
-def _agent_status(last_seen, busy, kind="worker"):
-    # chief 是"入口身份"，不常驻进程，last_seen 只代表最近调用时间，不判离线
-    if kind != "chief" and (not last_seen or time.time() - int(last_seen) > OFFLINE_SECONDS):
+def _qp_int(q, key, default, lo, hi):
+    raw = q.get(key, None)
+    if raw is None or raw == "":
+        return default
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return max(lo, min(n, hi))
+
+
+def _live_status(seen, busy, now):
+    """chief 与 worker 同一口径：5 分钟内有心跳/last_seen 才算在线。从不出现=久未使用。"""
+    if not seen:
+        return "unused"
+    if now - int(seen) > OFFLINE_SECONDS:
         return "offline"
     return "working" if busy else "idle"
+
+
+def _load_presence(conn):
+    """heartbeats.agent 是实例名或进程名；实例经 registry.agent_ref 折回 chief。"""
+    beats = {}
+    try:
+        for agent, ts, note in conn.execute("SELECT agent, ts, note FROM heartbeats"):
+            beats[agent] = (int(ts or 0), note or "")
+    except Exception:
+        beats = {}
+    by_ref = {}
+    try:
+        rows = conn.execute(
+            "SELECT name, location, agent_ref, status FROM registry WHERE kind='instance'"
+        ).fetchall()
+    except Exception:
+        rows = []
+    now = int(time.time())
+    for name, loc, ref, status in rows:
+        ts, note = beats.get(name, (None, ""))
+        by_ref.setdefault(ref or "", []).append({
+            "name": name,
+            "location": loc or "",
+            "registry_status": status or "",
+            "heartbeat_at": ts,
+            "note": note,
+            "online": bool(ts) and status == "active" and now - int(ts) <= OFFLINE_SECONDS,
+        })
+    return beats, by_ref
+
+
+def _annotate_agent(agent, busy, beats, by_ref, now):
+    """用 last_seen、自身心跳、名册实例心跳三者的最大值判定在线，不看 kind。"""
+    inst = list(by_ref.get(agent.get("agent_id"), []))
+    cands = []
+    if agent.get("last_seen"):
+        cands.append(("last_seen", int(agent["last_seen"])))
+    own = beats.get(agent.get("agent_id"))
+    if own and own[0]:
+        cands.append(("heartbeat", own[0]))
+    for item in inst:
+        if item.get("heartbeat_at"):
+            cands.append(("instance:" + item["name"], int(item["heartbeat_at"])))
+    if cands:
+        via, seen = max(cands, key=lambda x: x[1])
+    else:
+        via, seen = "", None
+    agent["presence_at"] = seen
+    agent["presence_via"] = via
+    agent["instances"] = inst
+    agent["instance_names"] = [i["name"] for i in inst]
+    agent["live_status"] = _live_status(seen, busy, now)
+    agent["ever_connected"] = seen is not None
+    return agent
+
+
+def touch_instance_presence(conn, instance, now_ts=None):
+    """SSE 在场：心跳键仍是实例名；agents.last_seen 按 registry.agent_ref 回写。
+
+    不把实例名当成 agent_id。名册没有对应行时只记心跳、不改 agents。不提交事务。
+    """
+    now_ts = int(now_ts if now_ts is not None else time.time())
+    conn.execute(
+        "INSERT INTO heartbeats(agent,ts,note) VALUES(?,?,'sse') "
+        "ON CONFLICT(agent) DO UPDATE SET ts=excluded.ts, note=excluded.note",
+        (instance, now_ts))
+    agent_id = ""
+    try:
+        ref = conn.execute(
+            "SELECT agent_ref FROM registry WHERE name=? AND kind='instance' AND status='active'",
+            (instance,)).fetchone()
+        agent_id = (ref[0] or "").strip() if ref else ""
+    except Exception:
+        agent_id = ""
+    updated = 0
+    if agent_id:
+        updated = conn.execute(
+            "UPDATE agents SET last_seen=? WHERE agent_id=?", (now_ts, agent_id)).rowcount
+    return {"instance": instance, "agent_id": agent_id or None, "updated": updated, "ts": now_ts}
+
+
+def _instruction_of(payload):
+    """从任务 payload 取出给人看的指令原文。过大的对象不整包返回。"""
+    if payload is None:
+        return "", None
+    obj = payload
+    if isinstance(payload, str):
+        try:
+            obj = json.loads(payload)
+        except Exception:
+            return payload[:1200], None
+    if isinstance(obj, dict):
+        text = obj.get("text") or obj.get("instruction") or obj.get("prompt") or obj.get("content") or ""
+        raw = json.dumps(obj, ensure_ascii=False)
+        return str(text)[:1200], (obj if len(raw) <= 8000 else None)
+    return str(obj)[:800], None
+
+
+def _result_paths(*blobs):
+    found, seen = [], set()
+    for blob in blobs:
+        if isinstance(blob, dict):
+            for key in ("result_path", "path", "file"):
+                val = blob.get(key)
+                if isinstance(val, str):
+                    blob_s = val
+                    if blob_s.startswith("60-Outputs/") and blob_s.endswith(".md") and blob_s not in seen:
+                        seen.add(blob_s)
+                        found.append(blob_s)
+            blob = json.dumps(blob, ensure_ascii=False)
+        for m in _RESULT_PATH.findall(str(blob or "")):
+            if m not in seen:
+                seen.add(m)
+                found.append(m)
+    return found
+
+
+def _enrich_task(conn, row, now, with_events=False):
+    payload_raw = row.get("payload")
+    instruction, payload_obj = _instruction_of(payload_raw)
+    row["instruction"] = instruction
+    if payload_obj is not None:
+        row["payload"] = payload_obj
+    elif isinstance(payload_raw, str):
+        row.pop("payload", None)
+        row["payload_omitted"] = True
+    row["result_paths"] = _result_paths(payload_obj, row.get("result"), row.get("summary"))
+    _with_awaiting(conn, _with_progress(conn, row, now))
+    if with_events and row.get("event_id"):
+        eid = row["event_id"]
+        row["events"] = _rows(conn.execute(
+            "SELECT event_id,source,type,status,created_at,substr(COALESCE(payload,''),1,500) AS payload "
+            "FROM events WHERE event_id=? OR parent_id=? ORDER BY created_at DESC LIMIT 20",
+            (eid, eid)))
+    return row
+
+
+def _is_sensitive_name(name):
+    n = (name or "").lower()
+    return n.startswith(("api_tokens", "llm.json", "state.db", ".env")) or n.endswith(
+        (".db", ".db-wal", ".db-shm", ".pem", ".key"))
+
+
+def _kb_file(rel):
+    """解析知识全文路径。返回 (Path|None, error|None)。拒绝穿越、敏感文件与知识目录之外。"""
+    rel = (rel or "").replace("\\", "/").strip()
+    if not rel or "\x00" in rel or rel.startswith("/") or ":" in rel.split("/")[0]:
+        return None, "非法路径"
+    parts = [p for p in rel.split("/") if p not in ("", ".")]
+    if any(p == ".." for p in parts) or any(p == ".git" or p.startswith(".git") for p in parts):
+        return None, "非法路径"
+    rel = "/".join(parts)
+    if not any(rel.startswith(p) for p in KB_READ_PREFIXES):
+        return None, "只允许读取知识类目录"
+    if _is_sensitive_name(parts[-1]):
+        return None, "敏感文件拒绝读取"
+    root = ROOT.resolve()
+    fp = (root / rel).resolve()
+    try:
+        resolved = fp.relative_to(root).as_posix()
+    except ValueError:
+        return None, "越界路径"
+    if resolved != rel or not any(resolved.startswith(p) for p in KB_READ_PREFIXES):
+        return None, "越界路径"
+    if any(p == ".git" for p in fp.parts) or _is_sensitive_name(fp.name):
+        return None, "敏感文件拒绝读取"
+    if fp.suffix.lower() not in KB_READ_SUFFIXES:
+        return None, "只允许读取 Markdown 或纯文本"
+    if not fp.is_file():
+        return None, "文件不存在"
+    return fp, None
 
 
 def _frontmatter(path):
@@ -142,20 +336,25 @@ def handle_get(conn, raw_path):
     if path == "/api/overview":
         busy = {r[0] for r in conn.execute(
             "SELECT lease_owner FROM tasks WHERE status='doing' AND lease_owner IS NOT NULL")}
+        beats, by_ref = _load_presence(conn)
         agents = _rows(conn.execute(
             "SELECT agent_id,kind,status,last_seen FROM agents WHERE status='active' "
             "ORDER BY kind,agent_id"))
         for a in agents:
-            a["live_status"] = _agent_status(a["last_seen"], a["agent_id"] in busy, a["kind"])
+            _annotate_agent(a, a["agent_id"] in busy, beats, by_ref, now)
         tasks = dict(conn.execute("SELECT status,COUNT(*) FROM tasks GROUP BY status").fetchall())
         dec = conn.execute(
             "SELECT COUNT(*) FROM tasks WHERE status='pending' AND priority>=1").fetchone()[0]
         today0 = int(time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1)))
         ev = conn.execute("SELECT COUNT(*) FROM events WHERE created_at>=?", (today0,)).fetchone()[0]
+        online = sum(1 for a in agents if a["live_status"] in ("idle", "working"))
         return ok({
+            "console_rev": 1,
             "agents_total": len(agents),
-            "agents_online": sum(1 for a in agents if a["live_status"] != "offline"),
+            "agents_online": online,
             "agents_working": sum(1 for a in agents if a["live_status"] == "working"),
+            "agents_offline": sum(1 for a in agents if a["live_status"] == "offline"),
+            "agents_unused": sum(1 for a in agents if a["live_status"] == "unused"),
             "tasks": tasks,
             "tasks_running": tasks.get("doing", 0),
             "tasks_pending": tasks.get("pending", 0),
@@ -165,8 +364,13 @@ def handle_get(conn, raw_path):
         })
 
     if path == "/api/agents":
-        busy = {r[0]: r[1] for r in conn.execute(
-            "SELECT lease_owner, id FROM tasks WHERE status='doing' AND lease_owner IS NOT NULL")}
+        doing = {}
+        for r in conn.execute(
+                "SELECT id, lease_owner, type, substr(COALESCE(payload,''),1,240) "
+                "FROM tasks WHERE status='doing' AND lease_owner IS NOT NULL LIMIT 40"):
+            doing[r[1]] = {"id": r[0], "type": r[2],
+                           "instruction": _instruction_of(r[3])[0][:180]}
+        beats, by_ref = _load_presence(conn)
         dec = dict(conn.execute(
             "SELECT e.source, COUNT(*) FROM tasks t JOIN events e ON t.event_id=e.event_id "
             "WHERE t.status='pending' AND t.priority>=1 GROUP BY 1").fetchall())
@@ -178,9 +382,10 @@ def handle_get(conn, raw_path):
                 a["permissions"] = json.loads(a["permissions"] or "{}")
             except Exception:
                 pass
-            a["live_status"] = _agent_status(a["last_seen"], a["agent_id"] in busy, a["kind"])
-            a["current_task_id"] = busy.get(a["agent_id"])
-            a["ever_connected"] = a["last_seen"] is not None
+            _annotate_agent(a, a["agent_id"] in doing, beats, by_ref, now)
+            cur = doing.get(a["agent_id"])
+            a["current_task_id"] = cur["id"] if cur else None
+            a["current_task"] = cur
             a["pending_decisions"] = dec.get(a["agent_id"], 0)
             out.append(a)
         return ok(out)
@@ -197,18 +402,42 @@ def handle_get(conn, raw_path):
                 d[k] = json.loads(d[k] or "[]")
             except Exception:
                 pass
+        beats, by_ref = _load_presence(conn)
+        doing_id = conn.execute(
+            "SELECT id FROM tasks WHERE lease_owner=? AND status='doing' ORDER BY id DESC LIMIT 1",
+            (d["agent_id"],)).fetchone()
+        _annotate_agent(d, bool(doing_id), beats, by_ref, now)
+        d["current_task_id"] = doing_id[0] if doing_id else None
         hist = _rows(conn.execute(
-            "SELECT id,type,status,created_at,done_at FROM tasks WHERE lease_owner=? "
-            "ORDER BY id DESC LIMIT 10", (d["agent_id"],)))
-        return ok({**d, "recent_tasks": hist})
+            "SELECT id,event_id,type,status,priority,lease_owner,retry_count,claimed_at,"
+            "created_at,done_at,payload,substr(COALESCE(result,error),1,400) AS summary "
+            "FROM tasks WHERE lease_owner=? AND status IN (?,?,?,?,?) "
+            "ORDER BY id DESC LIMIT 12",
+            (d["agent_id"], *OPEN_STATUSES)))
+        for row in hist:
+            _enrich_task(conn, row, now, with_events=(doing_id and row["id"] == doing_id[0]))
+        d["recent_tasks"] = hist
+        if doing_id:
+            d["current_task"] = next((r for r in hist if r["id"] == doing_id[0]), None)
+        else:
+            d["current_task"] = None
+        return ok(d)
 
     if path == "/api/tasks":
-        limit = min(int(q.get("limit", 50)), 200)
-        offset = max(int(q.get("offset", 0)), 0)
+        limit = _qp_int(q, "limit", 50, 1, 200)
+        offset = _qp_int(q, "offset", 0, 0, 5000)
+        if limit is None or offset is None:
+            return 400, {"ok": False, "error": "limit 或 offset 不是整数"}
         where, args = [], []
-        if q.get("status"):
+        status = (q.get("status") or "").strip()
+        excluded_dead = False
+        if status:
             where.append("status=?")
-            args.append(q["status"])
+            args.append(status)
+        else:
+            where.append("status IN (%s)" % ",".join("?" * len(OPEN_STATUSES)))
+            args.extend(OPEN_STATUSES)
+            excluded_dead = True
         if q.get("type"):
             where.append("type=?")
             args.append(q["type"])
@@ -216,10 +445,13 @@ def handle_get(conn, raw_path):
             where.append("lease_owner=?")
             args.append(q["agent"])
         if q.get("q"):
-            kw = "%" + q["q"].strip() + "%"
-            where.append("(type LIKE ? OR COALESCE(result,error,'') LIKE ? OR CAST(id AS TEXT)=?)")
-            args.extend([kw, kw, q["q"].strip()])
-        w = ("WHERE " + " AND ".join(where)) if where else ""
+            raw_q = q["q"].strip()[:80]
+            kw = "%" + raw_q + "%"
+            where.append(
+                "(type LIKE ? OR lease_owner LIKE ? OR "
+                "substr(COALESCE(result,error,''),1,200) LIKE ? OR CAST(id AS TEXT)=?)")
+            args.extend([kw, kw, kw, raw_q])
+        w = "WHERE " + " AND ".join(where)
         rows = _rows(conn.execute(
             f"SELECT id,event_id,type,status,priority,lease_owner,retry_count,claimed_at,"
             f"created_at,done_at,"
@@ -228,7 +460,7 @@ def handle_get(conn, raw_path):
         for r in rows:
             _with_awaiting(conn, _with_progress(conn, r, now))
         total = conn.execute(f"SELECT COUNT(*) FROM tasks {w}", args).fetchone()[0]
-        return ok(rows, total=total, limit=limit, offset=offset)
+        return ok(rows, total=total, limit=limit, offset=offset, excluded_dead=excluded_dead)
 
     m = re.fullmatch(r"/api/tasks/(\d+)", path)
     if m:
@@ -241,6 +473,9 @@ def handle_get(conn, raw_path):
             d["payload"] = json.loads(d["payload"] or "{}")
         except Exception:
             pass
+        instr, _ = _instruction_of(d.get("payload"))
+        d["instruction"] = instr
+        d["result_paths"] = _result_paths(d.get("payload"), d.get("result"))
         _with_awaiting(conn, _with_progress(conn, d, now))
         evs = _rows(conn.execute(
             "SELECT event_id,source,type,status,created_at FROM events WHERE parent_id=? "
@@ -339,8 +574,17 @@ def handle_get(conn, raw_path):
 
     if path == "/api/monitor":
         hb = _rows(conn.execute("SELECT agent,ts,note FROM heartbeats ORDER BY agent"))
+        ref_of = {}
+        try:
+            ref_of = dict(conn.execute(
+                "SELECT name, agent_ref FROM registry WHERE kind='instance'").fetchall())
+        except Exception:
+            ref_of = {}
         for h in hb:
             h["age_seconds"] = now - int(h["ts"] or 0)
+            h["online"] = h["age_seconds"] <= OFFLINE_SECONDS
+            if h["agent"] in ref_of:
+                h["agent_ref"] = ref_of[h["agent"]]
         queue = dict(conn.execute("SELECT status,COUNT(*) FROM tasks GROUP BY status").fetchall())
         health = None
         try:
@@ -361,6 +605,30 @@ def handle_get(conn, raw_path):
         except Exception:
             pass
         return ok({"heartbeats": hb, "queue": queue, "health": health, "system": sysinfo})
+
+    if path == "/api/knowledge/file":
+        fp, err = _kb_file(q.get("path") or "")
+        if err == "文件不存在":
+            return 404, {"ok": False, "error": err}
+        if err:
+            return 400, {"ok": False, "error": err}
+        size = fp.stat().st_size
+        if size > KB_READ_MAX_BYTES:
+            return 413, {"ok": False, "error": "文件过大，控制台不全文加载"}
+        text = fp.read_text(encoding="utf-8", errors="replace")
+        truncated = len(text) > 120_000
+        if truncated:
+            text = text[:120_000]
+        fm = _frontmatter(fp)
+        rel = fp.resolve().relative_to(ROOT.resolve()).as_posix()
+        return ok({
+            "path": rel,
+            "title": fm.get("title") or fp.stem,
+            "category": fm.get("category") or fp.parent.name,
+            "content": text,
+            "truncated": truncated,
+            "bytes": size,
+        })
 
     if path == "/api/knowledge":
         limit = min(int(q.get("limit", 100)), 500)

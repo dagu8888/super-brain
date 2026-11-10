@@ -28,10 +28,11 @@ CORS：允许 `*`（只读接口；跨域便于本地控制台调试），预检
 | 端点 | 参数 | 说明 |
 |---|---|---|
 | `GET /healthz` | — | 免鉴权探活 |
-| `GET /api/overview` | — | 首页统计：Agent 总数/在线/工作中、任务各状态、今日事件数 |
-| `GET /api/agents` | — | Agent 列表（含 `live_status`、`current_task_id`、`ever_connected`、`pending_decisions`） |
-| `GET /api/agents/{id}` | — | 单个 Agent + 最近 10 条任务 |
-| `GET /api/tasks` | `status`,`type`,`agent`,`q`,`limit`(≤200),`offset` | 任务列表（summary 截断 200 字；q 匹配 ID/类型/结果） |
+| `GET /api/overview` | — | 首页统计：Agent 总数/在线/工作中/离线/久未使用、任务各状态、今日事件数。含 `console_rev: 1` |
+| `GET /api/agents` | — | Agent 列表。`live_status` 按心跳判定；含 `presence_at`、`instances`（名册实例）、`current_task` |
+| `GET /api/agents/{id}` | — | 单个 Agent + 最近 12 条非 dead 任务（含指令原文、结果路径；进行中的那条带事件） |
+| `GET /api/tasks` | `status`,`type`,`agent`,`q`,`limit`(≤200),`offset` | 任务列表。**未传 status 时默认排除 dead**（`excluded_dead: true`），条件走 `status IN (...)` |
+| `GET /api/knowledge/file` | `path` | 知识类目录全文（Markdown/纯文本）。拒绝穿越、`.git`、`api_tokens`、`state.db` |
 | `GET /api/tasks/{id}` | — | 任务全量（含 payload）+ 关联事件 20 条 |
 | `GET /api/events` | `since`(秒),`type`,`limit`(≤200) | 事件流，倒序 |
 | `GET /api/stream` | `token`,`since`(秒) | **SSE 实时推送**（见第 5 节） |
@@ -57,11 +58,22 @@ CORS：允许 `*`（只读接口；跨域便于本地控制台调试），预检
 
 | 字段 | 来源 | 口径 |
 |---|---|---|
-| `ever_connected` | `agents.last_seen IS NOT NULL` | 是否接入过（曾经被调用/注册过） |
+| `ever_connected` | 有效出现时间非空 | 是否接入过。有效出现时间见下 |
 | `pending_decisions` | 该 chief 名下 `tasks.status='pending' AND priority>=1` 的任务数 | 关键决策等待批示；无则为 0，不编造 |
 | `pending_decisions`（overview） | 同上，全局合计 | 供调度中枢节点展示 |
+| `presence_at` | 见下 | 最后一次被看见的 Unix 秒 |
+| `instances` | `registry.kind='instance'` 且 `agent_ref=agent_id` | 在册实例名、位置、该实例心跳时间 |
 
-在线判定：worker 以 `last_seen` 300 秒内为准；chief 为入口身份、不判离线，展示为「在线」或「久未使用」。
+在线判定（chief 与 worker 相同，不再因为 kind=chief 就永远在线）：
+
+有效出现时间 = `max(agents.last_seen, heartbeats.ts)`。心跳键有两种：进程自己的 `agent_id`，以及名册实例名（`heartbeats.agent` = `registry.name`，再经 `agent_ref` 折回 chief）。5 分钟（300 秒）内有出现才算在线。
+
+| `live_status` | 含义 |
+|---|---|
+| `working` | 在线，且名下有 `status='doing'` 的任务 |
+| `idle` | 在线，没有进行中的任务 |
+| `offline` | 曾经出现，但超过 5 分钟 |
+| `unused` | 从未出现（久未使用） |
 
 ### 协作线口径（必须遵守）
 
@@ -70,13 +82,20 @@ CORS：允许 `*`（只读接口；跨域便于本地控制台调试），预检
 - **才发光**：`state=active`（对应执行者当前有 `doing` 任务）才加流动光点。
 - 连线不表示"此刻正在协作"，只表示"可委派的通道"；点击可看派发次数/时间。
 
+## 3.2 知识全文与在场心跳（2026-11-10）
+
+`GET /api/knowledge/file?path=` 只读 `00-Inbox/`、`10-Knowledge/`、`20-Skills/`、`30-Reviews/`、`40-Agents/`、`60-Outputs/` 下的 `.md` / `.txt`。解析后的真实路径必须仍落在这些前缀里。拒绝 `..`、`.git`、绝对路径，以及文件名命中 `api_tokens*`、`llm.json`、`state.db*`、`.env`、`.pem`、`.key`。缺失文件返回 `文件不存在`（与未知路由的 `not found` 区分，便于旧前端降级）。
+
+`GET /api/stream?instance=` 通过名册校验后：`heartbeats.agent` 仍写实例名；`agents.last_seen` 改为更新 `registry.agent_ref`，不再把实例名当作 `agent_id`。
+
 ## 4. 状态映射（前端展示 ← 后端真实字段）
 
 | 前端 | 来源 |
 |---|---|
-| Agent `working` | `tasks.status='doing' AND lease_owner=agent_id` |
-| Agent `idle` | `status='active'` 且无进行中任务 |
-| Agent `offline` | `kind='worker'` 且 `last_seen` 超 300 秒 |
+| Agent `working` | 5 分钟内有心跳，且 `tasks.status='doing' AND lease_owner=agent_id` |
+| Agent `idle` | 5 分钟内有心跳，且无进行中任务 |
+| Agent `offline` | 曾经出现，但超过 300 秒（chief 同样判离线） |
+| Agent `unused` | 从未有 `last_seen` 或心跳（久未使用） |
 | Agent `collaborating/waiting/completed/error` | **当前后端无对应字段 → 前端不显示**（不推断、不编造） |
 | Task 状态 | 直接透传 `tasks.status`（pending/doing/done/failed/dead/cancelled） |
 | 进度百分比 | 后端按「同类任务近 20 次完成耗时中位数」估算（见上），仅 `doing` 有值且封顶 95%；无样本不显示 |
@@ -145,3 +164,4 @@ data: {"event_id":"evt_xxx","source":"trae-chief","type":"task_delegated","prior
 3. 无分页游标，超大结果集用 limit/offset 截断；知识列表最多 500。
 4. 协作线来自「历史真实派发记录 + 默认路由兜底」，只表示可委派通道；当前状态仅为 `active/idle` 两态，没有独立的协作事件表。
 5. SSE 并发上限 8、单连接 10 分钟；超出返回 429 / 自动重连。未做 IP 级限流（服务仅内网口径使用，公网暴露需另加网关）。
+6. `/api/tasks` 不带 `status` 时不再返回 dead。要看死信必须显式 `status=dead`（仍带 limit）。这是为了避开历史死信风暴。
