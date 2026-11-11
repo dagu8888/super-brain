@@ -15,7 +15,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="v2/icons/favicon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="v2/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="v2/app.css?v=2.1.0">
+<link rel="stylesheet" href="v2/app.css?v=2.2.0">
 </head>
 <body>
 <a class="skip" href="#main">跳到主要内容</a>
@@ -72,11 +72,12 @@
     <ol class="chat-list" id="chat" aria-live="polite" aria-relevant="additions"><li class="empty">读取中…</li></ol>
     <div class="chat-reply" id="chat-reply" hidden></div>
     <form class="chat-form" id="chat-form" autocomplete="off">
-      <button class="mic" id="btn-mic" type="button" aria-label="按住说话" title="按住说话（浏览器原生语音识别）"><i></i></button>
+      <button class="mic" id="btn-mic" type="button" aria-label="按住说话" title="按住说话，松手识别（Moonshine 中文识别，需本设备已配对）"><i></i></button>
       <label class="sr" for="chat-input">给幕僚长的消息</label>
       <textarea id="chat-input" rows="1" placeholder="给幕僚长下指令 / 提问…" enterkeyhint="send"></textarea>
       <button class="btn" id="chat-send" type="submit">发送</button>
     </form>
+    <div class="mic-status" id="mic-status" role="status" aria-live="polite" hidden></div>
     <div class="chat-foot" id="chat-foot"></div>
   </section>
 
@@ -168,6 +169,6 @@
   </form>
 </dialog>
 
-<script src="v2/app.js?v=2.1.0" defer></script>
+<script src="v2/app.js?v=2.2.0" defer></script>
 </body>
 </html>
