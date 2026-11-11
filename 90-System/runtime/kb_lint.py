@@ -82,6 +82,8 @@ def run(consolidate=False, notify=True, dry=False):
     max_age = float(L.get("staging_max_age_days", 7))
     if st_dir.exists():
         for f in st_dir.rglob("*.md"):
+            if f.name == "README.md":
+                continue
             age = (time.time() - f.stat().st_mtime) / 86400
             if age > max_age:
                 issues["暂存区草稿超期未审"].append(f"{f.relative_to(ROOT).as_posix()}（{int(age)} 天）")
