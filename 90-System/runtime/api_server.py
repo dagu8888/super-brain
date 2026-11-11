@@ -260,11 +260,14 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
             if ctype.startswith("text/") or ctype in (
                     "application/javascript", "application/json", "application/manifest+json"):
                 ctype += "; charset=utf-8"
-            # 静态资源协商缓存：内容不变则 304，手机二次打开不再整包下载（three.js 600KB+）
-            if self.headers.get("If-None-Match") == etag:
+            # HTML 入口不缓存（iPhone Safari / 主屏幕易卡住旧 index，从而加载旧 app.js）
+            is_html = target.suffix.lower() in (".html", ".htm")
+            cache = "no-store, no-cache, must-revalidate" if is_html else "no-cache"
+            # 静态资源协商缓存：内容不变则 304（HTML 一律重发，避免主屏幕卡住旧入口）
+            if (not is_html) and self.headers.get("If-None-Match") == etag:
                 self.send_response(304)
                 self.send_header("ETag", etag)
-                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Cache-Control", cache)
                 for k, v in CORS:
                     self.send_header(k, v)
                 self.end_headers()
@@ -274,7 +277,10 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
             self.send_header("ETag", etag)
-            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Cache-Control", cache)
+            if is_html:
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
             for k, v in CORS:
                 self.send_header(k, v)
             self.end_headers()
@@ -356,13 +362,30 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
                 if self._limited():
                     return self._send(429, {"ok": False, "error": "失败次数过多，10 分钟后再试"})
                 if path == "/api/owner/pair":
+                    ip = self._client_ip()
+                    # 旧配对框兼容：直接输入当日口令，按 unlock 签发当日会话令牌
+                    if owner_ops.phrase_matches(req.get("code")):
+                        if owner_ops.unlock_is_locked(ip):
+                            return self._send(429, {"ok": False, "error": "失败次数过多，5 分钟后再试"})
+                        res = owner_ops.unlock(conn, req.get("code"), req.get("device_name"),
+                                               ua=self.headers.get("User-Agent") or "")
+                        who = {"actor": owner_ops.OWNER_ID, "device": res.get("device") or "?"}
+                        owner_ops.audit(conn, who, "unlock", res.get("device", ""),
+                                        self._audit_ua({"ok": res.get("ok"), "via": "pair"}),
+                                        ok=res.get("ok"), ip=ip)
+                        if not res.get("ok"):
+                            owner_ops.unlock_note_failure(ip)
+                            log_event("owner_unlock_failed", ip=ip, via="pair")
+                            return self._send(401, res)
+                        owner_ops.unlock_note_success(ip)
+                        return self._send(200, res, cookies=self._cookie(res["token"], res.get("expires_at")))
                     res = owner_ops.pair(conn, req.get("code"), req.get("device_name"))
                     who = {"actor": owner_ops.OWNER_ID, "device": res.get("device") or "?"}
                     owner_ops.audit(conn, who, "pair", res.get("device", ""),
-                                    {"ok": res.get("ok"), "error": res.get("error")}, ok=res.get("ok"), ip=self._client_ip())
+                                    {"ok": res.get("ok"), "error": res.get("error")}, ok=res.get("ok"), ip=ip)
                     if not res.get("ok"):
                         self._fail()
-                        log_event("owner_pair_failed", ip=self._client_ip())
+                        log_event("owner_pair_failed", ip=ip)
                     return self._send(200 if res.get("ok") else 400, res)
                 if path != "/api/owner/act":
                     return self._send(404, {"ok": False, "error": "not found"})
