@@ -1,3 +1,12 @@
+---
+layer: 编译层
+type: 实体页
+status: 已失效
+valid_to: 2026-11-11
+superseded_by: "[[10-Knowledge/Concepts/元Ai-工作区概览与协作指南]]"
+confidence: 文档依据
+---
+
 # 元Ai 工作区概览与协作指南
 
 > 元Ai 主工作区总览地图与多 Agent 协作规范
