@@ -36,7 +36,9 @@ if ! git remote get-url origin >/dev/null 2>&1; then
 fi
 
 # 场景二：已配置云端 → 先拉（rebase+autostash），再推
-git pull --rebase --autostash || { echo "PULL_FAILED: 存在冲突，请人工处理后重试"; exit 1; }
+# 2026-11-11：显式指定 origin + 当前分支。watchdog.sh 在同一分钟 git fetch 会把多个分支写进 FETCH_HEAD，
+# 不带参数的 pull 偶发「Cannot rebase onto multiple branches」导致本轮同步失败。
+git pull --rebase --autostash origin "$(git branch --show-current)" || { echo "PULL_FAILED: 存在冲突，请人工处理后重试"; exit 1; }
 
 if git diff --cached --quiet && [ -z "$(git log origin/$(git branch --show-current)..HEAD 2>/dev/null)" ]; then
   echo "NO_CHANGES"
