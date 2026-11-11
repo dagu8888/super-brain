@@ -34,6 +34,10 @@ import vault  # noqa: E402
 FAILS = []
 OWNER_MASTER = "owner-master-test-token"
 CHIEF = "chief-test-token-owner"
+# 测试口令只走环境变量，仓库与生产哈希文件都不写真实口令原文
+PHRASE_A = "测试口令甲"
+PHRASE_B = "测试口令乙"
+os.environ["SB_OWNER_UNLOCK_PHRASE"] = PHRASE_A + "|" + PHRASE_B
 
 
 def check(name, cond, detail=""):
@@ -72,6 +76,69 @@ def test_pairing_and_auth():
     check("退出后令牌失效", owner_ops.authenticate(conn, r["token"], {}) is None)
     c2, _ = owner_ops.create_pair_code(conn, ttl=-1)
     check("过期配对码被拒", "过期" in owner_ops.pair(conn, c2, "x")["error"])
+
+
+def test_daily_unlock():
+    d, conn = fresh()
+    owner_ops.reset_unlock_fails()
+    r = owner_ops.unlock(conn, "  " + PHRASE_A + "  ", "测试机", ua="UnitTest/1.0")
+    check("正确口令（写法一，去空格）通过", r["ok"] and r.get("token") and r.get("expires_at"), r.get("ok"))
+    tok = r["token"]
+    who = owner_ops.authenticate(conn, tok, {})
+    check("当日令牌认证为 dagu-owner", who and who["actor"] == "dagu-owner" and who.get("auth") == "daily")
+    r2 = owner_ops.unlock(conn, PHRASE_B, "测试机B")
+    check("正确口令（写法二）通过", r2["ok"] and r2.get("token") and r2["token"] != tok)
+    bad = owner_ops.unlock(conn, "这不是口令")
+    check("错口令拒绝", (not bad["ok"]) and "不对" in (bad.get("error") or ""))
+    check("错口令不发令牌", not bad.get("token"))
+    # 过期：把会话 expires_at 改到过去
+    conn.execute("UPDATE owner_sessions SET expires_at=? WHERE token_hash=?", (int(time.time()) - 10, owner_ops._h(tok)))
+    conn.commit()
+    check("过期次日失效", owner_ops.authenticate(conn, tok, {}) is None)
+    # 哈希文件路径（临时关闭 env，改读文件）
+    env = os.environ.pop("SB_OWNER_UNLOCK_PHRASE", None)
+    try:
+        hf = d / "owner_unlock.hash"
+        owner_ops.write_unlock_hashes(hf, ["文件口令A", "文件口令B"])
+        os.environ["SB_OWNER_UNLOCK_FILE"] = str(hf)
+        check("哈希文件口令通过", owner_ops.phrase_matches("文件口令A") and owner_ops.phrase_matches(" 文件口令B "))
+        check("哈希文件错口令拒绝", not owner_ops.phrase_matches("文件口令C"))
+        # 文件里不应出现口令原文
+        text = hf.read_text(encoding="utf-8")
+        check("哈希文件不含口令原文", "文件口令A" not in text and "文件口令B" not in text and "salt=" in text)
+        mode = oct(hf.stat().st_mode & 0o777)
+        check("哈希文件权限 600", mode == "0o600", mode)
+    finally:
+        os.environ.pop("SB_OWNER_UNLOCK_FILE", None)
+        if env is not None:
+            os.environ["SB_OWNER_UNLOCK_PHRASE"] = env
+    # 限速：同 IP 连续错 10 次锁定
+    owner_ops.reset_unlock_fails()
+    now = 1_700_000_000.0
+    locked = False
+    for i in range(10):
+        locked = owner_ops.unlock_note_failure("1.2.3.4", now=now + i)
+    check("第 10 次连续错误后锁定", locked and owner_ops.unlock_is_locked("1.2.3.4", now=now + 9))
+    check("锁定 5 分钟内仍锁", owner_ops.unlock_is_locked("1.2.3.4", now=now + 9 + 299))
+    check("5 分钟后解锁", not owner_ops.unlock_is_locked("1.2.3.4", now=now + 9 + 300))
+    owner_ops.reset_unlock_fails()
+    for _ in range(3):
+        owner_ops.unlock_note_failure("5.6.7.8", now=now)
+    owner_ops.unlock_note_success("5.6.7.8")
+    check("成功后清零连续失败", not owner_ops.unlock_is_locked("5.6.7.8", now=now))
+    # 有效期落在北京时间次日 0 点
+    exp = owner_ops.beijing_day_end(now)
+    from datetime import datetime
+    dt = datetime.fromtimestamp(exp, owner_ops.BEIJING)
+    check("过期时间是北京时间次日 00:00:00", dt.hour == 0 and dt.minute == 0 and dt.second == 0 and dt.tzinfo is not None)
+    # 写操作走当日令牌
+    d2, conn2 = fresh()
+    sess = owner_ops.unlock(conn2, PHRASE_A, "测")
+    who = owner_ops.authenticate(conn2, sess["token"], {})
+    res = owner_ops.execute(conn2, who, "msg", {"to": "幕僚长@云端", "text": "令牌自测"})
+    check("写操作带当日令牌成功", res.get("ok"), res)
+    logout = owner_ops.execute(conn2, who, "logout", {})
+    check("退出后当日令牌失效", logout.get("ok") and owner_ops.authenticate(conn2, sess["token"], {}) is None)
 
 
 def test_work_state():
@@ -248,16 +315,18 @@ def _free_port():
     return p
 
 
-def _req(port, path, method="GET", data=None, headers=None):
+def _req(port, path, method="GET", data=None, headers=None, with_headers=False):
     req = urllib.request.Request("http://127.0.0.1:%s%s" % (port, path), data=data, method=method, headers=headers or {})
     try:
         with urllib.request.urlopen(req, timeout=8) as r:
-            return r.status, json.loads(r.read() or b"{}")
+            body = json.loads(r.read() or b"{}")
+            return (r.status, body, dict(r.headers)) if with_headers else (r.status, body)
     except urllib.error.HTTPError as e:
         try:
-            return e.code, json.loads(e.read() or b"{}")
+            body = json.loads(e.read() or b"{}")
         except Exception:
-            return e.code, {}
+            body = {}
+        return (e.code, body, dict(e.headers)) if with_headers else (e.code, body)
 
 
 def test_http():
@@ -282,10 +351,53 @@ def test_http():
             c, b = _req(port, path)
             check("GET %s 免口令 200" % path, c == 200 and b.get("ok"), c)
         c, b = _req(port, "/api/owner/act", "POST", json.dumps({"action": "msg", "args": {"to": "grok-chief", "text": "x"}}).encode(), J)
-        check("写操作无令牌 401", c == 401, c)
+        check("写操作无令牌 401", c == 401 and b.get("need_unlock"), c)
         c, b = _req(port, "/api/owner/act", "POST", json.dumps({"action": "msg", "args": {"to": "grok-chief", "text": "x"}}).encode(),
                     dict(J, Authorization="Bearer " + CHIEF))
         check("Agent 口令不能做大古写操作", c == 401, c)
+        owner_ops.reset_unlock_fails()
+        c, b, h = _req(port, "/api/owner/unlock", "POST",
+                       json.dumps({"phrase": "  " + PHRASE_A + "  ", "device_name": "HTTP机"}).encode(),
+                       dict(J, **{"User-Agent": "OwnerUnlockTest/1.0"}), with_headers=True)
+        check("HTTP 正确口令一解锁 200", c == 200 and b.get("ok") and b.get("token") and b.get("expires_at"), c)
+        daily = b.get("token")
+        raw_c = ""
+        for k, v in h.items():
+            if k.lower() == "set-cookie" and "sb_owner=" in v:
+                raw_c = v
+                break
+        check("解锁响应 Set-Cookie", "sb_owner=" in raw_c, "present" if raw_c else "missing")
+        A_DAILY = dict(J, Authorization="Bearer " + daily)
+        c, b = _req(port, "/api/owner/act", "POST",
+                    json.dumps({"action": "msg", "args": {"to": "grok-chief", "text": "口令改造自测，可忽略"}}).encode(), A_DAILY)
+        check("写操作带当日令牌成功", c == 200 and b.get("ok"), c)
+        # cookie 亦可认证（无 Bearer）
+        cookie = ""
+        for part in raw_c.split(";"):
+            if part.strip().startswith("sb_owner="):
+                cookie = part.strip()
+                break
+        if cookie:
+            c, b = _req(port, "/api/owner/act", "POST",
+                        json.dumps({"action": "whoami"}).encode(), dict(J, Cookie=cookie))
+            check("Cookie 会话可认证", c == 200 and b.get("ok") and b.get("actor") == "dagu-owner", c)
+        c, b = _req(port, "/api/owner/unlock", "POST", json.dumps({"phrase": PHRASE_B, "device_name": "HTTP机2"}).encode(), J)
+        check("HTTP 正确口令二解锁 200", c == 200 and b.get("ok") and b.get("token"), c)
+        c, b = _req(port, "/api/owner/unlock", "POST", json.dumps({"phrase": "错的口令"}).encode(), J)
+        check("HTTP 错口令 401", c == 401 and not b.get("token"), c)
+        # 审计不含口令原文
+        c, b = _req(port, "/api/audit")
+        aud = json.dumps(b, ensure_ascii=False)
+        check("审计含 unlock 且不含口令原文", "unlock" in aud and PHRASE_A not in aud and PHRASE_B not in aud)
+        # 先成功一次，清掉服务端子进程里的失败计数，再连续错 10 次
+        c, _b = _req(port, "/api/owner/unlock", "POST", json.dumps({"phrase": PHRASE_A, "device_name": "限速前清零"}).encode(), J)
+        check("限速测试前成功解锁", c == 200, c)
+        last = 0
+        for i in range(10):
+            last, _b = _req(port, "/api/owner/unlock", "POST", json.dumps({"phrase": "错" + str(i)}).encode(), J)
+        check("HTTP 连续错 10 次后 429", last == 429, last)
+        last, _b = _req(port, "/api/owner/unlock", "POST", json.dumps({"phrase": PHRASE_A}).encode(), J)
+        check("锁定期间对的口令也 429", last == 429, last)
         c, b = _req(port, "/api/owner/pair", "POST", json.dumps({"code": code, "device_name": "测试机"}).encode(), J)
         check("HTTP 配对成功", c == 200 and b.get("token"), c)
         dev = b.get("token")
@@ -317,6 +429,7 @@ def test_http():
 def main():
     try:
         test_pairing_and_auth()
+        test_daily_unlock()
         test_work_state()
         test_approvals()
         test_vault()

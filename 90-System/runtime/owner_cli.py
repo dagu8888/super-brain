@@ -6,6 +6,8 @@
 #        生成一次性配对码，把配对链接写进 --out（600），终端只提示文件路径。
 #   python3 owner_cli.py devices            列出已配对设备（不含令牌）
 #   python3 owner_cli.py revoke <id>        吊销某台设备
+#   python3 owner_cli.py set-unlock [--out /etc/super-brain/owner_unlock.hash]
+#        从标准输入读口令（每行一条），写成加盐哈希（600）。终端不回显原文或哈希。
 import argparse
 import json
 import os
@@ -81,6 +83,20 @@ def cmd_revoke(a):
     return 0
 
 
+def cmd_set_unlock(a):
+    phrases = []
+    for ln in sys.stdin:
+        s = ln.strip()
+        if s and not s.startswith("#"):
+            phrases.append(s)
+    if not phrases:
+        print("请从标准输入提供至少一条口令（每行一条）", file=sys.stderr)
+        return 1
+    n = owner_ops.write_unlock_hashes(a.out, phrases)
+    print(f"已写入口令哈希到 {a.out}（600），共 {n} 条；未回显内容")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default=str(DB))
@@ -94,8 +110,11 @@ def main():
     sub.add_parser("devices")
     s = sub.add_parser("revoke")
     s.add_argument("id", type=int)
+    s = sub.add_parser("set-unlock")
+    s.add_argument("--out", default="/etc/super-brain/owner_unlock.hash")
     a = ap.parse_args()
-    return {"init": cmd_init, "pair": cmd_pair, "devices": cmd_devices, "revoke": cmd_revoke}[a.cmd](a)
+    return {"init": cmd_init, "pair": cmd_pair, "devices": cmd_devices,
+            "revoke": cmd_revoke, "set-unlock": cmd_set_unlock}[a.cmd](a)
 
 
 if __name__ == "__main__":

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-# Super-Brain 大古（dagu-owner）操作层：设备配对、审批中心、介入操作、知识库编辑、审计。
-# 身份：dagu-owner 是独立身份，不复用任何 Agent 口令。认证二选一：
-#   1) /etc/super-brain/api_tokens.json 的 "owner": {"dagu-owner": "<口令>"}（服务器上手工/CLI 生成）；
-#   2) 设备令牌：由一次性配对码换取，库里只存 sha256，不存明文；可逐台吊销。
-# 配对码：一次性、24 小时有效、库里只存 sha256；用后即废。
-# 所有写操作写 owner_audit（谁、何时、做了什么、成败），控制台只读可见（不含 IP）。
+# Super-Brain 大古（dagu-owner）操作层：当日口令解锁、设备配对（兼容）、审批中心、介入操作、知识库编辑、审计。
+# 身份：dagu-owner 是独立身份，不复用任何 Agent 口令。认证方式：
+#   1) 当日会话令牌：POST /api/owner/unlock 校验口令哈希后签发，有效至北京时间当天结束；
+#   2) 旧设备令牌（兼容）：由一次性配对码换取，库里只存 sha256；前端不再引导配对；
+#   3) /etc/super-brain/api_tokens.json 的 "owner": {"dagu-owner": "<口令>"}（服务器主口令，可选）。
+# 每日口令只以加盐 sha256 存在 /etc/super-brain/owner_unlock.hash（600）或测试环境变量，仓库不含原文。
+# 所有写操作写 owner_audit（谁、何时、做了什么、成败、设备 UA），控制台只读可见（不含 IP）。
 # 不提供删除类、交易类操作。
 import hashlib
 import hmac
@@ -13,6 +14,7 @@ import os
 import re
 import secrets
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import message_bus
@@ -70,6 +72,17 @@ CREATE TABLE IF NOT EXISTS approvals(
   result_msg_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status, created_at);
+CREATE TABLE IF NOT EXISTS owner_sessions(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  last_used_at INTEGER,
+  revoked_at INTEGER,
+  device TEXT,
+  ua TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_owner_sessions_hash ON owner_sessions(token_hash);
 """
 
 
@@ -102,14 +115,131 @@ def _now():
 
 # ---------------- 认证与配对 ----------------
 
+BEIJING = timezone(timedelta(hours=8))
+_UNLOCK_FAILS = {}  # ip -> {"n", "locked_until"}
+
+
+def _eq(a, b):
+    if not isinstance(a, (bytes, bytearray)):
+        a = str(a).encode()
+    if not isinstance(b, (bytes, bytearray)):
+        b = str(b).encode()
+    if len(a) != len(b):
+        hmac.compare_digest(a, a)
+        return False
+    return hmac.compare_digest(a, b)
+
+
+def beijing_day_end(now=None):
+    """当前北京时间所在日的结束（次日 00:00:00 的 Unix 时间戳）。"""
+    if now is None:
+        now = time.time()
+    dt = datetime.fromtimestamp(float(now), BEIJING)
+    nxt = (dt + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return int(nxt.timestamp())
+
+
+def unlock_file_path():
+    return Path(os.environ.get("SB_OWNER_UNLOCK_FILE") or "/etc/super-brain/owner_unlock.hash")
+
+
+def write_unlock_hashes(path, phrases, salt=None):
+    """把口令写成加盐 sha256，文件 600。不回显原文或哈希。"""
+    path = Path(path)
+    salt = salt or secrets.token_hex(16)
+    lines = ["# Super-Brain owner daily-unlock hashes. No plaintext.", "v=1", "salt=" + salt]
+    n = 0
+    for raw in phrases or []:
+        p = str(raw).strip()
+        if not p:
+            continue
+        lines.append("h=" + hashlib.sha256((salt + p).encode("utf-8")).hexdigest())
+        n += 1
+    if n < 1:
+        raise ValueError("至少需要一条口令")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    os.chmod(path, 0o600)
+    return n
+
+
+def phrase_matches(phrase):
+    phrase = str(phrase or "").strip()
+    if not phrase or len(phrase) > 40:
+        return False
+    env = (os.environ.get("SB_OWNER_UNLOCK_PHRASE") or "").strip()
+    if env:
+        return any(_eq(phrase, x.strip()) for x in env.split("|") if x.strip())
+    path = unlock_file_path()
+    if not path.is_file():
+        return False
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    salt, hashes = "", []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("salt="):
+            salt = line[5:]
+        elif line.startswith("h="):
+            hashes.append(line[2:].strip())
+    if not salt or not hashes:
+        return False
+    digest = hashlib.sha256((salt + phrase).encode("utf-8")).hexdigest()
+    return any(_eq(digest, h) for h in hashes if h)
+
+
+def unlock_is_locked(ip, now=None):
+    now = time.time() if now is None else now
+    rec = _UNLOCK_FAILS.get(ip) or {}
+    return float(rec.get("locked_until") or 0) > now
+
+
+def unlock_note_failure(ip, now=None):
+    now = time.time() if now is None else now
+    limit = int(os.environ.get("SB_OWNER_UNLOCK_FAIL_LIMIT") or "10")
+    lock = float(os.environ.get("SB_OWNER_UNLOCK_LOCK_SECONDS") or "300")
+    rec = _UNLOCK_FAILS.get(ip) or {"n": 0, "locked_until": 0}
+    if rec.get("locked_until") and rec["locked_until"] <= now:
+        rec = {"n": 0, "locked_until": 0}
+    rec["n"] = int(rec.get("n") or 0) + 1
+    if rec["n"] >= limit:
+        rec["locked_until"] = now + lock
+    _UNLOCK_FAILS[ip] = rec
+    return rec["n"] >= limit
+
+
+def unlock_note_success(ip):
+    _UNLOCK_FAILS.pop(ip, None)
+
+
+def reset_unlock_fails():
+    _UNLOCK_FAILS.clear()
+
+
 def authenticate(conn, token, owners):
     """返回 {'actor','device','device_id'} 或 None。Agent 口令不在 owners 里，天然无效。"""
     if not token:
         return None
-    for oid, t in (owners or {}).items():
-        if t and hmac.compare_digest(str(t).encode(), token.encode()):
-            return {"actor": oid, "device": "主口令", "device_id": None}
+    for oid, tkn in (owners or {}).items():
+        if tkn and _eq(str(tkn), token):
+            return {"actor": oid, "device": "主口令", "device_id": None, "auth": "master"}
     ensure_schema(conn)
+    row = conn.execute(
+        "SELECT id, device, expires_at FROM owner_sessions WHERE token_hash=? AND revoked_at IS NULL",
+        (_h(token),)).fetchone()
+    if row:
+        if int(row[2]) <= _now():
+            return None
+        conn.execute("UPDATE owner_sessions SET last_used_at=? WHERE id=?", (_now(), row[0]))
+        conn.commit()
+        return {"actor": OWNER_ID, "device": row[1], "device_id": None,
+                "session_id": row[0], "expires_at": row[2], "auth": "daily"}
     row = conn.execute(
         "SELECT id, name FROM owner_devices WHERE token_hash=? AND revoked_at IS NULL",
         (_h(token),)).fetchone()
@@ -117,7 +247,26 @@ def authenticate(conn, token, owners):
         return None
     conn.execute("UPDATE owner_devices SET last_used_at=? WHERE id=?", (_now(), row[0]))
     conn.commit()
-    return {"actor": OWNER_ID, "device": row[1], "device_id": row[0]}
+    return {"actor": OWNER_ID, "device": row[1], "device_id": row[0], "auth": "device"}
+
+
+def unlock(conn, phrase, device_name="", ua="", now=None):
+    """校验当日口令，签发有效至北京时间当天结束的会话令牌（明文只返回这一次）。"""
+    ensure_schema(conn)
+    if not phrase_matches(phrase):
+        return {"ok": False, "error": "口令不对"}
+    ts = int(now if now is not None else _now())
+    exp = beijing_day_end(ts)
+    if exp <= ts:
+        return {"ok": False, "error": "口令不对"}
+    token = secrets.token_urlsafe(32)
+    name = re.sub(r"[\x00-\x1f]", "", str(device_name or "未命名设备"))[:60] or "未命名设备"
+    ua = re.sub(r"[\x00-\x1f]", "", str(ua or ""))[:200]
+    conn.execute(
+        "INSERT INTO owner_sessions(token_hash,created_at,expires_at,last_used_at,device,ua) VALUES(?,?,?,?,?,?)",
+        (_h(token), ts, exp, ts, name, ua))
+    conn.commit()
+    return {"ok": True, "token": token, "expires_at": exp, "actor": OWNER_ID, "device": name}
 
 
 def create_pair_code(conn, created_by="cli", ttl=PAIR_TTL):
@@ -603,9 +752,14 @@ def execute(conn, who, action, args, emit=None):
 
     if action in ("device_revoke", "logout"):
         ensure_schema(conn)
+        if action == "logout" and (who or {}).get("session_id"):
+            n = conn.execute("UPDATE owner_sessions SET revoked_at=? WHERE id=? AND revoked_at IS NULL",
+                             (_now(), int(who["session_id"]))).rowcount
+            conn.commit()
+            return {"ok": True, "revoked_session": n}
         did = (who or {}).get("device_id") if action == "logout" else args.get("device_id")
         if not did:
-            return {"ok": True, "note": "主口令登录，无需吊销设备"}
+            return {"ok": True, "note": "主口令或当日会话，已退出本机存储即可"}
         n = conn.execute("UPDATE owner_devices SET revoked_at=? WHERE id=? AND revoked_at IS NULL",
                          (_now(), int(did))).rowcount
         conn.commit()
@@ -629,7 +783,12 @@ def execute(conn, who, action, args, emit=None):
         return projects.owner_write(conn, OWNER_ID, action, args)
 
     if action == "whoami":
-        return {"ok": True, "actor": who.get("actor"), "device": who.get("device"), "device_id": who.get("device_id")}
+        out = {"ok": True, "actor": who.get("actor"), "device": who.get("device"), "device_id": who.get("device_id")}
+        if who.get("expires_at"):
+            out["expires_at"] = who["expires_at"]
+        if who.get("auth"):
+            out["auth"] = who["auth"]
+        return out
 
     return {"ok": False, "error": f"未知操作 {action}"}
 
@@ -637,7 +796,7 @@ def execute(conn, who, action, args, emit=None):
 # 审计里不记录正文全文和任何令牌，只记摘要
 def audit_detail(action, args, res):
     a = dict(args or {})
-    for k in ("token", "code", "content", "reply", "secret", "password", "value", "_ticket_secret", "ticket"):
+    for k in ("token", "code", "content", "reply", "secret", "password", "value", "phrase", "_ticket_secret", "ticket"):
         if k in a:
             a[k] = f"<{len(str(a[k]))} 字>" if k == "content" else "<已隐去>"
     if "text" in a:
