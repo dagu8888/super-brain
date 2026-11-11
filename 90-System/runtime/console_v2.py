@@ -11,6 +11,8 @@
 #   /api/projects            项目 / 阶段 / 完成度（按阶段验收真实计算）
 # 口径（与手册第 5 章一致，不冒充）：
 #   在线 = 5 分钟内有心跳 / last_seen / 名册实例心跳（同 console_api._annotate_agent）；
+#   降级（在场但回执失败）= 心跳仍新，但近窗内发给该 Agent/实例的消息超过约 60 秒仍无 reply_to 回执；
+#     不计入 agents_online，单独计 agents_degraded。不发探针。
 #   执行中 = 只认 tasks.status='doing' 且 lease_owner=该 Agent，心跳不算执行；
 #   当前异常（红角标 total）= 未认领 + 近 24h 失败/新死信；不含历史 status=dead。
 #   未认领 = 点名该 Agent、pending、无人领取且超过 10 分钟的任务数；
@@ -147,10 +149,11 @@ def _agents(conn, now):
             "SELECT id, lease_owner FROM tasks WHERE status='doing' AND lease_owner IS NOT NULL"):
         busy.setdefault(owner, []).append(tid)
     beats, by_ref = console_api._load_presence(conn)
+    receipt_fail = console_api._load_receipt_failures(conn, now)
     rows = console_api._rows(conn.execute(
         "SELECT agent_id, kind, status, last_seen FROM agents ORDER BY kind, agent_id"))
     for a in rows:
-        console_api._annotate_agent(a, a["agent_id"] in busy, beats, by_ref, now)
+        console_api._annotate_agent(a, a["agent_id"] in busy, beats, by_ref, now, receipt_fail)
         a["doing_task_ids"] = busy.get(a["agent_id"], [])
     return rows
 
@@ -160,7 +163,7 @@ def _stale(agent, now):
     if agent.get("status") != "active":
         return 0
     insts = agent.get("instances") or []
-    if insts and agent.get("live_status") not in ("idle", "working"):
+    if insts and agent.get("live_status") not in ("idle", "working", "degraded"):
         return sum(1 for i in insts
                    if i.get("registry_status") == "active" and i.get("heartbeat_at")
                    and now - int(i["heartbeat_at"]) > OFFLINE_SECONDS) or (
@@ -289,9 +292,13 @@ def dashboard(conn, now=None):
         ap = appr_by.get(a["agent_id"], {})
         live = a["live_status"]
         online = live in ("idle", "working")
-        # 细分状态：忙碌只认任务租约或自报工作；心跳只说明在线
+        # 细分状态：忙碌只认任务租约或自报工作；心跳只说明在场；
+        # 回执失败单独成「在场但回执失败」，不算健康在线。
         if a["status"] != "active":
             detail = {"state": "paused", "label": "已暂停"}
+        elif live == "degraded":
+            detail = {"state": "degraded", "label": "在场但回执失败",
+                      "since": a["presence_at"]}
         elif not online:
             detail = {"state": "offline" if a["ever_connected"] else "unused",
                       "label": "离线" if a["ever_connected"] else "未接入",
@@ -321,7 +328,8 @@ def dashboard(conn, now=None):
             "ever_connected": a["ever_connected"],
             "doing_task_ids": a["doing_task_ids"],
             "instances": [{k: i.get(k) for k in
-                           ("name", "location", "registry_status", "heartbeat_at", "note", "online")}
+                           ("name", "location", "registry_status", "heartbeat_at", "note",
+                            "online", "degraded", "link_status")}
                           for i in a.get("instances") or []],
             "anomalies": an,
         })
@@ -333,6 +341,7 @@ def dashboard(conn, now=None):
         queue = {}
     ev = lambda s: conn.execute("SELECT COUNT(*) FROM events WHERE created_at>=?", (s,)).fetchone()[0]
     online = [a for a in active if a["live_status"] in ("idle", "working")]
+    degraded = [a for a in active if a["live_status"] == "degraded"]
     owner_ops.ensure_schema(conn)
     appr_pending = conn.execute("SELECT COUNT(*) FROM approvals WHERE status='pending'").fetchone()[0]
     dec_tasks = conn.execute("SELECT COUNT(*) FROM tasks WHERE status='pending' AND (priority>=1 OR type='fuse-review')").fetchone()[0]
@@ -342,8 +351,10 @@ def dashboard(conn, now=None):
         "kpi": {
             "agents_total": len(active),
             "agents_online": len(online),
+            "agents_degraded": len(degraded),
             "agents_working": sum(1 for a in active if a["live_status"] == "working"),
             "chiefs_online": sum(1 for a in online if a["kind"] == "chief"),
+            "chiefs_degraded": sum(1 for a in degraded if a["kind"] == "chief"),
             "chiefs_total": sum(1 for a in active if a["kind"] == "chief"),
             "msgs_1h": msg["msgs_1h"],
             "msgs_24h": msg["msgs_24h"],
@@ -372,6 +383,8 @@ def dashboard(conn, now=None):
         "messages": msg,
         "rules": {
             "offline_seconds": OFFLINE_SECONDS,
+            "receipt_grace_seconds": console_api.RECEIPT_GRACE_SECONDS,
+            "receipt_lookback_seconds": console_api.RECEIPT_LOOKBACK_SECONDS,
             "unclaimed_seconds": UNCLAIMED_SECONDS,
             "dead_cache_seconds": DEAD_CACHE_SECONDS,
             "recent_fail_seconds": RECENT_FAIL_SECONDS,

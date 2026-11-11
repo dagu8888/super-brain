@@ -132,6 +132,7 @@ button.kpi:hover { border-color: var(--line2); transform: translateY(-2px); }
 .kpi .segbar span { flex: 1; height: 6px; border-radius: 3px; background: var(--gray); opacity: .35; }
 .kpi .segbar span.on-chief { background: var(--chief); opacity: 1; box-shadow: 0 0 6px rgba(255, 95, 162, .6); }
 .kpi .segbar span.on-worker { background: var(--worker); opacity: 1; box-shadow: 0 0 6px rgba(62, 230, 193, .5); }
+.kpi .segbar span.on-degraded { background: var(--amber); opacity: 1; box-shadow: 0 0 6px rgba(255, 181, 71, .6); }
 .kpi .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .kpi .chips span { font-size: 10.5px; padding: 1px 6px; border-radius: 6px; background: rgba(76, 201, 255, .1); color: #bfe9ff; border: 1px solid rgba(76, 201, 255, .18); }
 .kpi .chips span.miss { background: rgba(255, 77, 94, .1); color: #ffc0c6; border-color: rgba(255, 77, 94, .25); }
@@ -234,6 +235,7 @@ button.kpi:hover { border-color: var(--line2); transform: translateY(-2px); }
 .st.working { background: rgba(245, 196, 81, .16); color: var(--gold2); }
 .st.offline { background: rgba(255, 181, 71, .12); color: #ffd38a; }
 .st.unused, .st.disabled { background: rgba(107, 122, 144, .18); color: var(--ink3); }
+.st.degraded { background: rgba(255, 181, 71, .16); color: var(--amber); }
 .an { display: flex; gap: 4px; margin-top: 7px; flex-wrap: wrap; }
 .an span { font-size: 10.5px; padding: 0 6px; border-radius: 6px; line-height: 18px; background: rgba(255, 255, 255, .04); color: var(--ink3); font-variant-numeric: tabular-nums; }
 .an span.hot { background: rgba(255, 77, 94, .14); color: #ffb0b8; }
