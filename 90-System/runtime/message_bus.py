@@ -159,11 +159,17 @@ def post_message(conn, from_agent, text, to="all", kind="chat",
     conn.commit()
     _log("bus_msg", msg_id=mid, from_agent=from_agent, to=to, msg_kind=kind,
          reply_to=reply_to or "", instance=inst or "")
-    return {"ok": True, "msg_id": mid, "from_agent": from_agent,
+    out = {"ok": True, "msg_id": mid, "from_agent": from_agent,
             "from_instance": inst or None, "to": to, "kind": kind,
             "text": text, "reply_to": reply_to, "thread_id": thread,
             "created_at": now,
             "note": "已入消息总线，不进 events 路由"}
+    try:
+        import commander_hook
+        commander_hook.enqueue(conn, out)
+    except Exception:
+        pass
+    return out
 
 
 def handle_cmd(conn, chief_id, cmd, args):

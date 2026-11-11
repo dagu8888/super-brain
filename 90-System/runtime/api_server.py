@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import console_api
 import message_bus
+import owner_ops
 
 HERE = Path(__file__).parent
 CONF = HERE / "api_tokens.json"
@@ -36,9 +37,10 @@ CORS = (("Access-Control-Allow-Origin", "*"),
         ("Access-Control-Allow-Headers", "Authorization, Content-Type"),
         ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"))
 STREAM = {"active": 0}
+OWNER_FAILS = {}                          # ip -> [失败时刻]，大古接口防爆破
 
 
-def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None):
+def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None, owners=None, emit_fn=None):
     viewers = viewers or {}
     stop_event = stop or threading.Event()
 
@@ -253,9 +255,92 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None)
             if self.command != "HEAD":
                 self.wfile.write(data)
 
+        def _client_ip(self):
+            return (self.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+                    or self.client_address[0])
+
+        def _owner(self, conn):
+            """大古身份：只认 owner 主口令或设备令牌；Agent 口令一律无效。"""
+            auth = self.headers.get("Authorization", "")
+            token = auth[7:] if auth.startswith("Bearer ") else ""
+            return owner_ops.authenticate(conn, token, owners or {})
+
+        def _limited(self):
+            ip = self._client_ip()
+            now = time.time()
+            hits = [t for t in OWNER_FAILS.get(ip, []) if now - t < 600]
+            OWNER_FAILS[ip] = hits
+            return len(hits) >= 20
+
+        def _fail(self):
+            ip = self._client_ip()
+            OWNER_FAILS.setdefault(ip, []).append(time.time())
+
+        def _read_json(self):
+            n = int(self.headers.get("Content-Length", 0) or 0)
+            if n > MAX_BODY * 32:
+                raise ValueError("请求体过大")
+            obj = json.loads(self.rfile.read(n) or b"{}")
+            if not isinstance(obj, dict):
+                raise ValueError("JSON 必须是对象")
+            return obj
+
+        def _owner_post(self):
+            """POST /api/owner/pair（凭一次性配对码换设备令牌）与 /api/owner/act（大古写操作）。"""
+            path = urlparse(self.path).path
+            if self._limited():
+                return self._send(429, {"ok": False, "error": "失败次数过多，10 分钟后再试"})
+            try:
+                req = self._read_json()
+            except Exception as e:
+                return self._send(400, {"ok": False, "error": f"请求无效：{e}"[:80]})
+            conn = db_fn()
+            try:
+                if path == "/api/owner/pair":
+                    res = owner_ops.pair(conn, req.get("code"), req.get("device_name"))
+                    who = {"actor": owner_ops.OWNER_ID, "device": res.get("device") or "?"}
+                    owner_ops.audit(conn, who, "pair", res.get("device", ""),
+                                    {"ok": res.get("ok"), "error": res.get("error")}, ok=res.get("ok"), ip=self._client_ip())
+                    if not res.get("ok"):
+                        self._fail()
+                        log_event("owner_pair_failed", ip=self._client_ip())
+                    return self._send(200 if res.get("ok") else 400, res)
+                if path != "/api/owner/act":
+                    return self._send(404, {"ok": False, "error": "not found"})
+                who = self._owner(conn)
+                if not who:
+                    self._fail()
+                    log_event("owner_auth_failed", ip=self._client_ip())
+                    return self._send(401, {"ok": False, "error": "需要先配对本设备", "need_pair": True})
+                action = str(req.get("action") or "")
+                args = req.get("args") or {}
+                if not isinstance(args, dict):
+                    return self._send(400, {"ok": False, "error": "args 必须是对象"})
+                try:
+                    res = owner_ops.execute(conn, who, action, args, emit=emit_fn)
+                except Exception as e:
+                    res = {"ok": False, "error": f"内部错误: {type(e).__name__}"}
+                if action not in ("whoami", "devices", "vault_list"):   # 只读动作不记审计
+                    target = args.get("to") or args.get("agent") or args.get("task_id") or args.get("id") or args.get("path") or ""
+                    owner_ops.audit(conn, who, action, target, owner_ops.audit_detail(action, args, res),
+                                    ok=bool(res.get("ok")), ip=self._client_ip())
+                    log_event("owner_act", action=action, ok=bool(res.get("ok")), device=who.get("device", ""))
+                return self._send(200 if res.get("ok") else 400, res)
+            finally:
+                conn.close()
+
         def do_GET(self):
             if self.path.startswith("/healthz"):        # 免鉴权探活
                 return self._send(200, {"ok": True, "service": "super-brain-api"})
+            if self.path.startswith("/api/owner/"):     # 大古身份自查（需设备令牌）
+                conn = db_fn()
+                try:
+                    who = self._owner(conn)
+                finally:
+                    conn.close()
+                if not who:
+                    return self._send(401, {"ok": False, "error": "未配对", "need_pair": True})
+                return self._send(200, {"ok": True, "data": {k: who[k] for k in ("actor", "device", "device_id")}})
             if self.path.startswith("/api/stream"):     # 实时推送（SSE）
                 return self._stream()
             if self.path.startswith("/api/"):           # 只读控制台接口：2026-11-11 起免口令（写入仍走 /cmd）
@@ -277,6 +362,8 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None)
             self._send(404, {"ok": False, "error": "not found"})
 
         def do_POST(self):
+            if self.path.startswith("/api/owner/"):
+                return self._owner_post()
             if self.path != "/cmd":
                 return self._send(404, {"ok": False, "error": "not found"})
             auth = self.headers.get("Authorization", "")
@@ -307,7 +394,7 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None)
     return Handler
 
 
-def maybe_start(stop, log_event, db_fn, execute_fn):
+def maybe_start(stop, log_event, db_fn, execute_fn, emit_fn=None):
     """配置存在则启动 API 守护线程并返回之；配置缺失返回 None（不影响主运行时）。"""
     try:
         conf = json.loads(CONF.read_text(encoding="utf-8"))
@@ -317,10 +404,11 @@ def maybe_start(stop, log_event, db_fn, execute_fn):
         log_event("api_disabled", note="api_tokens.json 缺失或无效，仅 CLI 入口可用")
         return None
     viewers = conf.get("viewers") or {}
+    owners = conf.get("owner") or {}          # 大古独立身份 {"dagu-owner": "..."}，不与 Agent 口令混用
     bind, port = str(conf.get("bind", "127.0.0.1")), int(conf.get("port", 18765))
     srv = ThreadingHTTPServer(
         (bind, port),
-        _make_handler(db_fn, execute_fn, log_event, tokens, viewers, stop))
+        _make_handler(db_fn, execute_fn, log_event, tokens, viewers, stop, owners, emit_fn))
     srv.daemon_threads = True
     srv.timeout = 2                         # handle_request 轮询间隔，便于响应 stop
 
@@ -333,7 +421,7 @@ def maybe_start(stop, log_event, db_fn, execute_fn):
     t.start()
 
     # 可选：同时监听 80，方便直接用 http://<公网IP>/ 打开控制台（端口被占用则忽略）
-    handler = _make_handler(db_fn, execute_fn, log_event, tokens, viewers, stop)
+    handler = _make_handler(db_fn, execute_fn, log_event, tokens, viewers, stop, owners, emit_fn)
     for extra in conf.get("extra_ports") or []:
         try:
             s2 = ThreadingHTTPServer(("0.0.0.0", int(extra)), handler)
