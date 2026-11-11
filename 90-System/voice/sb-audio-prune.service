@@ -1,0 +1,7 @@
+[Unit]
+Description=Super-Brain 音频保留兜底：只留最近 10 条录音/合成音频
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /root/super-brain/90-System/voice/audio_retention.py /var/lib/super-brain/audio --keep 10
+Nice=15
