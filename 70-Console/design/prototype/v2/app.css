@@ -378,7 +378,8 @@ button.pill { cursor: pointer; }
 .dlg h3 { margin: 0 0 4px; font-size: 16px; }
 .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .dlg select { height: 42px; margin-bottom: 8px; }
-.dlg input[type=text], .dlg input[type=password] { width: 100%; height: 44px; border-radius: 10px; border: 1px solid var(--line2); background: rgba(0, 0, 0, .3); color: var(--ink); padding: 0 12px; margin-bottom: 8px; }
+.dlg input[type=text], .dlg input[type=password] { width: 100%; height: 44px; border-radius: 10px; border: 1px solid var(--line2); background: rgba(0, 0, 0, .3); color: var(--ink); padding: 0 12px; margin-bottom: 8px; font-size: 16px; }
+.dlg input[type=text]:focus, .dlg input[type=password]:focus { outline: none; border-color: var(--gold); box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 35%, transparent); }
 .linkbox { font-family: var(--mono); font-size: 11.5px; word-break: break-all; padding: 10px; border-radius: 10px; background: rgba(0, 0, 0, .35); border: 1px dashed rgba(245, 196, 81, .5); }
 .tabbar .badge { position: absolute; margin-left: 18px; margin-top: -4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--red); color: #fff; font-size: 10px; font-style: normal; line-height: 16px; }
 .tabbar button { position: relative; }
