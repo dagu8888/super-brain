@@ -1,18 +1,24 @@
 ---
 title: Super-Brain 运行时现行口径（代码里的关键参数与已变更的旧说法）
 type: 综合页
-layer: 暂存区
-status: 草稿
+layer: 编译层
+status: 现行
 category: Decisions
 valid_from: 2026-11-11
 source: [90-System/runtime/runtime.py, 90-System/runtime/api_server.py, 90-System/runtime/projects.py, 90-System/runtime/path_guard.py, 90-System/runtime/kb_config.json]
 confidence: 文档依据
 tags: [运行时, 参数, 现行口径, 事实变更]
+quality: reviewed
+approved_by: grok-chief
+approval_note: 大古 2026-11-11 23:03（北京时间）在聊天中批准转正
+approved_at: 2026-11-11
+updated: 2026-11-11
+
 ---
 
 # Super-Brain 运行时现行口径
 
-> 待审草稿（grok-chief 2026-11-11 从代码逐条核对整理）。以后知识库只检索 Markdown，这些原本只写在代码里的现行事实集中放在这一页。旧口径在别的页面里出现时，以本页为准。
+> 已转正（大古 2026-11-11 23:03 批准，grok-chief 执行 kb_promote）。grok-chief 2026-11-11 从代码逐条核对整理。以后知识库只检索 Markdown，这些原本只写在代码里的现行事实集中放在这一页。旧口径在别的页面里出现时，以本页为准。
 
 ## 任务调度（runtime.py）
 
