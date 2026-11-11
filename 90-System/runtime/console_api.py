@@ -6,6 +6,7 @@
 #       /api/events /api/monitor /api/knowledge /api/memory
 #       /api/messages /api/rollcall/{msg_id}（消息总线 v1，只读查询）
 #       /api/dashboard /api/server /api/messages?agent=（操作台 v2，见 console_v2.py）
+import hashlib
 import json
 import re
 import time
@@ -624,7 +625,8 @@ def handle_get(conn, raw_path):
         size = fp.stat().st_size
         if size > KB_READ_MAX_BYTES:
             return 413, {"ok": False, "error": "文件过大，控制台不全文加载"}
-        text = fp.read_text(encoding="utf-8", errors="replace")
+        raw = fp.read_bytes()
+        text = raw.decode("utf-8", errors="replace")
         truncated = len(text) > 120_000
         if truncated:
             text = text[:120_000]
@@ -637,6 +639,7 @@ def handle_get(conn, raw_path):
             "content": text,
             "truncated": truncated,
             "bytes": size,
+            "sha256": hashlib.sha256(raw).hexdigest(),   # 控制台编辑保存时的版本号（防覆盖别人改动）
         })
 
     if path == "/api/knowledge":

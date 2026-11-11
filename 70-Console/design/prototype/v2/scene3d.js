@@ -10,7 +10,7 @@
   const C = { hub: 0xf5c451, chief: 0xff5fa2, worker: 0x3ee6c1, off: 0x5a6880, cyan: 0x4cc9ff, red: 0xff4d5e, white: 0xffffff };
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const big = (n) => (n >= 10000 ? (n / 10000).toFixed(n >= 100000 ? 1 : 2) + "万" : String(n));
-  const LIVE = { working: "执行中", idle: "在线", offline: "离线", unused: "未接入" };
+  const LIVE = { working: "执行中", idle: "在线", offline: "离线", unused: "未接入", disabled: "已暂停" };
 
   let GLOW = null;
   function glowTex() {
@@ -32,8 +32,8 @@
     const g = c.getContext("2d");
     g.textAlign = "center"; g.textBaseline = "middle";
     g.shadowColor = "rgba(0,0,0,.9)"; g.shadowBlur = 12;
-    g.font = `600 46px ${font}`; g.fillStyle = on ? "#eef3fb" : "#8794aa"; g.fillText(name, 256, 46);
-    g.font = `400 30px ${font}`; g.fillStyle = on ? "#9fb0c8" : "#66738a"; g.fillText(sub, 256, 104);
+    g.font = `600 46px ${font}`; g.fillStyle = on ? "#eef3fb" : "#8794aa"; g.fillText(name, 256, 46, 500);
+    g.font = `400 30px ${font}`; g.fillStyle = /^忙碌/.test(sub) ? "#ffdf8a" : on ? "#9fb0c8" : "#66738a"; g.fillText(sub, 256, 104, 504);
     const t = new T.CanvasTexture(c); t.anisotropy = 2; return t;
   }
   function badgeTex(text) {
@@ -65,13 +65,21 @@
     /* 环境：星尘（静止）+ 极坐标地网 + 两条轨道环 */
     const world = new T.Group(); scene.add(world);
     {
-      const n = 900, pos = new Float32Array(n * 3);
-      for (let i = 0; i < n; i++) {
-        const r = 55 + Math.random() * 90, th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1);
-        pos[i * 3] = r * Math.sin(ph) * Math.cos(th); pos[i * 3 + 1] = r * Math.cos(ph) * 0.6; pos[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
-      }
-      const g = new T.BufferGeometry(); g.setAttribute("position", new T.BufferAttribute(pos, 3));
-      world.add(new T.Points(g, new T.PointsMaterial({ color: 0x7fa6d9, size: 0.35, transparent: true, opacity: 0.55, depthWrite: false })));
+      // 星空：三层静态星点（冷白/淡蓝/暖黄），只随拖拽视角变化，不自己动
+      const layers = [[1400, 0.28, 0xbfd4ff, 0.7], [500, 0.5, 0xffffff, 0.85], [160, 0.85, 0xffe2b0, 0.9]];
+      layers.forEach(([n, size, color, op]) => {
+        const pos = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) {
+          const r = 60 + Math.random() * 120, th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1);
+          pos[i * 3] = r * Math.sin(ph) * Math.cos(th); pos[i * 3 + 1] = r * Math.cos(ph) * 0.7; pos[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
+        }
+        const g = new T.BufferGeometry(); g.setAttribute("position", new T.BufferAttribute(pos, 3));
+        world.add(new T.Points(g, new T.PointsMaterial({ color, size, transparent: true, opacity: op, depthWrite: false, sizeAttenuation: true, map: glowTex(), blending: T.AdditiveBlending })));
+      });
+      // 星云：远处几团加色光雾（静态）
+      [[0x6b4cff, -70, 18, -90, 110, 0.16], [0xff5fa2, 85, -10, -70, 90, 0.11], [0x2fb6ff, -20, 30, 110, 120, 0.1], [0xf5c451, 60, 25, 80, 70, 0.07]].forEach(([c, x, y, z, sc, op]) => {
+        const nb = sprite(c, sc, op); nb.position.set(x, y, z); world.add(nb);
+      });
       const gridM = new T.LineBasicMaterial({ color: 0x24406a, transparent: true, opacity: 0.35 });
       for (let r = 4; r <= 24; r += 4) {
         const pts = []; for (let i = 0; i <= 96; i++) { const a = (i / 96) * Math.PI * 2; pts.push(new T.Vector3(Math.cos(a) * r, -6, Math.sin(a) * r)); }
@@ -92,13 +100,16 @@
     const hubCore = new T.Mesh(new T.SphereGeometry(1.5, 48, 32), new T.MeshBasicMaterial({ color: C.hub }));
     const hubShell = new T.Mesh(new T.SphereGeometry(1.95, 32, 24), new T.MeshBasicMaterial({ color: C.hub, wireframe: true, transparent: true, opacity: 0.18 }));
     const hubHalo = sprite(C.hub, 10, 0.55), hubHalo2 = sprite(0xffe7a8, 4.2, 0.9);
+    // 恒星日冕：多层加色辉光模拟 bloom（经典版 three 无后期处理，用叠加精灵近似）
+    const corona = [sprite(0xffb347, 22, 0.16), sprite(0xff8a3d, 34, 0.07), sprite(0xfff3d6, 6.5, 0.6)];
+    corona.forEach((c) => hub.add(c));
     const hubRing = new T.Mesh(new T.TorusGeometry(2.8, 0.03, 8, 96), new T.MeshBasicMaterial({ color: C.hub, transparent: true, opacity: 0.55 }));
     hubRing.rotation.x = Math.PI / 2.3;
     const hubRing2 = new T.Mesh(new T.TorusGeometry(3.4, 0.015, 8, 96), new T.MeshBasicMaterial({ color: C.cyan, transparent: true, opacity: 0.35 }));
     hubRing2.rotation.x = Math.PI / 1.8; hubRing2.rotation.y = 0.4;
     hub.add(hubCore, hubShell, hubHalo, hubHalo2, hubRing, hubRing2);
     hubCore.userData.id = HUB;
-    const hubLabel = new T.Sprite(new T.SpriteMaterial({ map: labelTex("中台", "消息总线 · 香港", true, font), transparent: true, depthWrite: false }));
+    const hubLabel = new T.Sprite(new T.SpriteMaterial({ map: labelTex("中台 · 恒星", "消息总线 · 香港", true, font), transparent: true, depthWrite: false }));
     hubLabel.scale.set(6.4, 1.75, 1); hubLabel.position.set(0, 3.6, 0); hub.add(hubLabel);
 
     const nodesG = new T.Group(); world.add(nodesG);
@@ -118,7 +129,7 @@
     }
     function setData(g) {
       const list = g.nodes.filter((n) => n.id !== HUB);
-      const s = JSON.stringify(list.map((n) => [n.id, n.label, n.kind, n.live, n.working, n.msgs, n.tasks, n.anomalies && n.anomalies.total]));
+      const s = JSON.stringify(list.map((n) => [n.id, n.label, n.kind, n.live, n.working, n.msgs, n.tasks, n.anomalies && n.anomalies.total, n.sub, n.pending]));
       if (s === sig) return; sig = s;
       [nodesG, edgesG].forEach((grp) => { grp.children.slice().forEach((c) => { grp.remove(c); disposeObj(c); }); });
       N = {}; hits.length = 1;
@@ -139,11 +150,14 @@
         grp.add(mesh);
         let halo = null;
         if (on) { halo = sprite(base, r * 6.5, 0.5); grp.add(halo); const core = sprite(0xffffff, r * 1.6, 0.35); grp.add(core); }
+        // 行星：指挥入口带一圈细行星环
+        if (n.kind === "chief") { const pr = new T.Mesh(new T.RingGeometry(r * 1.35, r * 1.5, 48), new T.MeshBasicMaterial({ color: col, transparent: true, opacity: on ? 0.35 : 0.12, side: T.DoubleSide, depthWrite: false })); pr.rotation.x = Math.PI / 2.4; grp.add(pr); }
         if (n.working) { const ring = new T.Mesh(new T.TorusGeometry(r * 1.9, 0.04, 8, 64), new T.MeshBasicMaterial({ color: C.hub, transparent: true, opacity: 0.9 })); ring.userData.spin = true; grp.add(ring); }
-        const lab = new T.Sprite(new T.SpriteMaterial({ map: labelTex(n.label, LIVE[n.live] || n.live, on, font), transparent: true, depthWrite: false, opacity: on ? 1 : 0.75 }));
+        const lab = new T.Sprite(new T.SpriteMaterial({ map: labelTex(n.label, n.sub || LIVE[n.live] || n.live, on, font), transparent: true, depthWrite: false, opacity: on ? 1 : 0.75 }));
         lab.scale.set(5.2, 1.42, 1); lab.position.set(0, -r - 1.15, 0); grp.add(lab);
         const an = n.anomalies && n.anomalies.total;
         if (an) { const b = new T.Sprite(new T.SpriteMaterial({ map: badgeTex(big(an)), transparent: true, depthWrite: false, depthTest: false })); b.scale.set(1.6, 0.67, 1); b.position.set(r * 0.9, r + 0.55, 0); b.renderOrder = 5; grp.add(b); }
+        if (n.pending) { const b = new T.Sprite(new T.SpriteMaterial({ map: badgeTex(String(n.pending)), transparent: true, depthWrite: false, depthTest: false })); b.scale.set(1.3, 0.55, 1); b.position.set(-r * 0.9, r + 0.55, 0); b.renderOrder = 6; grp.add(b); }
         const hit = new T.Mesh(new T.SphereGeometry(Math.max(1.1, r * 1.6), 12, 8), new T.MeshBasicMaterial({ visible: false }));
         hit.userData.id = n.id; grp.add(hit); hits.push(hit);
         nodesG.add(grp);

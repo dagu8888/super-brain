@@ -293,6 +293,12 @@ def handle_async(conf, tok, msg):
             send_reply(conf, tok, msg, out[0])
         return
     box = {}
+    # 真实工作才报「忙碌」：只有 handler 真的去执行（openmaus/shell）时，经 /cmd work 自报在做什么，做完清除。
+    # 心跳从不报忙碌。
+    really_works = (conf.get("handler") or "none").strip().lower() in ("openmaus", "shell")
+    if really_works:
+        report_work(conf, tok, "处理%s的消息：%s" % (msg.get("from_agent") or "?", (msg.get("text") or "")[:40]),
+                    msg.get("msg_id"))
 
     def run():
         box["out"] = dispatch(conf, msg)
@@ -300,6 +306,8 @@ def handle_async(conf, tok, msg):
     t = threading.Thread(target=run, name="bus-handler", daemon=True)
     t.start()
     t.join(HANDLER_TIMEOUT)
+    if really_works:
+        report_work(conf, tok, None)
     if t.is_alive():
         log("HANDLER 超时 msg=%s" % msg.get("msg_id"))
         send_reply(conf, tok, msg, _timeout_reply(conf, msg))
@@ -307,6 +315,19 @@ def handle_async(conf, tok, msg):
     out = box.get("out")
     if out:
         send_reply(conf, tok, msg, out[0])
+
+
+def report_work(conf, tok, title, ref=None):
+    """/cmd work：title 非空=开始做，None=做完清除。失败只记日志，不影响回复。"""
+    args = {"clear": 1} if title is None else {"title": title[:120], "ref": ref}
+    if conf.get("instance"):
+        args["instance"] = conf["instance"]
+    try:
+        res = api_post(conf["gateway"], tok, "work", args, timeout=10)
+        if not res.get("ok"):
+            log("WORK 上报被拒 err=%s" % res.get("error"))
+    except Exception as e:
+        log("WORK 上报失败 err=%s" % _redact(str(e)[:120]))
 
 
 def iter_sse(resp):
