@@ -3,7 +3,7 @@
   "owner_id": "dagu-owner",
   "system_sender": "system-watchdog",
   "search": {
-    "engine": "shadow",
+    "engine": "hybrid",
     "_engine_可选": "legacy=旧的逐字匹配（已收窄到 git 跟踪的 .md）；hybrid=FTS5+二元组+实体匹配+时效过滤；shadow=对外仍返回 legacy，同时后台跑 hybrid 记日志对比",
     "include_globs": [
       "*.md"
@@ -88,7 +88,8 @@
     ],
     "read_deny_prefixes": [
       "15-Private/"
-    ]
+    ],
+    "_切换记录": "2026-11-11 21:1x 北京时间 由 shadow 切到 hybrid（金标 A/B：整句问法答对 0→56.5%、时效严格 0→60%、拒答 100%→100%；关键词问法答对 78.3→82.6%、拒答持平）。回滚：engine 改回 legacy 并重启服务。"
   },
   "redact": {
     "placeholder": "（已遮蔽）",
