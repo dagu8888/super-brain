@@ -38,6 +38,11 @@ CORS = (("Access-Control-Allow-Origin", "*"),
         ("Access-Control-Allow-Methods", "GET, POST, OPTIONS"))
 STREAM = {"active": 0}
 OWNER_FAILS = {}                          # ip -> [失败时刻]，大古接口防爆破
+# 按住说话（2026-11-11）：录音转发给本机 Moonshine 边车（90-System/voice/stt_server.py，仅 127.0.0.1）
+STT_URL = os.environ.get("SB_STT_URL", "http://127.0.0.1:18791/stt")
+STT_MAX_BYTES = 48000 * 2 * 30 + 1024     # 与边车一致：16-bit 单声道 ≤30 秒
+STT_RATE = {}                             # device -> [请求时刻]，每设备每分钟 ≤20 次
+STT_BUSY = threading.Semaphore(2)         # 同时最多 2 路排队，其余直接 429
 
 
 def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None, owners=None, emit_fn=None):
@@ -329,6 +334,67 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
             finally:
                 conn.close()
 
+        def _owner_stt(self):
+            """POST /api/owner/stt：大古设备令牌 + audio/wav 原始字节 → 识别文本。
+            音频只在内存中转发，不落盘、不进日志、不进审计；识别结果只回给调用方，
+            由前端放进输入框等大古确认后再发（语音只是输入通道，不是授权）。"""
+            if self._limited():
+                return self._send(429, {"ok": False, "error": "失败次数过多，10 分钟后再试"})
+            conn = db_fn()
+            try:
+                who = self._owner(conn)
+            finally:
+                conn.close()
+            if not who:
+                self._fail()
+                log_event("owner_auth_failed", ip=self._client_ip(), path="/api/owner/stt")
+                return self._send(401, {"ok": False, "error": "需要先配对本设备", "need_pair": True})
+            ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if ctype not in ("audio/wav", "audio/x-wav", "audio/wave"):
+                return self._send(415, {"ok": False, "error": "只接受 WAV 录音"})
+            try:
+                n = int(self.headers.get("Content-Length", 0) or 0)
+            except ValueError:
+                n = -1
+            if n <= 0:
+                return self._send(400, {"ok": False, "error": "没有收到录音"})
+            if n > STT_MAX_BYTES:
+                return self._send(413, {"ok": False, "error": "录音太长（最多 30 秒）"})
+            dev = str(who.get("device_id") or who.get("device") or "owner")
+            now = time.time()
+            hits = [t for t in STT_RATE.get(dev, []) if now - t < 60]
+            if len(hits) >= 20:
+                STT_RATE[dev] = hits
+                return self._send(429, {"ok": False, "error": "说得太频繁了，歇一分钟再试"})
+            STT_RATE[dev] = hits + [now]
+            if not STT_BUSY.acquire(blocking=False):
+                return self._send(429, {"ok": False, "error": "识别引擎正忙，稍后再试"})
+            data = b""
+            try:
+                data = self.rfile.read(n)
+                import urllib.error
+                import urllib.request
+                req = urllib.request.Request(STT_URL, data=data, method="POST",
+                                             headers={"Content-Type": "audio/wav"})
+                try:
+                    with urllib.request.urlopen(req, timeout=45) as r:
+                        code, obj = r.status, json.loads(r.read() or b"{}")
+                except urllib.error.HTTPError as e:
+                    try:
+                        code, obj = e.code, json.loads(e.read() or b"{}")
+                    except Exception:
+                        code, obj = e.code, {"ok": False, "error": "识别失败"}
+                except (urllib.error.URLError, OSError, TimeoutError):
+                    code, obj = 503, {"ok": False, "error": "语音识别服务没启动或超时，请先用键盘输入"}
+                log_event("owner_stt", ok=bool(obj.get("ok")), seconds=obj.get("seconds"),
+                          ms=obj.get("ms"), chars=len(obj.get("text") or ""))
+                if code >= 500 and code != 503:
+                    code = 502
+                return self._send(code, {k: obj.get(k) for k in ("ok", "text", "seconds", "ms", "error") if k in obj})
+            finally:
+                data = b""
+                STT_BUSY.release()
+
         def do_GET(self):
             if self.path.startswith("/healthz"):        # 免鉴权探活
                 return self._send(200, {"ok": True, "service": "super-brain-api"})
@@ -362,6 +428,8 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
             self._send(404, {"ok": False, "error": "not found"})
 
         def do_POST(self):
+            if urlparse(self.path).path == "/api/owner/stt":
+                return self._owner_stt()
             if self.path.startswith("/api/owner/"):
                 return self._owner_post()
             if self.path != "/cmd":
