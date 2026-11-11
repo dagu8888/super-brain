@@ -195,6 +195,72 @@ def test_t91():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_t91_alert_guards():
+    """告警总开关打开时，也不得递归放大：自豁免、离线不建、窗口限流。"""
+    d, conn = fresh()
+    now = int(time.time())
+    prev = runtime.ALERTS_ENABLED
+    try:
+        runtime.ALERTS_ENABLED = True
+
+        # 1) 收件幕僚长不在线：任务转死信，但不建告警
+        t1 = _mk_assist(conn, "DSH一号@主机", created_ago=runtime.CLAIM_TIMEOUT + 60)
+        runtime._claim_timeout_sweep(conn, now)
+        st = conn.execute("SELECT status FROM tasks WHERE id=?", (t1,)).fetchone()[0]
+        alerts = conn.execute(
+            "SELECT COUNT(*) FROM tasks WHERE type='assist' AND "
+            "(payload LIKE '%认领超时告警%' OR payload LIKE '%死信告警%')").fetchone()[0]
+        check("GUARD-1 无在线认领人不建告警", st == "dead" and alerts == 0, (st, alerts))
+
+        # 2) 幕僚长在线：可为真实任务建告警，但告警带 no_claim_timeout
+        conn.execute("INSERT INTO heartbeats(agent,ts,note) VALUES('muse-chief',?,'active')", (now,))
+        conn.commit()
+        t2 = _mk_assist(conn, "DSH二号@笔记本", created_ago=runtime.CLAIM_TIMEOUT + 60,
+                        extra={"from": "muse-chief"})
+        runtime._claim_timeout_sweep(conn, now)
+        rows = conn.execute(
+            "SELECT id,payload FROM tasks WHERE type='assist' AND "
+            "(payload LIKE '%认领超时告警%' OR payload LIKE '%死信告警%')").fetchall()
+        check("GUARD-2 在线幕僚长可建告警", len(rows) >= 1, len(rows))
+        flags = [json.loads(r[1]).get("no_claim_timeout") for r in rows]
+        check("GUARD-2b 告警自带 no_claim_timeout", all(flags), flags)
+
+        # 3) 告警任务自身超时：转死信，不再生成新告警
+        before = len(rows)
+        alert_id, raw = rows[0]
+        p = json.loads(raw)
+        p.pop("no_claim_timeout", None)  # 模拟旧风暴任务（没有自豁免标记）
+        conn.execute(
+            "UPDATE tasks SET payload=?, status='pending', created_at=?, claimed_at=NULL, "
+            "done_at=NULL, error=NULL WHERE id=?",
+            (json.dumps(p, ensure_ascii=False), now - runtime.CLAIM_TIMEOUT - 60, alert_id))
+        conn.commit()
+        runtime._claim_timeout_sweep(conn, now)
+        after = conn.execute(
+            "SELECT COUNT(*) FROM tasks WHERE type='assist' AND "
+            "(payload LIKE '%认领超时告警%' OR payload LIKE '%死信告警%')").fetchone()[0]
+        ast = conn.execute("SELECT status,error FROM tasks WHERE id=?", (alert_id,)).fetchone()
+        check("GUARD-3 告警任务超时不再递归", after == before and ast[0] == "dead"
+              and "不再递归" in (ast[1] or ""), (after, before, ast))
+
+        # 4) 窗口限流：一次扫到大批真实超时，新建告警不超过上限
+        for i in range(30):
+            _mk_assist(conn, "DSH一号@主机", created_ago=runtime.CLAIM_TIMEOUT + 60,
+                       extra={"from": "muse-chief"})
+        runtime._claim_timeout_sweep(conn, now)
+        created = conn.execute(
+            "SELECT COUNT(*) FROM tasks WHERE type='assist' AND json_extract(payload,'$.kind')='告警' "
+            "AND created_at>=?", (now,)).fetchone()[0]
+        check("GUARD-4 窗口限流", created <= runtime.ALERT_MAX_PER_WINDOW + 2, created)
+        # +2 宽松：此前 GUARD-2 可能已建 1～2 条；上限是窗口内最多 5 条新任务，
+        # 但 GUARD-2 与本段同窗。总数应不超过 ALERT_MAX_PER_WINDOW（含已有）。
+        check("GUARD-4b 含先前告警仍不超过窗口上限", created <= runtime.ALERT_MAX_PER_WINDOW, created)
+    finally:
+        runtime.ALERTS_ENABLED = prev
+        conn.close()
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def test_t92():
     d, conn = fresh()
     qd = d / "queue"
@@ -234,6 +300,7 @@ def test_kb_guard():
 if __name__ == "__main__":
     test_f1_to_f5()
     test_t91()
+    test_t91_alert_guards()
     test_t92()
     test_kb_guard()
     print(f"\n== {len(FAILS)} 项失败 ==" if FAILS else "\n== 全部通过 ==")

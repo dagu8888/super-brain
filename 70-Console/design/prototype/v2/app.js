@@ -343,10 +343,10 @@
       <button class="kpi" style="--accent:var(--gold)" data-go="rollcall" type="button">
         <div class="k-label">最近一次点名</div>${rcHtml}</button>
       <button class="kpi" style="--accent:var(--red)" data-go="agents-issue" type="button">
-        <div class="k-label">异常计数</div>
+        <div class="k-label">异常计数 <span class="tag">当前可处理</span></div>
         <div class="k-val"><span data-k="an">${big(an.total)}</span></div>
-        <div class="bars3"><div class="r">死信<b>${big(an.dead)}</b></div><div class="r">未认领<b>${an.unclaimed}</b></div><div class="a">心跳过期<b>${an.stale}</b></div></div>
-        <div class="k-sub" title="${esc(stale)}">${stale ? "过期：" + esc(stale) : "无心跳过期节点"}</div></button>
+        <div class="bars3"><div class="r">未认领<b>${an.unclaimed || 0}</b></div><div class="r">最近失败<b>${an.recent_failed || an.dead || 0}</b></div><div class="a">心跳过期<b>${an.stale || 0}</b></div></div>
+        <div class="k-sub" title="${esc(stale)}">历史归档死信 <b>${big((an.archive && an.archive.dead) || 0)}</b> 条，不计入角标${stale ? " · 过期：" + esc(stale) : ""}</div></button>
       <button class="kpi" style="--accent:#9b8cff" data-go="approvals" type="button">
         <div class="k-label">待大古批示</div>
         <div class="k-val"><span data-k="ap">${(k.approvals_pending || 0) + (k.decision_tasks || 0)}</span><small>项</small></div>
@@ -385,7 +385,9 @@
   /* ---------- Agent 矩阵 ---------- */
   const dotColor = (a) => (liveOf(a) === "idle" || liveOf(a) === "working" ? (a.kind === "chief" ? "var(--chief)" : "var(--worker)") : "var(--gray)");
   function anChips(an) {
-    return `<span class="${an.dead ? "hot" : ""}">死信 ${big(an.dead)}</span><span class="${an.unclaimed ? "hot" : ""}">未认领 ${an.unclaimed}</span><span class="${an.stale ? "warm" : ""}">心跳过期 ${an.stale}</span>`;
+    const recent = an.recent_failed || an.dead || 0;
+    const arch = an.archive_dead || (an.archive && an.archive.dead) || 0;
+    return `<span class="${an.unclaimed ? "hot" : ""}">未认领 ${an.unclaimed || 0}</span><span class="${recent ? "hot" : ""}">最近失败 ${recent}</span><span class="${an.stale ? "warm" : ""}">心跳过期 ${an.stale || 0}</span>${arch ? `<span>历史死信 ${big(arch)}</span>` : ""}`;
   }
   function renderAgents() {
     const d = S.dash; if (!d) return;
@@ -647,9 +649,9 @@
     const d = S.dash, k = d.kpi;
     openDrawer(head("中台 · 消息总线", "所有 Agent 经中台收发；香港服务器 super-brain.service", "var(--gold)") + `<div class="dr-body">
       <div class="stats4"><div><b>${k.msgs_1h}</b><span>近 1 小时消息</span></div><div><b>${k.msgs_24h}</b><span>近 24 小时消息</span></div><div><b>${k.events_1h}</b><span>近 1 小时事件</span></div><div><b>${k.agents_online}/${k.agents_total}</b><span>在线 Agent</span></div></div>
-      <div><h4>任务队列</h4><div class="an">${Object.entries(k.queue).map(([s, n]) => `<span class="${s === "dead" || s === "failed" ? "hot" : ""}">${TASK[s] || s} ${big(n)}</span>`).join("")}</div></div>
+      <div><h4>任务队列</h4><div class="an">${Object.entries(k.queue).map(([s, n]) => `<span class="${s === "failed" ? "hot" : ""}">${s === "dead" ? "历史死信" : (TASK[s] || s)} ${big(n)}</span>`).join("")}</div></div>
       <div><h4>24 小时消息连线</h4><div class="list">${(d.messages.links_24h || []).map((l) => `<div class="li"><div class="li-top"><span class="who ${whoCls(l.from)}">${esc(agentName(l.from))}</span><span class="arrow">→</span><span class="who">${esc(agentName(toAgent(l.to) || l.to))}</span><span style="margin-left:auto">${l.count_24h} 条 · 最近 ${ago(l.last_at)}</span></div></div>`).join("") || '<div class="note">24 小时内无消息</div>'}</div></div>
-      <div class="note">异常口径：死信=点名该 Agent 的 dead 任务；未认领=点名该 Agent、pending 超过 ${d.rules.unclaimed_seconds / 60} 分钟无人领；心跳过期=曾接入但超过 ${d.rules.offline_seconds / 60} 分钟无在场信号。死信数每 ${d.rules.dead_cache_seconds / 60} 分钟统计一次。</div></div>`);
+      <div class="note">异常口径（红角标）：未认领=点名该 Agent、pending 超过 ${d.rules.unclaimed_seconds / 60} 分钟无人领；最近失败=近 ${(d.rules.recent_fail_seconds || 86400) / 3600} 小时内 failed/新死信。历史归档死信不计入角标（记录保留）。心跳过期=曾接入但超过 ${d.rules.offline_seconds / 60} 分钟无在场信号，单独展示、不进红角标。待审批是独立红点。</div></div>`);
   }
   async function openAgent(id) {
     const a = S.agentById[id]; if (!a) return;
