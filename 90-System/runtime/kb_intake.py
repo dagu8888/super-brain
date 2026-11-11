@@ -55,7 +55,8 @@ def list_staging(limit=50):
     root = staging_root()
     out = []
     if root.exists():
-        for f in sorted(root.rglob("*.md"), key=lambda x: -x.stat().st_mtime)[:limit]:
+        for f in sorted((x for x in root.rglob("*.md") if x.name != "README.md"),
+                        key=lambda x: -x.stat().st_mtime)[:limit]:
             meta, _ = kb_engine.parse_frontmatter(f.read_text(encoding="utf-8", errors="replace"))
             out.append({"path": _rel(f), "title": str(meta.get("title") or f.stem),
                         "category": str(meta.get("category") or ""), "supersedes": str(meta.get("supersedes") or ""),
@@ -83,7 +84,7 @@ def _check_draft(args):
         return None, {"ok": False, "error": "path 必填（暂存区里的草稿路径）"}
     fp = (ROOT / rel).resolve()
     sr = staging_root().resolve()
-    if sr not in fp.parents or not fp.is_file() or fp.suffix != ".md":
+    if sr not in fp.parents or not fp.is_file() or fp.suffix != ".md" or fp.name == "README.md":
         return None, {"ok": False, "error": f"只能处理暂存区里的草稿：{rel}"}
     return fp, None
 
