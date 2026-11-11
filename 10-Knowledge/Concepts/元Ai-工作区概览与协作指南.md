@@ -1,3 +1,13 @@
+---
+layer: 编译层
+type: 实体页
+valid_from: 2026-11-08
+confidence: 文档依据
+title: 元Ai 工作区概览与协作指南
+source: [10-Knowledge/Concepts/元Ai-工作区概览与协作指南.md]
+status: 争议
+---
+
 # 元Ai 工作区概览与协作指南
 
 > 元Ai 主工作区总览、能力清单与协作约定

@@ -1,3 +1,13 @@
+---
+layer: 编译层
+type: 实体页
+valid_from: 2026-11-08
+confidence: 文档依据
+title: Mausbot 本地项目总览
+source: [10-Knowledge/Concepts/Mausbot-本地项目总览.md]
+status: 现行
+---
+
 # Mausbot 本地项目总览
 
 > 盘点 D:\DSH 下四个自有项目与资产

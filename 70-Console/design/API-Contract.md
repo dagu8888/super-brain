@@ -1,3 +1,14 @@
+---
+layer: 编译层
+type: 综合页
+valid_from: 2026-11-08
+confidence: 文档依据
+title: Super-Brain 3.0 控制台 API 契约（Phase 4 · v1）
+source: [70-Console/design/API-Contract.md]
+status: 现行
+partially_stale: true
+---
+
 # Super-Brain 3.0 控制台 API 契约（Phase 4 · v1）
 
 > 版本：2026-11-08 ｜ 实现：`90-System/runtime/console_api.py` + `api_server.py`(GET 路由)

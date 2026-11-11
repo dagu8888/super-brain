@@ -1,3 +1,13 @@
+---
+layer: 编译层
+type: 决策页
+valid_from: 2026-11-08
+confidence: 文档依据
+title: 首页「Agent 协作网络」3D 优化方案（2026-11-08）
+source: [70-Console/design/3D-Collab-Network-Optimization.md]
+status: 现行
+---
+
 # 首页「Agent 协作网络」3D 优化方案（2026-11-08）
 
 > 目标：从"固定环 + 静态图"升级为**状态驱动、自适应、可下钻**的指挥视图。

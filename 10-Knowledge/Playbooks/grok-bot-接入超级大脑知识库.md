@@ -1,3 +1,13 @@
+---
+layer: 编译层
+type: 实体页
+valid_from: 2026-11-08
+confidence: 文档依据
+title: grok-bot 接入超级大脑知识库
+source: [10-Knowledge/Playbooks/grok-bot-接入超级大脑知识库.md]
+status: 现行
+---
+
 # grok-bot 接入超级大脑知识库
 
 > grok-bot 完成仓库拉取、环境自检与同步上传，正式接入协作体系

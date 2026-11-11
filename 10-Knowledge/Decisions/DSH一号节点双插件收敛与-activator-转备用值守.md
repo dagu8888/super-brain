@@ -8,6 +8,12 @@ created: 2026-11-09
 updated: 2026-11-09
 version: 1
 quality: auto-triaged
+layer: 编译层
+type: 决策页
+valid_from: 2026-11-10
+confidence: 文档依据
+status: 现行
+
 ---
 
 # DSH一号节点双插件收敛与 activator 转备用值守
