@@ -49,7 +49,10 @@ MAX_RETRIES = 3
 BACKOFF_BASE = 30                # 退避：2^retry * 30s
 CLAIM_TIMEOUT = 600              # 认领超时（任务包第9包 T9-1）：pending 超过该秒数仍无人认领 → 进 D2
 OFFLINE_GRACE = 300              # 兄弟实例"在线"判定沿用 5 分钟心跳阈值
-ALERTS_ENABLED = False           # 认领超时/死信告警总开关（2026-11-09 止血：递归告警；恢复待去重修复包）
+ALERTS_ENABLED = False           # 认领超时/死信告警总开关（2026-11-09 止血：递归告警）
+ALERT_RATE_WINDOW = 600          # 限流窗口：10 分钟
+ALERT_MAX_PER_WINDOW = 5         # 窗口内最多新建 5 条告警任务
+ALERT_CIRCUIT_HOUR = 20          # 近 1 小时超过该数则熔断，只记日志
 MAX_HOP = 8                      # 跳数熔断（借鉴 IP TTL）：事件链超过 8 跳自动熔断止损
 DETACH_THRESHOLD = 3000          # 指令数据分离：超过该长度的外部文本落 incoming/ 单文件
 # 内部留痕事件不参与路由、不会派活，豁免跳数熔断（豁免名单与 router 归档清单一致）
@@ -1068,22 +1071,93 @@ def _chief_of_task(conn, p):
     return "trae-chief"
 
 
-def _alert_chief(conn, chief, text, priority=2):
-    """告警落成一条 assist 任务（信使会写进该幕僚长队列，与其现有告警同一姿势）。
+def _is_kernel_alert(p):
+    """认领超时/死信告警任务：这类任务再被告警就会递归放大。"""
+    if not isinstance(p, dict):
+        return False
+    if p.get("kind") == "告警" or p.get("from") == "内核":
+        return True
+    text = str(p.get("text") or "")
+    return text.startswith("【认领超时告警】") or text.startswith("【死信告警】")
 
-    ALERTS_ENABLED=False 时整体短路（2026-11-09 止血，任务 #134294，古大裁定）：
-    告警任务本身也会成为 pending 点名任务，被认领超时扫描再告警，形成递归放大；
-    去重/自豁免/熔断属后续修复包，本次只停增量。认领超时判定、改派、死信转移不受影响。
+
+def _chief_online(conn, chief, now):
+    """收件幕僚长或其任一在册实例在离线阈值内有心跳，才算有人能认领。"""
+    if not chief:
+        return False
+    names = [chief]
+    try:
+        names += [n for (n,) in conn.execute(
+            "SELECT name FROM registry WHERE agent_ref=? AND status='active'", (chief,))]
+    except Exception:
+        pass
+    for name in names:
+        hb = conn.execute(
+            "SELECT ts FROM heartbeats WHERE agent=? ORDER BY ts DESC LIMIT 1",
+            (name,)).fetchone()
+        if hb and now - int(hb[0]) <= OFFLINE_GRACE:
+            return True
+    return False
+
+
+def _recent_alert_count(conn, since):
+    return conn.execute(
+        "SELECT COUNT(*) FROM tasks WHERE type='assist' AND created_at>=? AND "
+        "(json_extract(payload,'$.kind')='告警' OR json_extract(payload,'$.from')='内核')",
+        (since,)).fetchone()[0]
+
+
+def _alert_pending(conn, source_task_id, alert_type):
+    if source_task_id is None or not alert_type:
+        return False
+    row = conn.execute(
+        "SELECT 1 FROM tasks WHERE type='assist' AND status IN ('pending','doing') "
+        "AND json_extract(payload,'$.source_task_id')=? "
+        "AND json_extract(payload,'$.alert_type')=? LIMIT 1",
+        (source_task_id, alert_type)).fetchone()
+    return bool(row)
+
+
+def _alert_chief(conn, chief, text, priority=2, source_task_id=None,
+                 alert_type=None, now=None, source_is_alert=False):
+    """告警落成一条 assist 任务（信使会写进该幕僚长队列）。
+
+    2026-11-09 曾因「告警任务本身再被认领超时扫描」递归放大至 16 万条死信。
+    防护：总开关、源任务自豁免、收件人不在线则不建、同任务去重、窗口限流、小时熔断；
+    即便创建，也打上 no_claim_timeout，避免再进入认领超时链。
+    认领超时判定、改派、死信转移不受总开关影响。
     """
-    if not ALERTS_ENABLED:
-        log_event("alert_suppressed", chief=chief, text=str(text)[:200])
-        return
-    import json as _json
+    now = int(now or time.time())
+    reason = None
+    if source_is_alert:
+        reason = "source_is_alert"
+    elif not ALERTS_ENABLED:
+        reason = "disabled"
+    elif not _chief_online(conn, chief, now):
+        reason = "chief_offline"
+    elif _alert_pending(conn, source_task_id, alert_type):
+        reason = "deduped"
+    elif _recent_alert_count(conn, now - 3600) >= ALERT_CIRCUIT_HOUR:
+        reason = "circuit_open"
+    elif _recent_alert_count(conn, now - ALERT_RATE_WINDOW) >= ALERT_MAX_PER_WINDOW:
+        reason = "rate_limited"
+    if reason:
+        log_event("alert_suppressed", reason=reason, chief=chief,
+                  source_task_id=source_task_id, text=str(text)[:200])
+        return False
+    payload = {
+        "kind": "告警", "from": "内核", "to": chief, "to_agent": chief,
+        "text": text, "no_claim_timeout": True,
+    }
+    if source_task_id is not None:
+        payload["source_task_id"] = source_task_id
+    if alert_type:
+        payload["alert_type"] = alert_type
     conn.execute(
         "INSERT INTO tasks(event_id,type,payload,status,priority,max_retries,created_at) "
         "VALUES(NULL,'assist',?,'pending',?,3,?)",
-        (_json.dumps({"kind": "告警", "from": "内核", "to": chief, "to_agent": chief,
-                      "text": text}, ensure_ascii=False), priority, int(time.time())))
+        (json.dumps(payload, ensure_ascii=False), priority, now))
+    return True
 
 
 def _online_sibling(conn, p, now):
@@ -1121,6 +1195,16 @@ def _claim_timeout_sweep(conn, now):
             continue
         chief = _chief_of_task(conn, p)
         mark = p.get("_claim_timeout") or {}
+        if _is_kernel_alert(p):
+            # 告警任务自身超时：直接转死信，不改派、不再生成告警，切断递归。
+            np = {**p, "_claim_timeout": {**mark, "alerted_at": mark.get("alerted_at") or now, "stage": "dead"}}
+            conn.execute(
+                "UPDATE tasks SET status='dead', done_at=?, error=?, payload=? "
+                "WHERE id=? AND status='pending'",
+                (now, f"认领超时：告警任务自身不再递归扩大",
+                 json.dumps(np, ensure_ascii=False), tid))
+            log_event("task_dead_claim_timeout", id=tid, target=target, chief=chief, stage="alert_no_recurse")
+            continue
         if not mark.get("alerted_at"):
             # 原子占位：多进程/多线程同时扫到同一条也只告警一次
             cur = conn.execute(
@@ -1133,7 +1217,8 @@ def _claim_timeout_sweep(conn, now):
             minutes = max(1, (now - int(created)) // 60)
             _alert_chief(conn, chief,
                          f"【认领超时告警】任务 #{tid} 点名「{display}」已 {minutes} 分钟无人认领"
-                         f"（阈值 {CLAIM_TIMEOUT} 秒）。\n内容：{str(p.get('text', ''))[:120]}")
+                         f"（阈值 {CLAIM_TIMEOUT} 秒）。\n内容：{str(p.get('text', ''))[:120]}",
+                         source_task_id=tid, alert_type="claim_timeout", now=now)
             sib = _online_sibling(conn, p, now)
             if sib:                          # 改派一次，计时重置
                 name, ref = sib
@@ -1151,7 +1236,8 @@ def _claim_timeout_sweep(conn, now):
                      json.dumps(np, ensure_ascii=False), tid))
                 _alert_chief(conn, chief,
                              f"【死信告警】任务 #{tid} 点名「{target}」无人认领，无在线兄弟实例，已转死信。"
-                             f"\n内容：{str(p.get('text', ''))[:120]}")
+                             f"\n内容：{str(p.get('text', ''))[:120]}",
+                             source_task_id=tid, alert_type="dead_letter", now=now)
                 log_event("task_dead_claim_timeout", id=tid, target=target, chief=chief)
         elif mark.get("stage") != "dead":    # 已改派过又超时 → 死信 + 再次告警
             np = {**p, "_claim_timeout": {**mark, "stage": "dead"}}
@@ -1162,7 +1248,8 @@ def _claim_timeout_sweep(conn, now):
                  json.dumps(np, ensure_ascii=False), tid))
             _alert_chief(conn, chief,
                          f"【死信告警】任务 #{tid} 改派后仍无人认领，已转死信。"
-                         f"\n内容：{str(p.get('text', ''))[:120]}")
+                         f"\n内容：{str(p.get('text', ''))[:120]}",
+                         source_task_id=tid, alert_type="dead_letter", now=now)
             log_event("task_dead_claim_timeout", id=tid, target=target, chief=chief, stage="after_reassign")
     conn.commit()
 
