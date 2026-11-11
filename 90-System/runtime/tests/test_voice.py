@@ -173,7 +173,7 @@ def test_api_stt():
         url = f"http://127.0.0.1:{port}/api/owner/stt"
         w = wav_bytes(1.0)
         c, j = post(url, w, {"Content-Type": "audio/wav"})
-        check("未配对 401", c == 401 and j.get("need_pair"), (c, j))
+        check("未授权 401", c == 401 and j.get("need_unlock"), (c, j))
         c, j = post(url, w, {"Content-Type": "audio/wav", "Authorization": "Bearer chief-voice-test"})
         check("Agent 口令不能用语音接口", c == 401, c)
         c, j = post(url, w, {"Content-Type": "audio/mp4", "Authorization": "Bearer " + tok})
@@ -189,7 +189,7 @@ def test_api_stt():
         check("超长 413（不读正文）", r.status == 413, r.status)
         hc.close()
         c, j = post(url, w, {"Content-Type": "audio/wav", "Authorization": "Bearer " + tok})
-        check("已配对设备拿到识别文本", c == 200 and j.get("text") == "幕僚长你好", (c, j))
+        check("已授权设备拿到识别文本", c == 200 and j.get("text") == "幕僚长你好", (c, j))
         check("音频原样转给本机边车", FakeStt.seen and FakeStt.seen[-1] == len(w))
         fake.shutdown()
         fake.server_close()
