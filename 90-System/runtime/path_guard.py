@@ -18,6 +18,15 @@ HARD_DENY = [
 ]
 
 
+def _protect_cfg():
+    """读 kb_config.json 的 protect 段；配置缺失/损坏时按默认保护 40-Agents/、90-System/（宁严勿松）。"""
+    try:
+        cfg = json.loads((Path(__file__).resolve().parent / "kb_config.json").read_text(encoding="utf-8"))
+        return cfg.get("protect") or {"prefixes": ["40-Agents/", "90-System/"], "writers": []}
+    except Exception:
+        return {"prefixes": ["40-Agents/", "90-System/"], "writers": []}
+
+
 class PermissionDenied(Exception):
     pass
 
@@ -54,6 +63,11 @@ class PathGuard:
         if any(rx.search(rel) for rx in HARD_DENY):
             self._audit(rel, "write", False)
             raise PermissionDenied(f"{self.agent_id}: 硬禁路径 {rel}")
+        # 2026-11-11 受保护目录（kb_config.json protect）：不在 writers 名单的身份一律禁写，allowlist 也不能放行
+        prot = _protect_cfg()
+        if rel.startswith(tuple(prot.get("prefixes") or ())) and self.agent_id not in (prot.get("writers") or []):
+            self._audit(rel, "write", False)
+            raise PermissionDenied(f"{self.agent_id}: 受保护目录 {rel}（需大古批准，见 kb_config.json protect）")
         if not any(rel.startswith(a) for a in self.allow_write):
             self._audit(rel, "write", False)
             raise PermissionDenied(f"{self.agent_id}: {rel} 不在写白名单 {list(self.allow_write)}")
