@@ -5,6 +5,7 @@
 # 端点：/api/overview /api/agents /api/agents/{id} /api/tasks /api/tasks/{id}
 #       /api/events /api/monitor /api/knowledge /api/memory
 #       /api/messages /api/rollcall/{msg_id}（消息总线 v1，只读查询）
+#       /api/dashboard /api/server /api/messages?agent=（操作台 v2，见 console_v2.py）
 import json
 import re
 import time
@@ -335,6 +336,11 @@ def handle_get(conn, raw_path):
 
     def ok(data, **extra):
         return 200, {"ok": True, "ts": now, "data": data, **extra}
+
+    import console_v2                      # v2 聚合只读接口（dashboard / server / 按 Agent 查消息）
+    hit = console_v2.handle(conn, path, q, now)
+    if hit is not None:
+        return hit
 
     if path == "/api/overview":
         busy = {r[0] for r in conn.execute(
