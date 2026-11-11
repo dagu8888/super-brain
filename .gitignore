@@ -21,3 +21,4 @@ api_tokens.json.bak*
 __pycache__/
 50-Events/*.jsonl
 50-Events/*.log
+70-Console/design/prototype/exports/
