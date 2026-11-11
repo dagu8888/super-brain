@@ -1,0 +1,154 @@
+{
+  "_说明": "知识库与运行时治理配置（KB-Annex-001 第二阶段）。所有身份、目录、阈值都在这里改，代码里不写死。改完无需改代码；kb_search 每次调用按 mtime 重新加载。",
+  "owner_id": "dagu-owner",
+  "system_sender": "system-watchdog",
+  "search": {
+    "engine": "shadow",
+    "_engine_可选": "legacy=旧的逐字匹配（已收窄到 git 跟踪的 .md）；hybrid=FTS5+二元组+实体匹配+时效过滤；shadow=对外仍返回 legacy，同时后台跑 hybrid 记日志对比",
+    "include_globs": [
+      "*.md"
+    ],
+    "exclude_prefixes": [
+      "90-System/queue/",
+      "50-Events/",
+      "15-Private/",
+      ".obsidian/",
+      "99-Local/"
+    ],
+    "index_path": "/var/lib/super-brain/kb_index.db",
+    "snippet_chars": 200,
+    "candidates": 60,
+    "refuse_below_coverage": 0.6,
+    "layer_weight": {
+      "编译层": 1.25,
+      "系统区": 1.0,
+      "暂存区": 0.85,
+      "原料层": 0.8,
+      "未知": 0.9
+    },
+    "status_weight": {
+      "现行": 1.0,
+      "争议": 0.85,
+      "部分已失效": 0.75,
+      "已失效": 0.35,
+      "草稿": 0.85
+    },
+    "drop_status": [
+      "测试残留"
+    ],
+    "layer_by_prefix": [
+      [
+        "10-Knowledge/_staging/",
+        "暂存区"
+      ],
+      [
+        "00-Inbox/",
+        "原料层"
+      ],
+      [
+        "60-Outputs/",
+        "原料层"
+      ],
+      [
+        "70-Assets/",
+        "原料层"
+      ],
+      [
+        "15-Private/",
+        "原料层"
+      ],
+      [
+        "10-Knowledge/",
+        "编译层"
+      ],
+      [
+        "10-Projects/",
+        "编译层"
+      ],
+      [
+        "30-Reviews/",
+        "编译层"
+      ],
+      [
+        "70-Console/design/",
+        "编译层"
+      ],
+      [
+        "40-Agents/",
+        "系统区"
+      ],
+      [
+        "90-System/",
+        "系统区"
+      ],
+      [
+        "80-Templates/",
+        "系统区"
+      ]
+    ],
+    "read_deny_prefixes": [
+      "15-Private/"
+    ]
+  },
+  "redact": {
+    "placeholder": "（已遮蔽）",
+    "patterns": [
+      "(?i)((?:密码|口令|password|passwd|pwd)\\s*[:：=]\\s*)[`\"']?(?!（)[^\\s`\"'<（(]{6,}",
+      "\\S+@\\S+----\\S+",
+      "(激活码\\s*[:：]\\s*)(?!（)\\S{8,}",
+      "gh[pousr]_[A-Za-z0-9]{20,}",
+      "github_pat_[A-Za-z0-9_]{20,}",
+      "\\bsk-[A-Za-z0-9_\\-]{16,}",
+      "(?i)(bearer\\s+)[A-Za-z0-9._\\-]{16,}",
+      "(?i)(https?://)[^/\\s:@]+:[^/\\s@]+@",
+      "-----BEGIN [A-Z ]*PRIVATE KEY-----[\\s\\S]*?-----END [A-Z ]*PRIVATE KEY-----"
+    ]
+  },
+  "intake": {
+    "gate": true,
+    "_说明": "inbox-triage 产出先进暂存区并推一条提示给大古；只有 approvers 用 kb_promote 才能进编译层。例行日志类事件不入库。",
+    "staging_dir": "10-Knowledge/_staging",
+    "approvers": [
+      "dagu-owner",
+      "grok-chief"
+    ],
+    "notify_new_draft": true,
+    "notify_max_per_day": 20,
+    "routine_event_types": [
+      "heartbeat_lost"
+    ]
+  },
+  "presence": {
+    "enabled": true,
+    "offline_after_sec": 900,
+    "min_interval_sec": 1800,
+    "startup_grace_sec": 900,
+    "ignore_agents": [
+      "router",
+      "supervisor"
+    ],
+    "notify_to": "dagu-owner"
+  },
+  "protect": {
+    "_说明": "受保护目录：除 writers 名单外，任何 Worker / 网关指令都不能写。自动同步也不再把这些目录的改动直接推上 main。",
+    "prefixes": [
+      "40-Agents/",
+      "90-System/"
+    ],
+    "writers": []
+  },
+  "lint": {
+    "report_dir": "60-Outputs/kb-lint",
+    "stale_after_days": 45,
+    "dup_jaccard": 0.6,
+    "staging_max_age_days": 7,
+    "compiled_required_fields": [
+      "title",
+      "type",
+      "status",
+      "valid_from",
+      "source",
+      "confidence"
+    ]
+  }
+}
