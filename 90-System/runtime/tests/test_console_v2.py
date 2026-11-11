@@ -351,10 +351,68 @@ def test_http(d):
             proc.kill()
 
 
+def test_dashboard_degraded_receipt():
+    """心跳仍新、定向消息超过 60 秒无回执 → live_status=degraded，不计入 agents_online。"""
+    d, conn = fresh()
+    now = int(time.time())
+    seed(conn, now)
+    conn.execute(
+        "INSERT OR REPLACE INTO registry(name,kind,location,agent_ref,status,registered_at) "
+        "VALUES('Muse@本机','instance','sandbox','muse-chief','active',?)", (now,))
+    conn.execute(
+        "INSERT INTO heartbeats(agent,ts,note) VALUES('Muse@本机',?,'sse') "
+        "ON CONFLICT(agent) DO UPDATE SET ts=excluded.ts, note=excluded.note", (now - 8,))
+    conn.execute("UPDATE agents SET last_seen=?, status='active' WHERE agent_id='muse-chief'", (now - 8,))
+    # 已有种子里的广播 ping1（now-600）Muse 补上回执，避免广播把她一直钉在降级
+    msg(conn, "ack_ping1_muse", "muse-chief", "Muse@本机", "grok-chief",
+        "1", now - 80, kind="chat", reply="ping1")
+    # 90 秒前发给 Muse 的任务，没有回执
+    msg(conn, "task_muse", "grok-chief", "幕僚长@云端", "muse-chief",
+        "请初审并回执", now - 90, kind="chat")
+    # 对照：同样心跳新鲜的 dsh-chief 已回执，应保持 idle
+    conn.commit()
+    console_v2.clear_cache()
+    code, body = console_api.handle_get(conn, "/api/dashboard")
+    check("degraded dashboard 200", code == 200 and body.get("ok"), code)
+    data = body["data"]
+    k = data["kpi"]
+    ag = {a["agent_id"]: a for a in data["agents"]}
+    check("Muse live_status=degraded", ag.get("muse-chief", {}).get("live_status") == "degraded",
+          ag.get("muse-chief", {}).get("live_status"))
+    check("Muse 状态文案", (ag["muse-chief"].get("state") or {}).get("label") == "在场但回执失败",
+          ag["muse-chief"].get("state"))
+    inst = (ag["muse-chief"].get("instances") or [{}])[0]
+    check("Muse 实例标 degraded", inst.get("degraded") is True or inst.get("link_status") == "degraded", inst)
+    check("dsh 仍是健康空闲，不被误伤", ag["dsh-chief"]["live_status"] == "idle")
+    # chat-worker 有心跳但从不回广播，不应被标 degraded
+    check("worker 不因广播被标 degraded", ag["chat-worker"]["live_status"] == "working",
+          ag["chat-worker"]["live_status"])
+    check("agents_online 不含 Muse", k["agents_online"] == sum(
+        1 for a in data["agents"] if a["status"] == "active" and a["live_status"] in ("idle", "working")),
+          k["agents_online"])
+    check("agents_degraded 单独计数含 Muse", k.get("agents_degraded") >= 1
+          and ag["muse-chief"]["agent_id"] and k["agents_degraded"] == sum(
+              1 for a in data["agents"] if a["status"] == "active" and a["live_status"] == "degraded"),
+          k.get("agents_degraded"))
+    # 补上回执后应恢复 idle
+    msg(conn, "ack_muse", "muse-chief", "Muse@本机", "grok-chief",
+        "已收到", now - 10, kind="chat", reply="task_muse")
+    conn.commit()
+    console_v2.clear_cache()
+    _, body2 = console_api.handle_get(conn, "/api/dashboard")
+    ag2 = {a["agent_id"]: a for a in body2["data"]["agents"]}
+    check("回执到达后 Muse 恢复 idle", ag2["muse-chief"]["live_status"] == "idle",
+          ag2["muse-chief"]["live_status"])
+    conn.close()
+    shutil.rmtree(d, ignore_errors=True)
+
+
+
 def main():
     test_dashboard()
     test_dashboard_recent_failed_in_badge()
     test_dashboard_storm_not_in_badge()
+    test_dashboard_degraded_receipt()
     test_server_health()
     d, conn = fresh()
     seed(conn, int(time.time()))

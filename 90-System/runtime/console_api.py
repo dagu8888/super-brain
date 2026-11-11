@@ -19,6 +19,8 @@ ROOT = Path(__file__).resolve().parents[2]
 KNOWLEDGE = ROOT / "10-Knowledge"
 EVENTS_DIR = ROOT / "50-Events"
 OFFLINE_SECONDS = 300          # 心跳超过 5 分钟视为离线
+RECEIPT_GRACE_SECONDS = 60     # 发出后这么久还没有 reply_to 回执，视为失败
+RECEIPT_LOOKBACK_SECONDS = 3600  # 只看近 1 小时的待回执消息，不翻旧账
 DEFAULT_ESTIMATE = 120         # 无历史样本时的默认预计耗时（秒）
 # 列表默认排除 dead：历史风暴在这一态，必须走 status= 索引，禁止无条件下扫全表
 OPEN_STATUSES = ("pending", "doing", "done", "failed", "cancelled")
@@ -145,8 +147,87 @@ def _load_presence(conn):
     return beats, by_ref
 
 
-def _annotate_agent(agent, busy, beats, by_ref, now):
-    """用 last_seen、自身心跳、名册实例心跳三者的最大值判定在线，不看 kind。"""
+def _load_receipt_failures(conn, now):
+    """近窗内发给某 Agent/实例（或 to=all 广播）且已过宽限期、仍无 reply_to 回执的对象。
+
+    只从 messages 表推断，不发探针。广播只检查名册里的实例（指挥入口），
+    不把从不回执的 worker 标成降级。发件人自己不用回自己的消息。
+    返回 (failed_agents, failed_instances)。表不存在时返回空集。
+    """
+    failed_agents, failed_instances = set(), set()
+    try:
+        lo = int(now) - RECEIPT_LOOKBACK_SECONDS
+        hi = int(now) - RECEIPT_GRACE_SECONDS
+        if hi < lo:
+            return failed_agents, failed_instances
+        rows = conn.execute(
+            'SELECT msg_id, from_agent, from_instance, "to", kind '
+            "FROM messages WHERE created_at>=? AND created_at<=? "
+            "AND (reply_to IS NULL OR reply_to='') "
+            "AND kind IN ('chat','ping','ack')", (lo, hi)).fetchall()
+        if not rows:
+            return failed_agents, failed_instances
+        ids = [r[0] for r in rows]
+        ph = ",".join("?" * len(ids))
+        ack_by = {}
+        for mid, fa, fi in conn.execute(
+                "SELECT reply_to, from_agent, from_instance FROM messages "
+                "WHERE reply_to IN (%s)" % ph, ids):
+            ack_by.setdefault(mid, []).append(((fa or ""), (fi or "")))
+        inst_to_ref, ref_to_insts = {}, {}
+        for name, ref in conn.execute(
+                "SELECT name, agent_ref FROM registry WHERE kind='instance'"):
+            if name and ref:
+                inst_to_ref[name] = ref
+                ref_to_insts.setdefault(ref, []).append(name)
+
+        def acked_by(mid, agent=None, inst=None):
+            for a, i in ack_by.get(mid, []):
+                if agent and a == agent:
+                    return True
+                if inst and i == inst:
+                    return True
+            return False
+
+        for mid, frm, finst, dest, _kind in rows:
+            dest = dest or ""
+            frm = frm or ""
+            finst = finst or ""
+            if dest == "all":
+                for inst, ref in inst_to_ref.items():
+                    if ref == frm or inst == finst:
+                        continue
+                    if acked_by(mid, agent=ref, inst=inst):
+                        continue
+                    failed_agents.add(ref)
+                    failed_instances.add(inst)
+                continue
+            if dest == frm or dest == finst:
+                continue
+            ref = inst_to_ref.get(dest, dest)
+            insts = ref_to_insts.get(dest, [])
+            if dest in inst_to_ref:
+                insts = [dest]
+            if acked_by(mid, agent=ref, inst=dest if dest in inst_to_ref else None):
+                continue
+            if any(acked_by(mid, inst=i) for i in insts):
+                continue
+            failed_agents.add(ref)
+            if dest in inst_to_ref:
+                failed_instances.add(dest)
+            else:
+                failed_instances.update(insts)
+    except Exception:
+        return set(), set()
+    return failed_agents, failed_instances
+
+
+def _annotate_agent(agent, busy, beats, by_ref, now, receipt_fail=None):
+    """用 last_seen、自身心跳、名册实例心跳三者的最大值判定在线，不看 kind。
+
+    心跳仍新、但近窗内发给该 Agent/实例的消息超过宽限期仍无回执时，
+    live_status 改为 degraded（在场但回执失败），不算健康在线。
+    """
     inst = list(by_ref.get(agent.get("agent_id"), []))
     cands = []
     if agent.get("last_seen"):
@@ -167,6 +248,21 @@ def _annotate_agent(agent, busy, beats, by_ref, now):
     agent["instance_names"] = [i["name"] for i in inst]
     agent["live_status"] = _live_status(seen, busy, now)
     agent["ever_connected"] = seen is not None
+    fail_agents, fail_insts = receipt_fail if receipt_fail else (set(), set())
+    inst_hit = any(i.get("name") in fail_insts for i in inst)
+    if agent["live_status"] in ("idle", "working") and (
+            agent.get("agent_id") in fail_agents or inst_hit):
+        agent["live_status"] = "degraded"
+        agent["receipt_failed"] = True
+    else:
+        agent["receipt_failed"] = False
+    for item in inst:
+        item["degraded"] = bool(
+            item.get("online") and (
+                item.get("name") in fail_insts or agent.get("agent_id") in fail_agents))
+        item["link_status"] = (
+            "degraded" if item["degraded"] else
+            ("online" if item.get("online") else "offline"))
     return agent
 
 
@@ -347,21 +443,24 @@ def handle_get(conn, raw_path):
         busy = {r[0] for r in conn.execute(
             "SELECT lease_owner FROM tasks WHERE status='doing' AND lease_owner IS NOT NULL")}
         beats, by_ref = _load_presence(conn)
+        receipt_fail = _load_receipt_failures(conn, now)
         agents = _rows(conn.execute(
             "SELECT agent_id,kind,status,last_seen FROM agents WHERE status='active' "
             "ORDER BY kind,agent_id"))
         for a in agents:
-            _annotate_agent(a, a["agent_id"] in busy, beats, by_ref, now)
+            _annotate_agent(a, a["agent_id"] in busy, beats, by_ref, now, receipt_fail)
         tasks = dict(conn.execute("SELECT status,COUNT(*) FROM tasks GROUP BY status").fetchall())
         dec = conn.execute(
             "SELECT COUNT(*) FROM tasks WHERE status='pending' AND priority>=1").fetchone()[0]
         today0 = int(time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1)))
         ev = conn.execute("SELECT COUNT(*) FROM events WHERE created_at>=?", (today0,)).fetchone()[0]
         online = sum(1 for a in agents if a["live_status"] in ("idle", "working"))
+        degraded = sum(1 for a in agents if a["live_status"] == "degraded")
         return ok({
             "console_rev": 1,
             "agents_total": len(agents),
             "agents_online": online,
+            "agents_degraded": degraded,
             "agents_working": sum(1 for a in agents if a["live_status"] == "working"),
             "agents_offline": sum(1 for a in agents if a["live_status"] == "offline"),
             "agents_unused": sum(1 for a in agents if a["live_status"] == "unused"),
@@ -381,6 +480,7 @@ def handle_get(conn, raw_path):
             doing[r[1]] = {"id": r[0], "type": r[2],
                            "instruction": _instruction_of(r[3])[0][:180]}
         beats, by_ref = _load_presence(conn)
+        receipt_fail = _load_receipt_failures(conn, now)
         dec = dict(conn.execute(
             "SELECT e.source, COUNT(*) FROM tasks t JOIN events e ON t.event_id=e.event_id "
             "WHERE t.status='pending' AND t.priority>=1 GROUP BY 1").fetchall())
@@ -392,7 +492,7 @@ def handle_get(conn, raw_path):
                 a["permissions"] = json.loads(a["permissions"] or "{}")
             except Exception:
                 pass
-            _annotate_agent(a, a["agent_id"] in doing, beats, by_ref, now)
+            _annotate_agent(a, a["agent_id"] in doing, beats, by_ref, now, receipt_fail)
             cur = doing.get(a["agent_id"])
             a["current_task_id"] = cur["id"] if cur else None
             a["current_task"] = cur
@@ -413,10 +513,11 @@ def handle_get(conn, raw_path):
             except Exception:
                 pass
         beats, by_ref = _load_presence(conn)
+        receipt_fail = _load_receipt_failures(conn, now)
         doing_id = conn.execute(
             "SELECT id FROM tasks WHERE lease_owner=? AND status='doing' ORDER BY id DESC LIMIT 1",
             (d["agent_id"],)).fetchone()
-        _annotate_agent(d, bool(doing_id), beats, by_ref, now)
+        _annotate_agent(d, bool(doing_id), beats, by_ref, now, receipt_fail)
         d["current_task_id"] = doing_id[0] if doing_id else None
         hist = _rows(conn.execute(
             "SELECT id,event_id,type,status,priority,lease_owner,retry_count,claimed_at,"

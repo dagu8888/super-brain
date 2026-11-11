@@ -222,33 +222,46 @@ def list_messages(conn, thread=None, since=None, to=None, limit=100):
 
 
 def poll_for_connection(conn, since, agent_ref, instance):
-    """SSE 一轮：该连接可见的新消息（含广播，但不含自己发出的广播）。"""
+    """SSE 一轮：该连接可见的新消息（含广播，但不含自己发出的广播）。
+
+    可见性（目的地 + 不回推自己的广播）在 LIMIT 之前过滤。否则 since=0
+    时先取出全表最旧的 200 条，游标只随可见消息前进，会被旧广播 ping
+    卡住，新的定向消息永远到不了桥（2026-11-11 Muse@本机 实测）。
+    """
     ensure_schema(conn)
     try:
         since = int(since)
     except (TypeError, ValueError):
         since = 0
-    rows = conn.execute(
-        'SELECT msg_id,from_agent,from_instance,"to",kind,text,reply_to,'
-        "thread_id,created_at FROM messages WHERE created_at>=? "
-        "ORDER BY created_at ASC, rowid ASC LIMIT 200", (since,)).fetchall()
-    out = []
     inst = (instance or "").strip()
     ref = (agent_ref or "").strip()
-    for r in rows:
-        m = _row(r)
-        dest = m["to"]
-        visible = dest == "all" or (ref and dest == ref) or (inst and dest == inst)
-        if not visible:
-            continue
-        # 广播不回推给发件人自己（按 chief 或本连接实例判定）
-        if dest == "all":
-            if ref and m["from_agent"] == ref:
-                continue
-            if inst and (m.get("from_instance") or "") == inst:
-                continue
-        out.append(m)
-    return out
+    clauses = ["created_at>=?"]
+    params = [since]
+    dest_ok = ['"to"=\'all\'']
+    if ref:
+        dest_ok.append('"to"=?')
+        params.append(ref)
+    if inst and inst != ref:
+        dest_ok.append('"to"=?')
+        params.append(inst)
+    clauses.append("(" + " OR ".join(dest_ok) + ")")
+    # 自己发出的广播不占配额，避免 200 条全是自己的 to=all 时游标不前进
+    self_skip = []
+    if ref:
+        self_skip.append('(from_agent IS NOT NULL AND from_agent=?)')
+        params.append(ref)
+    if inst:
+        self_skip.append('(from_instance IS NOT NULL AND from_instance=?)')
+        params.append(inst)
+    if self_skip:
+        clauses.append("NOT (\"to\"='all' AND (" + " OR ".join(self_skip) + "))")
+    rows = conn.execute(
+        'SELECT msg_id,from_agent,from_instance,"to",kind,text,reply_to,'
+        "thread_id,created_at FROM messages WHERE "
+        + " AND ".join(clauses)
+        + " ORDER BY created_at ASC, rowid ASC LIMIT 200",
+        params).fetchall()
+    return [_row(r) for r in rows]
 
 
 def _presence_ts(conn):
