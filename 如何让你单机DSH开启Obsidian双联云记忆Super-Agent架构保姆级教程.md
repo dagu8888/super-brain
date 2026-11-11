@@ -1,3 +1,14 @@
+---
+layer: 编译层
+type: 综合页
+valid_from: 2026-11-08
+confidence: 文档依据
+title: 如何让你单机DSH开启Obsidian双联云记忆Super-Agent架构保姆级教程
+source: [如何让你单机DSH开启Obsidian双联云记忆Super-Agent架构保姆级教程.md]
+status: 现行
+partially_stale: true
+---
+
 # 如何让你单机DSH开启Obsidian双联云记忆Super-Agent架构保姆级教程
 
 > 适用人群：非技术背景、Windows 用户、有多个本地项目（如 D:\DSH 下的 grok-bot、mausbot），想用 Obsidian + 云服务器搭建"永不丢记忆、多 Agent 协同"的个人系统。

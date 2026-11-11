@@ -1,3 +1,13 @@
+---
+layer: 编译层
+type: 概念页
+valid_from: 2026-11-08
+confidence: 文档依据
+title: Super-Brain 3.0 Design System（V3.0 · Phase 2 交付）
+source: [70-Console/design/Design-System.md]
+status: 现行
+---
+
 # Super-Brain 3.0 Design System（V3.0 · Phase 2 交付）
 
 > 日期：2026-11-08 ｜ 作者：Trae Agent（总负责人）

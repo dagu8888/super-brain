@@ -1,3 +1,13 @@
+---
+layer: 编译层
+type: 实体页
+valid_from: 2026-11-08
+confidence: 文档依据
+title: 元Ai接入登记与协作规范
+source: [10-Knowledge/Decisions/元Ai接入登记与协作规范.md]
+status: 现行
+---
+
 # 元Ai接入登记与协作规范
 
 > 元Ai工作区定位、工作流与隐私红线

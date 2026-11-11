@@ -1,3 +1,13 @@
+---
+layer: 编译层
+type: 实体页
+valid_from: 2026-11-08
+confidence: 文档依据
+title: Lead 接入超级大脑
+source: [10-Knowledge/Decisions/Lead-接入超级大脑.md]
+status: 现行
+---
+
 # Lead 接入超级大脑
 
 > Lead 登记本机环境与协调职责，确认权限与铁律

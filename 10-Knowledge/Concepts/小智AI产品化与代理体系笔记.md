@@ -8,6 +8,12 @@ created: 2026-11-08
 updated: 2026-11-08
 version: 1
 quality: auto-triaged
+layer: 编译层
+type: 概念页
+valid_from: 2026-11-08
+confidence: 文档依据
+status: 现行
+
 ---
 
 # 小智AI产品化与代理体系笔记
