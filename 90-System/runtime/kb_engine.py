@@ -185,6 +185,21 @@ def entities(query):
     return ents
 
 
+def phrases(query):
+    """查询里的原样片段：整句 + 按疑问词/标点切开的片段（≥2 字），用于原文直配与摘要定位。"""
+    q = (query or "").strip().lower()
+    segs = [q] if 2 <= len(q) <= 40 else []
+    t = q
+    for p in STOP_PHRASES:
+        if len(p) >= 2:
+            t = t.replace(p, "|")
+    for seg in re.split(r"[|\s，。？?！!、；;：:,（）()「」“”\"'《》]+", t):
+        seg = seg.strip()
+        if len(seg) >= 2 and seg not in segs:
+            segs.append(seg)
+    return sorted(segs, key=len, reverse=True)
+
+
 # ---------------- 索引 ----------------
 def _index_path():
     p = (os.environ.get("KB_INDEX_PATH") or section("search").get("index_path")
@@ -264,8 +279,15 @@ def build_index(force=False, extra_exclude=()):
 
 
 # ---------------- 检索 ----------------
-def _snippet(text, qtoks, idf, width):
+def _snippet(text, qtoks, idf, width, phrs=()):
     body = parse_frontmatter(text)[1]
+    low_body = body.lower()
+    for ph in phrs:                                  # 原样片段命中 → 以它为中心截取（与旧引擎同样的定位方式）
+        pos = low_body.find(ph)
+        if pos >= 0 and len(ph) >= 2:
+            start = max(0, pos - width // 3)
+            snip = re.sub(r"\s+", " ", body[start:start + width]).strip()
+            return ("…" if start else "") + snip + "…"
     paras = [p for p in re.split(r"\n\s*\n|\n(?=#)|\n(?=[-*|>] )", body) if p.strip()]
     best, bs = "", -1.0
     for p in paras:
@@ -297,6 +319,7 @@ def search_hybrid(q, limit=10, extra_exclude=(), with_debug=False):
     qseq = tokens(q, query=True)
     qt = list(dict.fromkeys(qseq))
     ents = entities(q)
+    phrs = phrases(q)
     if not qt and not ents:
         return {"hits": [], "refused": True, "best_coverage": 0.0, "note": "查询里没有可检索的词"}
     c = _idx_conn()
@@ -348,9 +371,12 @@ def search_hybrid(q, limit=10, extra_exclude=(), with_debug=False):
                 cov_all = 0.7 * cov + 0.3 * ent_cov if qt else ent_cov
             else:
                 cov_all = cov
+            ph_hit = [p for p in phrs if p in low]
+            ph_bonus = 0.3 if (phrs and phrs[0] == q.strip().lower() and ph_hit and ph_hit[0] == phrs[0]) else 0.0
+            ph_bonus += 0.1 * min(3, len(ph_hit))
             ttoks = set(tokens(title))
             title_bonus = 0.15 * (sum(1 for t in qt if t in ttoks) / max(1, len(qt)))
-            score = (cov_all + 0.35 * (b / bmax) + title_bonus) * lw.get(layer, 0.9) * sw.get(st, 0.9)
+            score = (cov_all + 0.35 * (b / bmax) + title_bonus + ph_bonus) * lw.get(layer, 0.9) * sw.get(st, 0.9)
             rows.append((score, cov_all, path, title, layer, typ, st, vf, vt, sup, text))
         rows.sort(key=lambda r: -r[0])
         best_cov = max((r[1] for r in rows), default=0.0)
@@ -370,7 +396,7 @@ def search_hybrid(q, limit=10, extra_exclude=(), with_debug=False):
             h = {"path": path, "title": title, "layer": layer, "type": typ, "status": st,
                  "valid_from": vf, "valid_to": vt, "superseded_by": sup,
                  "score": round(score, 3), "coverage": round(cov_all, 3),
-                 "snippet": redact(_snippet(text, qt + list(ents), idf, width))}
+                 "snippet": redact(_snippet(text, qt + list(ents), idf, width, phrs))}
             if st in ("已失效", "部分已失效"):
                 h["warning"] = "该页（或部分内容）已失效，请以现行页为准" + (f"：{sup}" if sup else "")
             hits.append(h)
