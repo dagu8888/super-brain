@@ -456,7 +456,7 @@ def chief_execute(conn, chief_id, cmd, args):
                 "orchestrated": isinstance(orch, dict) or None, "plan_id": plan_id,
                 "error": None if eid else "重复指令被幂等忽略"}
 
-    if cmd == "status":
+    if cmd == "status" and args.get("id") not in (None, ""):
         t = conn.execute(
             "SELECT id,type,status,priority,retry_count,result,error,created_at,claimed_at,done_at,lease_owner "
             "FROM tasks WHERE id=?", (int(args["id"]),)).fetchone()
@@ -465,6 +465,18 @@ def chief_execute(conn, chief_id, cmd, args):
         return {"ok": True, "task": dict(zip(
             ["id", "type", "status", "priority", "retry_count", "result", "error",
              "created_at", "claimed_at", "done_at", "worker"], t))}
+
+    # 上报/查询当前工作（2026-11-11）：不带 id 的 status，或专用指令 work。
+    # 忙碌只认这条自报或任务租约，心跳绝不冒充忙碌。
+    if cmd in ("work", "status"):
+        import current_work
+        current_work.ensure_schema(conn)
+        if args.get("clear") in (1, True, "1", "true") or args.get("action") == "clear":
+            return current_work.clear(conn, chief_id)
+        title = str(args.get("title") or args.get("text") or args.get("work") or "").strip()
+        if title or args.get("task_id") not in (None, ""):
+            return current_work.set_work(conn, chief_id, args)
+        return current_work.get_work(conn, str(args.get("agent") or chief_id))
 
     if cmd == "list":
         limit = int(args.get("limit", 10))
@@ -641,6 +653,24 @@ def chief_execute(conn, chief_id, cmd, args):
                 "content": text[:max_chars]}
 
     # ---- 节点心跳（任务包 T6）：沿用现有 heartbeats 机制，不新造协议 ----
+    # ---- 口令包：Agent 只能凭大古签发的限时限次票据取值，不能列出或直接读 ----
+    if cmd == "vault_redeem":
+        import vault
+        return vault.redeem(conn, chief_id, args.get("ticket_id"))
+
+    # ---- 项目：指挥官（chief）可建项目、改阶段；查看走只读 /api/projects ----
+    if cmd in ("project_upsert", "phase_upsert", "phase_accept"):
+        import projects
+        return projects.owner_write(conn, chief_id, cmd, args)   # 内部只放行 grok-chief
+
+    # ---- 审批中心（2026-11-11）：Agent 提交待大古批示事项；结果经消息总线推回 ----
+    if cmd in ("approval_request", "approval_status"):
+        import owner_ops
+        owner_ops.ensure_schema(conn)
+        if cmd == "approval_request":
+            return owner_ops.request_approval(conn, chief_id, args)
+        return owner_ops.approval_status(conn, chief_id, args)
+
     if cmd == "heartbeat":
         agent = str(args.get("agent") or chief_id)[:64]
         note = str(args.get("note", ""))[:200]
@@ -1486,7 +1516,12 @@ def main():
     # 批示#5：五入口在线接入——api_tokens.json 存在才启动 HTTP API（缺失不影响主干）
     try:
         import api_server
-        api_server.maybe_start(stop, log_event, db, chief_execute)
+        api_server.maybe_start(stop, log_event, db, chief_execute, emit_fn=emit_event)
+        try:
+            import commander_hook
+            commander_hook.start(db, stop)
+        except Exception as e:
+            log_event("commander_hook_start_failed", error=str(e)[:200])
     except Exception as e:                                  # noqa
         log_event("api_start_failed", error=str(e)[:200])
     log_event("runtime_started", version="v2", agents=list(threads), pid=os.getpid())
