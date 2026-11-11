@@ -1,4 +1,4 @@
-/* Super-Brain 协作中枢 v2（查看免口令；写操作需配对本设备）
+/* Super-Brain 协作中枢 v2（查看免口令；写操作：每台设备每天第一次输入口令）
    数据源：/api/dashboard（KPI/异常/点名/消息）、/api/server（服务器健康）、/api/relations、
           /api/agents/{id}、/api/messages?agent=、/api/tasks/{id}、/api/knowledge、/api/stream（SSE）。
    纪律：在线只认心跳/在场信号；“执行中”只认任务租约；粒子只在真实消息/事件到达时出现；
@@ -736,21 +736,36 @@
       const d = (await api(`/api/knowledge/file?path=${encodeURIComponent(path)}`)).data;
       $("#drawer .dr-head h3").textContent = d.title;
       $("#drawer .dr-head p").textContent = `${d.category} · ${d.path} · ${(d.bytes / 1024).toFixed(1)} KB${d.truncated ? " · 已截断" : ""}`;
-      $("#drawer .dr-body").innerHTML = `<div class="acts"><button class="act gold" id="kb-edit-btn" type="button" ${d.truncated ? "disabled" : ""}>编辑</button>${own() ? "" : '<span class="lock">编辑需先配对本设备</span>'}</div><div class="doc">${esc(d.content)}</div>`;
+      $("#drawer .dr-body").innerHTML = `<div class="acts"><button class="act gold" id="kb-edit-btn" type="button" ${d.truncated ? "disabled" : ""}>编辑</button>${own() ? "" : '<span class="lock">编辑需先完成今日授权</span>'}</div><div class="doc">${esc(d.content)}</div>`;
       $("#kb-edit-btn").onclick = () => editDoc(d);
     } catch (e) { $("#drawer .dr-body").innerHTML = `<div class="note" role="alert">读取失败：${esc(e.message)}</div>`; }
   }
 
-  /* ---------- 大古操作：设备配对、写操作、审批中心、审计 ----------
-     查看免口令；写操作只认 dagu-owner 设备令牌（一次性配对码换取，存本机 localStorage）。
+  /* ---------- 大古操作：当日口令、写操作、审批中心、审计 ----------
+     查看免口令；写操作：每台设备每天第一次输入口令，通过后签发当日会话令牌
+     （本机 localStorage + HttpOnly cookie），有效至北京时间当天 23:59。
      不提供删除、交易类按钮。每次写操作服务端都会记审计。 */
-  const OWN_KEY = "sb.owner.v1";
-  const own = () => { try { return JSON.parse(localStorage.getItem(OWN_KEY) || "null"); } catch (e) { return null; } };
+  const OWN_KEY = "sb.owner.daily.v1";
+  const LEGACY_OWN_KEY = "sb.owner.v1";
+  try { localStorage.removeItem(LEGACY_OWN_KEY); } catch (e) { /* 忽略旧配对令牌，改为每日口令 */ }
+  const own = () => {
+    try {
+      const o = JSON.parse(localStorage.getItem(OWN_KEY) || "null");
+      if (!o || !o.token) return null;
+      if (o.expires_at && o.expires_at * 1000 <= Date.now()) {
+        localStorage.removeItem(OWN_KEY);
+        return null;
+      }
+      return o;
+    } catch (e) { return null; }
+  };
   function setOwn(v) { if (v) localStorage.setItem(OWN_KEY, JSON.stringify(v)); else localStorage.removeItem(OWN_KEY); renderOwnerPill(); }
   function renderOwnerPill() {
     const o = own(), el = $("#owner-pill");
+    if (!el) return;
     el.dataset.s = o ? "owner" : "idle";
-    el.querySelector("b").textContent = o ? `大古 · ${o.device || "本设备"}` : "未配对 · 只读";
+    el.querySelector("b").textContent = o ? "今日已授权" : "只读";
+    el.title = o ? `今日操作已授权，有效至 ${o.expires_at ? dtm(o.expires_at) : "今晚 23:59"}（北京时间）` : "查看免口令；今天第一次写操作需输入口令";
   }
   function deviceName() {
     const ua = navigator.userAgent;
@@ -761,44 +776,37 @@
   async function postJSON(path, body, token) {
     const h = { "Content-Type": "application/json" };
     if (token) h.Authorization = "Bearer " + token;
-    const r = await fetch(API + path, { method: "POST", headers: h, body: JSON.stringify(body) });
+    const r = await fetch(API + path, { method: "POST", headers: h, body: JSON.stringify(body), credentials: "same-origin" });
     let j = {}; try { j = await r.json(); } catch (e) { j = { ok: false, error: "HTTP " + r.status }; }
     j._status = r.status;
     return j;
   }
-  async function pairWith(code) {
-    const j = await postJSON("/api/owner/pair", { code, device_name: deviceName() });
-    if (j.ok && j.token) { setOwn({ token: j.token, device: j.device, device_id: j.device_id, at: Math.floor(Date.now() / 1000) }); return { ok: true }; }
-    return { ok: false, error: j.error || "配对失败" };
-  }
-  async function checkPairHash() {
-    const m = location.hash.match(/[#&]pair=([^&]+)/);
-    if (!m) return;
-    const code = decodeURIComponent(m[1]);
-    history.replaceState(null, "", location.pathname + location.search);   // 配对码不留在地址栏/历史里
-    const r = await pairWith(code);
-    toast(r.ok ? "本设备已配对，之后可直接操作" : "配对失败：" + r.error);
-  }
-  async function askPair() {
-    const v = await dlg({ title: "配对本设备", desc: "写操作需要大古身份。粘贴配对码（或配对链接）即可；配对后本设备长期有效，可在「设备」里退出。", placeholder: "配对码 / 配对链接 / 主口令", rows: 2, okText: "配对" });
+  async function askUnlock() {
+    const v = await dlg({
+      title: "今日授权",
+      desc: "今天第一次操作请输入口令。通过后到今晚 23:59（北京时间）这台设备都不用再输。查看始终不用口令。",
+      placeholder: "请输入口令",
+      field: "text",
+      rows: 1,
+      okText: "确认",
+      required: true
+    });
     if (!v || !v.value) return false;
-    let code = v.value.trim();
-    const m = code.match(/[#&]pair=([^&\s]+)/); if (m) code = decodeURIComponent(m[1]);
-    let r = await pairWith(code);
-    if (!r.ok) {   // 也接受 owner 主口令：自检通过才保存
-      try {
-        const w = await fetch(API + "/api/owner/whoami", { headers: { Authorization: "Bearer " + code } });
-        if (w.ok) { setOwn({ token: code, device: "主口令", device_id: null }); r = { ok: true }; }
-      } catch (e) { /* 忽略 */ }
+    const j = await postJSON("/api/owner/unlock", { phrase: v.value.trim(), device_name: deviceName() });
+    if (j.ok && j.token) {
+      setOwn({ token: j.token, device: j.device, expires_at: j.expires_at, at: Math.floor(Date.now() / 1000) });
+      toast("今日已授权，今晚 23:59 前不用再输");
+      return true;
     }
-    toast(r.ok ? "配对成功" : "配对失败：" + r.error);
-    return r.ok;
+    if (j._status === 429) toast(j.error || "失败次数过多，5 分钟后再试");
+    else toast("口令不对，请再试一次");
+    return false;
   }
   async function act(action, args, okMsg) {
     let o = own();
-    if (!o) { if (!(await askPair())) return null; o = own(); }
+    if (!o) { if (!(await askUnlock())) return null; o = own(); }
     const j = await postJSON("/api/owner/act", { action, args: args || {} }, o.token);
-    if (j._status === 401) { setOwn(null); toast("本设备授权已失效，请重新配对"); if (await askPair()) return act(action, args, okMsg); return null; }
+    if (j._status === 401) { setOwn(null); if (await askUnlock()) return act(action, args, okMsg); return null; }
     if (!j.ok) { toast("没成功：" + (j.error || "未知原因")); loadAudit(); return j; }
     if (okMsg) toast(typeof okMsg === "function" ? okMsg(j) : okMsg);
     loadAudit(); refreshSoon(); loadApprovals();
@@ -806,24 +814,29 @@
     return j;
   }
   /* 通用对话框：文本 / 下拉选择 / 确认 */
-  function dlg({ title, desc = "", placeholder = "", value = "", rows = 4, okText = "确定", select = null, input = true, required = false, danger = false }) {
+  function dlg({ title, desc = "", placeholder = "", value = "", rows = 4, okText = "确定", select = null, input = true, required = false, danger = false, field = "textarea" }) {
     const d = $("#dlg");
     $("#dlg-title").textContent = title; $("#dlg-desc").textContent = desc;
-    const ta = $("#dlg-input"); ta.hidden = !input; ta.value = value; ta.placeholder = placeholder; ta.rows = rows;
-    $("#dlg-extra").innerHTML = select ? `<label class="sr" for="dlg-sel">选择</label><select id="dlg-sel">${select.map((o) => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("")}</select>` : "";
+    const ta = $("#dlg-input");
+    const useText = field === "text" && input;
+    ta.hidden = !input || useText; ta.value = useText ? "" : value; ta.placeholder = placeholder; ta.rows = rows;
+    let extra = select ? `<label class="sr" for="dlg-sel">选择</label><select id="dlg-sel">${select.map((o) => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("")}</select>` : "";
+    if (useText) extra += `<label class="sr" for="dlg-text">口令</label><input id="dlg-text" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" placeholder="${esc(placeholder)}" value="${esc(value)}">`;
+    $("#dlg-extra").innerHTML = extra;
+    const fieldEl = useText ? $("#dlg-text") : ta;
     const ok = $("#dlg-ok"); ok.textContent = okText; ok.className = danger ? "btn act no" : "btn";
     return new Promise((res) => {
       const done = (v) => { d.close(); $("#dlg-form").onsubmit = null; $("#dlg-cancel").onclick = null; d.oncancel = null; res(v); };
       $("#dlg-form").onsubmit = (e) => {
         e.preventDefault();
-        const val = ta.value.trim();
-        if (input && required && !val) { ta.focus(); toast("请填写内容"); return; }
+        const val = (fieldEl ? fieldEl.value : ta.value).trim();
+        if (input && required && !val) { (fieldEl || ta).focus(); toast("请填写内容"); return; }
         done({ value: val, target: select ? $("#dlg-sel").value : null });
       };
       $("#dlg-cancel").onclick = () => done(null);
       d.oncancel = () => done(null);
       if (typeof d.showModal === "function") d.showModal(); else d.setAttribute("open", "");
-      setTimeout(() => (input ? ta : ok).focus(), 30);
+      setTimeout(() => (input ? (fieldEl || ta) : ok).focus(), 30);
     });
   }
   const targets = () => (S.dash ? S.dash.agents : []).filter((a) => a.status === "active").flatMap((a) =>
@@ -831,39 +844,23 @@
 
   async function settings() {
     const o = own();
-    let devs = "";
-    if (o) {
-      const j = await postJSON("/api/owner/act", { action: "devices", args: {} }, o.token);
-      if (j._status === 401) { setOwn(null); return settings(); }
-      devs = (j.devices || []).map((d) => `<div class="li"><div class="li-top"><b style="color:var(--ink)">${esc(d.name)}</b>${d.id === j.current ? '<span class="tag ping">本机</span>' : ""}${d.revoked_at ? '<span class="tag">已吊销</span>' : ""}<span style="margin-left:auto">配对 ${dtm(d.created_at)} · 最近 ${d.last_used_at ? ago(d.last_used_at) : "—"}</span></div>${!d.revoked_at && d.id !== j.current ? `<div class="acts"><button class="act no" data-revoke="${d.id}" type="button">吊销这台</button></div>` : ""}</div>`).join("") || '<div class="note">没有配对设备</div>';
-    }
-    openDrawer(head("设备与权限", o ? `本机已配对为大古（${esc(o.device || "")}）` : "本机未配对：只能查看，不能操作", o ? "var(--gold)" : "var(--gray)") + `<div class="dr-body">
-      ${o ? `<div class="acts"><button class="act gold" id="st-newlink" type="button">生成新设备配对链接</button><button class="act no" id="st-logout" type="button">退出本设备</button></div>
-        <div id="st-link"></div><div><h4>已配对设备</h4><div class="list">${devs}</div></div>`
-      : `<div class="acts"><button class="act gold" id="st-pair" type="button">输入配对码</button></div>`}
+    const until = o && o.expires_at ? dtm(o.expires_at) : "今晚 23:59";
+    openDrawer(head("设备与权限", o ? `今日已授权，有效至 ${until}（北京时间）` : "今日尚未授权：可以查看，写操作时再输入口令", o ? "var(--gold)" : "var(--gray)") + `<div class="dr-body">
+      ${o ? `<div class="acts"><button class="act no" id="st-logout" type="button">退出今日授权</button></div>` : `<div class="acts"><button class="act gold" id="st-unlock" type="button">输入今日口令</button></div>`}
       <div><h4>提醒</h4>${prefRows()}</div>
       ${o ? `<div><h4>口令包 <small style="color:var(--ink3);font-weight:400">只显示名称和用途，值永不回显</small></h4><div id="st-vault" class="list"><div class="note">读取中…</div></div><div class="acts"><button class="act gold" id="st-vault-add" type="button">存入 / 更新口令</button></div></div>` : ""}
-      <div class="note">口令和配对码只在本机保存，不会显示在页面或日志里。配对链接一次性、24 小时内有效。查看始终免口令；所有写操作都会记入「操作审计」。不提供删除和交易类操作。</div></div>`);
+      <div class="note">查看始终免口令。每天第一次写操作在这台设备输入一次口令，到当晚 23:59（北京时间）都不用再输。口令不会显示在页面或日志里。所有写操作都会记入「操作审计」。不提供删除和交易类操作。</div></div>`);
     const dr = $("#drawer");
-    if ($("#st-pair", dr)) $("#st-pair", dr).onclick = async () => { if (await askPair()) settings(); };
+    if ($("#st-unlock", dr)) $("#st-unlock", dr).onclick = async () => { if (await askUnlock()) settings(); };
     if ($("#st-logout", dr)) $("#st-logout", dr).onclick = async () => {
-      const c = await dlg({ title: "退出本设备？", desc: "退出后本机令牌立即作废，再操作需要重新配对。", input: false, okText: "退出", danger: true });
+      const c = await dlg({ title: "退出今日授权？", desc: "退出后本机今日令牌作废，再操作需要重新输入口令。", input: false, okText: "退出", danger: true });
       if (!c) return;
-      await postJSON("/api/owner/act", { action: "logout", args: {} }, own().token);
+      const tok = (own() || {}).token;
+      if (tok) await postJSON("/api/owner/act", { action: "logout", args: {} }, tok);
       setOwn(null); loadAudit(); closeDrawer(); toast("已退出，本机恢复只读");
-    };
-    if ($("#st-newlink", dr)) $("#st-newlink", dr).onclick = async () => {
-      const j = await act("pair_code_create", {});
-      if (!j || !j.ok) return;
-      const link = `${location.origin}${location.pathname}#pair=${encodeURIComponent(j.code)}`;
-      $("#st-link", dr).innerHTML = `<div class="linkbox" id="st-linkbox">${esc(link)}</div><div class="acts"><button class="act gold" id="st-copy" type="button">复制链接</button><span class="note">一次性 · ${dtm(j.expires_at)} 前有效 · 只显示这一次</span></div>`;
-      $("#st-copy", dr).onclick = async () => { try { await navigator.clipboard.writeText(link); toast("已复制，发到新设备上打开即可"); } catch (e) { toast("复制失败，请长按选择链接"); } };
     };
     bindPrefs(dr);
     if (o) loadVault(dr);
-    dr.querySelectorAll("[data-revoke]").forEach((b) => { b.onclick = async () => {
-      const c = await dlg({ title: "吊销这台设备？", input: false, okText: "吊销", danger: true }); if (!c) return;
-      const j = await act("device_revoke", { device_id: Number(b.dataset.revoke) }, "已吊销"); if (j && j.ok) settings(); }; });
   }
 
   /* 审批中心 */
@@ -949,12 +946,12 @@
   }
 
   /* 审计 */
-  const ACT_CN = { msg: "发消息", rollcall: "发起点名", submit: "下指令", pause: "暂停", resume: "恢复", task_approve: "通过任务", task_reject: "打回任务", task_retry: "重跑任务", task_reassign: "转交任务", approval_decide: "审批裁决", kb_save: "编辑知识库", pair: "设备配对", pair_code_create: "生成配对链接", device_revoke: "吊销设备", logout: "退出设备", vault_put: "存入口令", vault_disable: "停用口令", vault_enable: "启用口令", vault_list: "查看口令清单", project_upsert: "编辑项目", phase_upsert: "编辑阶段", phase_accept: "阶段验收" };
+  const ACT_CN = { msg: "发消息", rollcall: "发起点名", submit: "下指令", pause: "暂停", resume: "恢复", task_approve: "通过任务", task_reject: "打回任务", task_retry: "重跑任务", task_reassign: "转交任务", approval_decide: "审批裁决", kb_save: "编辑知识库", unlock: "今日授权", pair: "设备配对", pair_code_create: "生成配对链接", device_revoke: "吊销设备", logout: "退出设备", vault_put: "存入口令", vault_disable: "停用口令", vault_enable: "启用口令", vault_list: "查看口令清单", project_upsert: "编辑项目", phase_upsert: "编辑阶段", phase_accept: "阶段验收" };
   async function loadAudit() {
     try {
       const rows = (await api("/api/audit?limit=50")).data || [];
       $("#audit").innerHTML = rows.length ? rows.map((r) => `<div class="au"><time>${tm(r.ts)}<br>${fmtD.format(new Date(r.ts * 1000)).slice(5)}</time><div><b>${r.actor === OWNER ? "大古" : esc(r.actor)}</b> · ${esc(r.device || "")} · ${esc(ACT_CN[r.action] || r.action)} ${r.target ? "→ " + esc(String(r.target)) : ""} ${r.ok ? "" : '<span class="bad">（未成功）</span>'}<small>${esc(auditSummary(r))}</small></div></div>`).join("")
-        : '<div class="empty"><b>还没有写操作</b>配对后的每一次操作都会记在这里</div>';
+        : '<div class="empty"><b>还没有写操作</b>每一次写操作都会记在这里</div>';
     } catch (e) { $("#audit").innerHTML = `<div class="empty">读取失败：${esc(e.message)}</div>`; }
   }
   function auditSummary(r) {
@@ -978,7 +975,7 @@
     const paused = a.status !== "active";
     const insts = (a.instances || []).filter((i) => i.registry_status === "active");
     const to = insts.length ? `<label class="sr" for="cmp-to">发给</label><select id="cmp-to" class="kb-edit" style="min-height:0;height:40px;font-family:var(--font)"><option value="${esc(a.agent_id)}">${esc(a._label)}（${esc(a.agent_id)}）</option>${insts.map((i) => `<option value="${esc(i.name)}">${esc(i.name)}</option>`).join("")}</select>` : `<input type="hidden" id="cmp-to" value="${esc(a.agent_id)}">`;
-    return `<div><h4>介入操作 ${own() ? "" : '<span class="lock">· 首次操作需配对本设备</span>'}</h4><div class="compose">${to}
+    return `<div><h4>介入操作 ${own() ? "" : '<span class="lock">· 今天第一次操作需输入口令</span>'}</h4><div class="compose">${to}
       <label class="sr" for="cmp-text">内容</label><textarea id="cmp-text" rows="3" placeholder="给 ${esc(a._label)} 的消息或指令…"></textarea>
       <div class="acts"><button class="act gold" data-op="msg" type="button">发消息</button><button class="act" data-op="submit" type="button">下指令（入任务队列）</button>
       ${paused ? `<button class="act ok" data-op="resume" type="button">恢复</button>` : `<button class="act no" data-op="pause" type="button">暂停</button>`}</div></div></div>`;
@@ -1006,7 +1003,7 @@
   /* 知识库编辑 */
   async function editDoc(d) {
     if (d.truncated) { toast("文件过大被截断，控制台不支持编辑"); return; }
-    if (!own() && !(await askPair())) return;
+    if (!own() && !(await askUnlock())) return;
     $("#drawer .dr-body").innerHTML = `<label class="sr" for="kb-edit">正文</label><textarea class="kb-edit" id="kb-edit">${esc(d.content)}</textarea>
       <div class="acts"><button class="act gold" id="kb-save" type="button">保存</button><button class="act" id="kb-cancel" type="button">取消</button><span class="note">保存前自动留底到服务器 99-Local/kb-history；若他人已改动会拒绝覆盖</span></div>`;
     $("#kb-cancel").onclick = () => openDoc(d.path);
@@ -1068,7 +1065,7 @@
     const el = $("#chat-foot"); if (!el) return;
     const g = S.agentById[CHAT_PEER];
     const so = g ? stateOf(g) : null;
-    el.textContent = `幕僚长：${so ? so.text + (so.work ? " · " + so.work : "") : "—"} · ${S.chatHook ? "新消息会经 webhook 即时转达" : "webhook 未配置：消息入总线，等幕僚长读取"}${own() ? "" : " · 首次发送需配对本设备"}`;
+    el.textContent = `幕僚长：${so ? so.text + (so.work ? " · " + so.work : "") : "—"} · ${S.chatHook ? "新消息会经 webhook 即时转达" : "webhook 未配置：消息入总线，等幕僚长读取"}${own() ? "" : " · 今天第一次发送需输入口令"}`;
   }
   function setChatReply(id) {
     S.chatReply = id || null;
@@ -1156,7 +1153,7 @@
 
   /* ---------- 语音（F）：按住说话 = 本机 Web Audio 录音 → 服务器 Moonshine（tiny-streaming-zh，MIT）识别 ----------
      不再依赖浏览器 Web Speech（iPhone Safari / 主屏 App 下常报错）。iOS 要求：麦克风与 AudioContext 必须在按下手势里开启。
-     录音只在内存里：采集 → 16kHz 16-bit WAV → POST /api/owner/stt（需本设备已配对）→ 文字放进输入框，由大古确认后再点发送。
+     录音只在内存里：采集 → 16kHz 16-bit WAV → POST /api/owner/stt（需今日授权）→ 文字放进输入框，由大古确认后再点发送。
      页面不把录音写进 Cache Storage / IndexedDB / localStorage；识别完立即丢弃。键盘输入始终可用。 */
   const VOICE = { MAX_S: 30, MIN_S: 0.4, RATE: 16000 };
   const AC = window.AudioContext || window.webkitAudioContext;
@@ -1179,7 +1176,7 @@
     if (e) { e.preventDefault(); if (e.pointerId != null && e.currentTarget.setPointerCapture) { try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) { /* noop */ } } }
     if (mic || $("#btn-mic").classList.contains("busy")) return;
     if (!canRecord()) { toast(location.protocol === "https:" || location.hostname === "localhost" ? "这个浏览器不能录音，请用键盘输入" : "录音需要 https 地址打开，请用键盘输入"); return; }
-    if (!own()) { toast("语音识别要先配对本设备（键盘随时可用）"); askPair(); return; }
+    if (!own()) { toast("语音识别要先完成今日授权（键盘随时可用）"); askUnlock(); return; }
     // 必须在手势里同步创建并恢复 AudioContext（iOS）
     const ctx = new AC(); try { ctx.resume(); } catch (x) { /* noop */ }
     const m = mic = { ctx, chunks: [], rate: ctx.sampleRate, released: false, ready: false };
@@ -1227,10 +1224,10 @@
       const o = own();
       const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 50000);
       let r;
-      try { r = await fetch(API + "/api/owner/stt", { method: "POST", headers: { "Content-Type": "audio/wav", Authorization: "Bearer " + (o && o.token) }, body: wav, signal: ctl.signal, cache: "no-store" }); }
+      try { r = await fetch(API + "/api/owner/stt", { method: "POST", headers: { "Content-Type": "audio/wav", Authorization: "Bearer " + (o && o.token) }, body: wav, signal: ctl.signal, cache: "no-store", credentials: "same-origin" }); }
       finally { clearTimeout(to); wav = null; }
       let j = {}; try { j = await r.json(); } catch (x) { j = { ok: false, error: "HTTP " + r.status }; }
-      if (r.status === 401) { setOwn(null); micStatus(""); toast("本设备授权已失效，请重新配对后再说"); askPair(); return; }
+      if (r.status === 401) { setOwn(null); micStatus(""); toast("今日授权已失效，请先输入口令再说话"); askUnlock(); return; }
       if (!j.ok) { micStatus(""); toast("没识别成功：" + (j.error || "服务器暂时不可用") + "，可以直接打字"); return; }
       const text = (j.text || "").trim();
       if (!text) { micStatus(""); toast("没听清，靠近一点再说一次"); return; }
@@ -1312,7 +1309,7 @@
       ${aps.length ? `<div><h4>待审批 <span class="tag red">${aps.length}</span></h4><div class="list">${aps.map(apvCard).join("")}</div></div>` : ""}
       <div><h4>阶段时间线</h4><div class="tl">${tl || '<div class="note">还没有阶段</div>'}</div></div>
       <div class="acts"><button class="act gold" data-ph="new" data-pj="${esc(p.id)}" data-seq="${(p.phases.reduce((m, x) => Math.max(m, x.seq), 0) || 0) + 1}" type="button">新增阶段</button></div>
-      <div class="note">完成度只按阶段验收真实计算；「未核实」= 据记录已完成但控制台没有证据，验收时补上证据即转为已核实。写操作需配对，大古与幕僚长（/cmd phase_accept 等）都可编辑，全部记审计。</div></div>`);
+      <div class="note">完成度只按阶段验收真实计算；「未核实」= 据记录已完成但控制台没有证据，验收时补上证据即转为已核实。写操作需今日授权，大古与幕僚长（/cmd phase_accept 等）都可编辑，全部记审计。</div></div>`);
   }
   async function onPhaseBtn(b) {
     const pid = b.dataset.pj, seq = Number(b.dataset.seq), k = b.dataset.ph;
@@ -1377,7 +1374,7 @@
   async function onAssist(btn, id) {
     const ak = btn.dataset.ak;
     if (ak === "vault") {
-      const o = own(); if (!o && !(await askPair())) return;
+      const o = own(); if (!o && !(await askUnlock())) return;
       const j = await postJSON("/api/owner/act", { action: "vault_list", args: {} }, own().token);
       const items = (j.items || []).filter((x) => !x.disabled);
       if (!items.length) { toast("口令包里还没有可授权的条目，先在「设备与权限」里存入"); return; }
@@ -1489,7 +1486,8 @@
     bind();
     setInterval(clock, 1000); clock();
     loadDash(true);
-    renderOwnerPill(); checkPairHash();
+    renderOwnerPill();
+    if (/[#&]pair=/.test(location.hash)) history.replaceState(null, "", location.pathname + location.search);
     loadServer(); loadRelations(); loadEvents(); searchKb(""); loadApprovals(); loadAudit(); loadChat(); loadProjects();
     if (!mobile.matches) document.documentElement.dataset.tab = "overview";
     setInterval(() => { if (document.visibilityState === "visible") loadProjects(); }, 60000);

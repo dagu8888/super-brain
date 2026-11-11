@@ -8,6 +8,7 @@
 # 用法（由 runtime.main 调用）：
 #   import api_server; api_server.maybe_start(stop, log_event, db, chief_execute)
 import hmac
+from email.utils import formatdate
 import json
 import mimetypes
 import os
@@ -55,13 +56,33 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
         def log_message(self, *a):          # 默认访问日志静默（调用留痕走 50-Events）
             pass
 
-        def _send(self, code, obj):
+        def _secure(self):
+            proto = (self.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
+            return proto == "https"
+
+        def _cookie(self, token, expires_at=None, clear=False):
+            if clear:
+                c = "sb_owner=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
+            else:
+                c = "sb_owner=%s; Path=/; HttpOnly; SameSite=Lax" % token
+                if expires_at:
+                    c += "; Expires=" + formatdate(int(expires_at), usegmt=True)
+            if self._secure():
+                c += "; Secure"
+            return c
+
+        def _send(self, code, obj, cookies=None):
             body = json.dumps(obj, ensure_ascii=False).encode()
             self.send_response(code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             for k, v in CORS:
                 self.send_header(k, v)
+            if cookies:
+                if isinstance(cookies, str):
+                    cookies = [cookies]
+                for c in cookies:
+                    self.send_header("Set-Cookie", c)
             self.end_headers()
             self.wfile.write(body)
 
@@ -264,11 +285,26 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
             return (self.headers.get("X-Forwarded-For", "").split(",")[0].strip()
                     or self.client_address[0])
 
-        def _owner(self, conn):
-            """大古身份：只认 owner 主口令或设备令牌；Agent 口令一律无效。"""
+        def _owner_token(self):
             auth = self.headers.get("Authorization", "")
-            token = auth[7:] if auth.startswith("Bearer ") else ""
-            return owner_ops.authenticate(conn, token, owners or {})
+            if auth.startswith("Bearer ") and auth[7:].strip():
+                return auth[7:].strip()
+            for part in (self.headers.get("Cookie") or "").split(";"):
+                k, _, v = part.strip().partition("=")
+                if k == "sb_owner" and v:
+                    return v.strip()
+            return ""
+
+        def _owner(self, conn):
+            """大古身份：当日会话令牌、旧设备令牌或主口令；Agent 口令一律无效。"""
+            return owner_ops.authenticate(conn, self._owner_token(), owners or {})
+
+        def _audit_ua(self, detail):
+            d = dict(detail or {})
+            ua = (self.headers.get("User-Agent") or "").strip()
+            if ua:
+                d["ua"] = ua[:200]
+            return d
 
         def _limited(self):
             ip = self._client_ip()
@@ -291,16 +327,34 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
             return obj
 
         def _owner_post(self):
-            """POST /api/owner/pair（凭一次性配对码换设备令牌）与 /api/owner/act（大古写操作）。"""
+            """POST /api/owner/unlock（当日口令换会话令牌）、/pair（兼容旧配对码）与 /act（写操作）。"""
             path = urlparse(self.path).path
-            if self._limited():
-                return self._send(429, {"ok": False, "error": "失败次数过多，10 分钟后再试"})
             try:
                 req = self._read_json()
             except Exception as e:
                 return self._send(400, {"ok": False, "error": f"请求无效：{e}"[:80]})
             conn = db_fn()
             try:
+                if path == "/api/owner/unlock":
+                    ip = self._client_ip()
+                    if owner_ops.unlock_is_locked(ip):
+                        return self._send(429, {"ok": False, "error": "失败次数过多，5 分钟后再试"})
+                    res = owner_ops.unlock(conn, req.get("phrase"), req.get("device_name"),
+                                           ua=self.headers.get("User-Agent") or "")
+                    who = {"actor": owner_ops.OWNER_ID, "device": res.get("device") or "?"}
+                    owner_ops.audit(conn, who, "unlock", res.get("device", ""),
+                                    self._audit_ua({"ok": res.get("ok"), "error": res.get("error")}),
+                                    ok=res.get("ok"), ip=ip)
+                    if not res.get("ok"):
+                        owner_ops.unlock_note_failure(ip)
+                        log_event("owner_unlock_failed", ip=ip)
+                        if owner_ops.unlock_is_locked(ip):
+                            return self._send(429, {"ok": False, "error": "失败次数过多，5 分钟后再试"})
+                        return self._send(401, res)
+                    owner_ops.unlock_note_success(ip)
+                    return self._send(200, res, cookies=self._cookie(res["token"], res.get("expires_at")))
+                if self._limited():
+                    return self._send(429, {"ok": False, "error": "失败次数过多，10 分钟后再试"})
                 if path == "/api/owner/pair":
                     res = owner_ops.pair(conn, req.get("code"), req.get("device_name"))
                     who = {"actor": owner_ops.OWNER_ID, "device": res.get("device") or "?"}
@@ -316,7 +370,7 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
                 if not who:
                     self._fail()
                     log_event("owner_auth_failed", ip=self._client_ip())
-                    return self._send(401, {"ok": False, "error": "需要先配对本设备", "need_pair": True})
+                    return self._send(401, {"ok": False, "error": "需要先输入当日口令", "need_unlock": True})
                 action = str(req.get("action") or "")
                 args = req.get("args") or {}
                 if not isinstance(args, dict):
@@ -327,10 +381,13 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
                     res = {"ok": False, "error": f"内部错误: {type(e).__name__}"}
                 if action not in ("whoami", "devices", "vault_list"):   # 只读动作不记审计
                     target = args.get("to") or args.get("agent") or args.get("task_id") or args.get("id") or args.get("path") or ""
-                    owner_ops.audit(conn, who, action, target, owner_ops.audit_detail(action, args, res),
+                    owner_ops.audit(conn, who, action, target, self._audit_ua(owner_ops.audit_detail(action, args, res)),
                                     ok=bool(res.get("ok")), ip=self._client_ip())
                     log_event("owner_act", action=action, ok=bool(res.get("ok")), device=who.get("device", ""))
-                return self._send(200 if res.get("ok") else 400, res)
+                cookies = None
+                if action == "logout" and res.get("ok"):
+                    cookies = self._cookie("", clear=True)
+                return self._send(200 if res.get("ok") else 400, res, cookies=cookies)
             finally:
                 conn.close()
 
@@ -348,7 +405,7 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
             if not who:
                 self._fail()
                 log_event("owner_auth_failed", ip=self._client_ip(), path="/api/owner/stt")
-                return self._send(401, {"ok": False, "error": "需要先配对本设备", "need_pair": True})
+                return self._send(401, {"ok": False, "error": "需要先输入当日口令", "need_unlock": True})
             ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             if ctype not in ("audio/wav", "audio/x-wav", "audio/wave"):
                 return self._send(415, {"ok": False, "error": "只接受 WAV 录音"})
@@ -405,7 +462,7 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
                 finally:
                     conn.close()
                 if not who:
-                    return self._send(401, {"ok": False, "error": "未配对", "need_pair": True})
+                    return self._send(401, {"ok": False, "error": "需要先输入当日口令", "need_unlock": True})
                 return self._send(200, {"ok": True, "data": {k: who[k] for k in ("actor", "device", "device_id")}})
             if self.path.startswith("/api/stream"):     # 实时推送（SSE）
                 return self._stream()
