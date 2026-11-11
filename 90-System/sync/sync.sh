@@ -12,7 +12,17 @@ cd "$(dirname "$0")/../.." || exit 1
 AGENT="${AGENT_NAME:-unknown-agent}"
 MSG="${1:-sync: $(date '+%Y-%m-%d %H:%M:%S') by ${AGENT}}"
 
-git add -A
+# 2026-11-11 保护：受保护目录（系统代码/Agent 配置）不再由定时同步自动提交直推 main，
+# 只能走人工分支 → 测试 → 合并。数据目录照旧每 30 分钟自动同步，所以同步本身不会断。
+# 可用环境变量 SYNC_PROTECTED 覆盖（空格分隔）。
+PROTECTED="${SYNC_PROTECTED:-40-Agents 90-System}"
+EXCLUDES=()
+for d in $PROTECTED; do EXCLUDES+=(":(exclude)$d"); done
+git add -A -- . "${EXCLUDES[@]}"
+if [ -n "$(git status --porcelain -- $PROTECTED 2>/dev/null | head -1)" ]; then
+  echo "PROTECTED_PENDING: 受保护目录有未提交改动，已跳过自动提交（需人工分支合并）："
+  git status --porcelain -- $PROTECTED | head -5
+fi
 
 # 场景一：尚未配置云端仓库 → 仅本地提交，明确提示待同步
 if ! git remote get-url origin >/dev/null 2>&1; then
