@@ -165,3 +165,18 @@ data: {"event_id":"evt_xxx","source":"trae-chief","type":"task_delegated","prior
 4. 协作线来自「历史真实派发记录 + 默认路由兜底」，只表示可委派通道；当前状态仅为 `active/idle` 两态，没有独立的协作事件表。
 5. SSE 并发上限 8、单连接 10 分钟；超出返回 429 / 自动重连。未做 IP 级限流（服务仅内网口径使用，公网暴露需另加网关）。
 6. `/api/tasks` 不带 `status` 时不再返回 dead。要看死信必须显式 `status=dead`（仍带 limit）。这是为了避开历史死信风暴。
+
+## 操作台 v2 只读接口（2026-11-11，console_v2.py）
+
+均为 GET、免口令、只读；写入仍只走 `POST /cmd` 并要 chief 口令。
+
+| 端点 | 说明 |
+|---|---|
+| `/api/dashboard` | KPI（在线/近1h/24h/累计消息、事件、队列）、各 Agent 异常计数、点名历史（每节点首条回复耗时、重复回复数、未回名单）、近24h分时消息与消息连线、最近 80 条消息 |
+| `/api/server` | 服务器健康：开机时长、中台服务运行时长、负载、内存、磁盘、状态库体积、TLS 证书到期（读本地 Caddy 证书文件，不联网） |
+| `/api/messages?agent=<id>&limit=` | 某 Agent 发出或收到（含其实例名）的消息，新→旧 |
+| `/api/stream?observe=1` | SSE 观察模式：不带 instance 时推送全部消息（与 `/api/messages` 同口径）；带 instance 仍要口令 |
+
+异常口径：死信=点名该 Agent（payload.to_agent / payload.to 经名册折回）的 dead 任务（5 分钟统计一次）；
+未认领=点名该 Agent、pending 且超过 10 分钟无人领；心跳过期=曾接入但超过 5 分钟无在场信号（实例逐个计）。
+在线只认心跳/在场；执行中只认任务租约。
