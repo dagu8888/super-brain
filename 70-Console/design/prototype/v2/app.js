@@ -102,6 +102,7 @@
     const el = $("#conn");
     el.dataset.s = mode === "live" ? "live" : mode === "down" ? "bad" : mode === "idle" ? "idle" : "warn";
     el.querySelector("b").textContent = text;
+    if (S.dash) renderTicker();
   }
 
   /* ---------- 取数 ---------- */
@@ -410,7 +411,7 @@
     const d = S.dash; if (!d) return;
     const top = (d.messages.links_24h || []).slice(0, 3).map((l) => `<div class="tk-row"><span>${esc(agentName(l.from))} → ${esc(agentName(toAgent(l.to) || l.to))}</span><b>${l.count_24h}</b></div>`).join("");
     $("#ticker").innerHTML = `<div class="tk-row"><span>最近一条消息</span><b>${S.lastActivity ? ago(S.lastActivity) : "—"}</b></div>
-      <div class="tk-row"><span>实时通道</span><b>${S.mode === "live" ? "SSE 已连" : S.mode === "warn" ? "降级" : "—"}</b></div>
+      <div class="tk-row"><span>实时通道</span><b>${S.mode === "live" ? "SSE 已连" : S.mode === "warn" ? "重连/轮询" : S.mode === "down" ? "断开" : "连接中"}</b></div>
       <div class="tk-row" style="border-top:1px solid var(--line);padding-top:6px"><span>24 小时最忙的连线</span><span></span></div>${top || '<div class="tk-row"><span>暂无</span></div>'}`;
   }
 
