@@ -1154,22 +1154,114 @@
     }; });
   }
 
-  /* ---------- 语音（F）：按住说话 = 浏览器原生 Web Speech（zh-CN）；朗读 = speechSynthesis ----------
-     不上传音频到任何付费服务。浏览器不支持时按钮置灰。 */
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let rec = null, recBase = "";
-  function micStart(e) {
-    e.preventDefault();
-    if (!SR) { toast("这个浏览器不支持原生语音识别，请用键盘输入（iPhone 可用输入法自带的麦克风）"); return; }
-    if (rec) return;
-    rec = new SR(); rec.lang = "zh-CN"; rec.interimResults = true; rec.continuous = true;
-    const ta = $("#chat-input"); recBase = ta.value ? ta.value + " " : "";
-    rec.onresult = (ev) => { let t = ""; for (let i = 0; i < ev.results.length; i++) t += ev.results[i][0].transcript; ta.value = recBase + t; autoGrow(ta); };
-    rec.onerror = (ev) => { toast("语音识别出错：" + (ev.error || "未知")); micStop(); };
-    rec.onend = () => { $("#btn-mic").classList.remove("rec"); rec = null; };
-    try { rec.start(); $("#btn-mic").classList.add("rec"); if (navigator.vibrate) navigator.vibrate(20); } catch (err) { rec = null; }
+  /* ---------- 语音（F）：按住说话 = 本机 Web Audio 录音 → 服务器 Moonshine（tiny-streaming-zh，MIT）识别 ----------
+     不再依赖浏览器 Web Speech（iPhone Safari / 主屏 App 下常报错）。iOS 要求：麦克风与 AudioContext 必须在按下手势里开启。
+     录音只在内存里：采集 → 16kHz 16-bit WAV → POST /api/owner/stt（需本设备已配对）→ 文字放进输入框，由大古确认后再点发送。
+     页面不把录音写进 Cache Storage / IndexedDB / localStorage；识别完立即丢弃。键盘输入始终可用。 */
+  const VOICE = { MAX_S: 30, MIN_S: 0.4, RATE: 16000 };
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const canRecord = () => !!(AC && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  let mic = null;   // { ctx, stream, node, sink, chunks, rate, t0, released, timer, ready }
+  function micStatus(text, kind) {
+    const el = $("#mic-status"); if (!el) return;
+    el.hidden = !text; el.textContent = text || ""; el.dataset.k = kind || "";
+    const b = $("#btn-mic"); b.classList.toggle("rec", kind === "rec"); b.classList.toggle("busy", kind === "busy");
+    b.setAttribute("aria-pressed", kind === "rec" ? "true" : "false");
   }
-  function micStop() { if (rec) { try { rec.stop(); } catch (e) { /* noop */ } } }
+  function micErrorText(err) {
+    const n = (err && err.name) || "";
+    if (n === "NotAllowedError" || n === "SecurityError") return "没有麦克风权限：iPhone 请到「设置 › Safari › 麦克风」选允许，或在地址栏「大小」菜单里允许本网站使用麦克风；键盘输入不受影响";
+    if (n === "NotFoundError" || n === "OverconstrainedError") return "没找到可用的麦克风";
+    if (n === "NotReadableError" || n === "AbortError") return "麦克风被别的 App 占用（比如正在通话或录音），稍后再试";
+    return "录音没开起来，请用键盘输入";
+  }
+  async function micStart(e) {
+    if (e) { e.preventDefault(); if (e.pointerId != null && e.currentTarget.setPointerCapture) { try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) { /* noop */ } } }
+    if (mic || $("#btn-mic").classList.contains("busy")) return;
+    if (!canRecord()) { toast(location.protocol === "https:" || location.hostname === "localhost" ? "这个浏览器不能录音，请用键盘输入" : "录音需要 https 地址打开，请用键盘输入"); return; }
+    if (!own()) { toast("语音识别要先配对本设备（键盘随时可用）"); askPair(); return; }
+    // 必须在手势里同步创建并恢复 AudioContext（iOS）
+    const ctx = new AC(); try { ctx.resume(); } catch (x) { /* noop */ }
+    const m = mic = { ctx, chunks: [], rate: ctx.sampleRate, released: false, ready: false };
+    micStatus("正在打开麦克风…", "rec");
+    try {
+      m.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    } catch (err) { micCleanup(m); micStatus(""); toast(micErrorText(err)); return; }
+    if (m.released) {   // 首次授权时手指已松开：不算一次录音
+      micCleanup(m); micStatus(""); toast("麦克风已就绪，请重新按住说话，说完松手"); return;
+    }
+    const src = ctx.createMediaStreamSource(m.stream);
+    const node = ctx.createScriptProcessor(4096, 1, 1);
+    const sink = ctx.createGain(); sink.gain.value = 0;
+    node.onaudioprocess = (ev) => { if (m.chunks) m.chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0))); };
+    src.connect(node); node.connect(sink); sink.connect(ctx.destination);
+    Object.assign(m, { src, node, sink, t0: performance.now(), ready: true });
+    if (navigator.vibrate) navigator.vibrate(20);
+    const tick = () => {
+      if (mic !== m) return;
+      const s = (performance.now() - m.t0) / 1000;
+      if (s >= VOICE.MAX_S) { micStop(); toast("已到 30 秒上限，先识别这一段"); return; }
+      micStatus(`● 录音中 ${s.toFixed(1)} 秒 · 松手识别（最多 30 秒）`, "rec");
+      m.timer = setTimeout(tick, 200);
+    };
+    tick();
+  }
+  function micCleanup(m) {
+    if (!m) return;
+    clearTimeout(m.timer);
+    try { if (m.node) { m.node.onaudioprocess = null; m.node.disconnect(); } if (m.src) m.src.disconnect(); if (m.sink) m.sink.disconnect(); } catch (x) { /* noop */ }
+    try { if (m.stream) m.stream.getTracks().forEach((t) => t.stop()); } catch (x) { /* noop */ }
+    try { if (m.ctx && m.ctx.state !== "closed") m.ctx.close(); } catch (x) { /* noop */ }
+    if (mic === m) mic = null;
+  }
+  async function micStop() {
+    const m = mic; if (!m) return;
+    m.released = true;
+    if (!m.ready) return;            // 还在等权限：micStart 里收尾
+    const secs = (performance.now() - m.t0) / 1000, chunks = m.chunks, rate = m.rate;
+    m.chunks = null; micCleanup(m);
+    if (secs < VOICE.MIN_S) { micStatus(""); toast("太短了：按住说完整句再松手"); return; }
+    micStatus("识别中…（本机录音只发给我们自己的服务器，用完即删）", "busy");
+    let wav = encodeWav16k(chunks, rate); chunks.length = 0;
+    try {
+      const o = own();
+      const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 50000);
+      let r;
+      try { r = await fetch(API + "/api/owner/stt", { method: "POST", headers: { "Content-Type": "audio/wav", Authorization: "Bearer " + (o && o.token) }, body: wav, signal: ctl.signal, cache: "no-store" }); }
+      finally { clearTimeout(to); wav = null; }
+      let j = {}; try { j = await r.json(); } catch (x) { j = { ok: false, error: "HTTP " + r.status }; }
+      if (r.status === 401) { setOwn(null); micStatus(""); toast("本设备授权已失效，请重新配对后再说"); askPair(); return; }
+      if (!j.ok) { micStatus(""); toast("没识别成功：" + (j.error || "服务器暂时不可用") + "，可以直接打字"); return; }
+      const text = (j.text || "").trim();
+      if (!text) { micStatus(""); toast("没听清，靠近一点再说一次"); return; }
+      const ta = $("#chat-input");
+      ta.value = (ta.value.trim() ? ta.value.replace(/\s+$/, "") + " " : "") + text;
+      autoGrow(ta);
+      micStatus(`已识别 ${j.seconds || ""} 秒语音：请核对后再点「发送」`, "ok");
+      setTimeout(() => { if ($("#mic-status").dataset.k === "ok") micStatus(""); }, 4000);
+    } catch (err) {
+      micStatus(""); toast(err && err.name === "AbortError" ? "识别超时了，请再试一次或用键盘输入" : "网络不通，识别没完成，可以直接打字");
+    }
+  }
+  function encodeWav16k(chunks, rate) {
+    let n = 0; for (const c of chunks) n += c.length;
+    const ratio = rate / VOICE.RATE, outN = Math.floor(n / ratio);
+    const buf = new ArrayBuffer(44 + outN * 2), v = new DataView(buf);
+    const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+    w(0, "RIFF"); v.setUint32(4, 36 + outN * 2, true); w(8, "WAVE"); w(12, "fmt "); v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, VOICE.RATE, true); v.setUint32(28, VOICE.RATE * 2, true);
+    v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, "data"); v.setUint32(40, outN * 2, true);
+    // 简单区间平均降采样（抗混叠足够应付语音）
+    let ci = 0, cj = 0, pos = 0;
+    const next = () => { while (ci < chunks.length && cj >= chunks[ci].length) { ci++; cj = 0; } return ci < chunks.length ? chunks[ci][cj++] : 0; };
+    for (let i = 0; i < outN; i++) {
+      const end = Math.floor((i + 1) * ratio); let sum = 0, k = 0;
+      while (pos < end) { sum += next(); pos++; k++; }
+      const x = Math.max(-1, Math.min(1, k ? sum / k : 0));
+      v.setInt16(44 + i * 2, x < 0 ? x * 0x8000 : x * 0x7fff, true);
+    }
+    return new Blob([buf], { type: "audio/wav" });
+  }
   function say(text) {
     if (!("speechSynthesis" in window) || !text) return;
     const u = new SpeechSynthesisUtterance(String(text).replace(/https?:\/\/\S+/g, "链接").slice(0, 500));
@@ -1315,10 +1407,12 @@
     $("#btn-chat-more").addEventListener("click", () => loadChat(S.chat.length ? S.chat[0].created_at : undefined));
     $("#btn-tts").addEventListener("click", () => { setPref("tts", !pref("tts")); if (pref("tts")) say("朗读已打开"); });
     renderTtsBtn();
-    const mic = $("#btn-mic");
-    if (!SR) { mic.disabled = true; mic.title = "此浏览器不支持原生语音识别（可用输入法自带的麦克风）"; }
-    mic.addEventListener("pointerdown", micStart);
-    ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => mic.addEventListener(ev, micStop));
+    const micBtn = $("#btn-mic");
+    if (!canRecord()) { micBtn.classList.add("off"); micBtn.title = "这个浏览器不能录音（键盘输入不受影响）"; }
+    micBtn.addEventListener("pointerdown", micStart);
+    ["pointerup", "pointercancel"].forEach((ev) => micBtn.addEventListener(ev, micStop));
+    micBtn.addEventListener("contextmenu", (e) => e.preventDefault());
+    micBtn.addEventListener("keydown", (e) => { if ((e.key === " " || e.key === "Enter") && !e.repeat) { e.preventDefault(); if (mic) micStop(); else micStart(); } });
     $("#projects").addEventListener("click", (e) => { const b = e.target.closest("[data-pj]"); if (b) openProject(b.dataset.pj); });
     $("#btn-new-project").addEventListener("click", newProject);
     $("#agents").addEventListener("click", (e) => {

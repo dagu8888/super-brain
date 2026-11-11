@@ -1,0 +1,24 @@
+[Unit]
+Description=Super-Brain 语音转文字边车（Moonshine tiny-streaming-zh，仅 127.0.0.1）
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/super-brain/90-System/voice
+Environment=SB_STT_MODEL_DIR=/opt/sb-voice/models/tiny-streaming-zh
+Environment=SB_AUDIO_DIR=/var/lib/super-brain/audio
+Environment=OMP_NUM_THREADS=1
+ExecStart=/opt/sb-voice/venv/bin/python /root/super-brain/90-System/voice/stt_server.py
+Restart=on-failure
+RestartSec=15
+# 限内存：超限只杀本进程（OOM 不波及 super-brain.service）
+MemoryMax=400M
+MemorySwapMax=0
+CPUQuota=100%
+Nice=10
+OOMScoreAdjust=800
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
