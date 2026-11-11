@@ -50,13 +50,14 @@ def msg(conn, mid, frm, inst, to, text, ts, kind="chat", reply=None):
 _SEQ = [0]
 
 
-def task(conn, status, payload, created, owner=None):
+def task(conn, status, payload, created, owner=None, done_at=None):
     _SEQ[0] += 1
     payload = dict(payload, seq=_SEQ[0])      # tasks(type,payload) 唯一，逐条加序号
     conn.execute(
-        "INSERT INTO tasks(event_id,type,payload,status,priority,lease_owner,claimed_at,created_at) "
-        "VALUES(NULL,'assist',?,?,0,?,?,?)",
-        (json.dumps(payload, ensure_ascii=False), status, owner, created if owner else None, created))
+        "INSERT INTO tasks(event_id,type,payload,status,priority,lease_owner,claimed_at,created_at,done_at) "
+        "VALUES(NULL,'assist',?,?,0,?,?,?,?)",
+        (json.dumps(payload, ensure_ascii=False), status, owner,
+         created if owner else None, created, done_at))
 
 
 def seed(conn, now):
@@ -111,10 +112,17 @@ def test_dashboard():
     check("累计消息数", k["msgs_total"] == 7, k["msgs_total"])
     check("分时 24 桶且合计=24h", len(data["messages"]["hourly_24h"]) == 24
           and sum(data["messages"]["hourly_24h"]) == 6, data["messages"]["hourly_24h"])
-    check("死信按 to_agent 归属", ag["trae-chief"]["anomalies"]["dead"] == 3, ag["trae-chief"]["anomalies"])
-    check("死信 to 实例名经名册折回", ag["dsh-chief"]["anomalies"]["dead"] == 2, ag["dsh-chief"]["anomalies"])
-    check("无法归属的死信单列", k["anomalies"]["dead"] == 6 and k["anomalies"]["dead_unassigned"] == 1,
+    check("历史死信进归档且按 to_agent 归属",
+          ag["trae-chief"]["anomalies"]["archive_dead"] == 3, ag["trae-chief"]["anomalies"])
+    check("历史死信 to 实例名经名册折回进归档",
+          ag["dsh-chief"]["anomalies"]["archive_dead"] == 2, ag["dsh-chief"]["anomalies"])
+    check("无法归属的历史死信进归档",
+          k["anomalies"]["archive"]["dead"] == 6 and k["anomalies"]["archive"]["dead_unassigned"] == 1,
           k["anomalies"])
+    check("历史死信不进红角标",
+          k["anomalies"]["dead"] == 0 and k["anomalies"]["recent_failed"] == 0
+          and ag["trae-chief"]["anomalies"]["dead"] == 0
+          and ag["dsh-chief"]["anomalies"]["dead"] == 0, k["anomalies"])
     check("未认领只算超过 10 分钟的", ag["dsh-chief"]["anomalies"]["unclaimed"] == 1 and k["anomalies"]["unclaimed"] == 1,
           ag["dsh-chief"]["anomalies"])
     check("实例心跳过期计入 trae", ag["trae-chief"]["anomalies"]["stale"] == 1 and ag["trae-chief"]["live_status"] == "offline")
@@ -124,7 +132,11 @@ def test_dashboard():
     check("在线 Agent 不算过期", ag["dsh-chief"]["anomalies"]["stale"] == 0 and ag["dsh-chief"]["live_status"] == "idle")
     check("执行中只认租约", ag["chat-worker"]["live_status"] == "working"
           and ag["dsh-chief"]["live_status"] == "idle" and k["agents_working"] == 1)
-    check("异常合计自洽", k["anomalies"]["total"] == k["anomalies"]["dead"] + k["anomalies"]["unclaimed"] + k["anomalies"]["stale"])
+    check("异常合计=未认领+最近失败，不含历史死信与心跳过期",
+          k["anomalies"]["total"] == k["anomalies"]["unclaimed"] + k["anomalies"]["recent_failed"]
+          and k["anomalies"]["total"] == 1
+          and ag["dsh-chief"]["anomalies"]["total"] == 1
+          and ag["trae-chief"]["anomalies"]["total"] == 0, k["anomalies"])
     rc = data["last_rollcall"]
     check("最近点名=ping1", rc and rc["msg_id"] == "ping1", rc and rc["msg_id"])
     lat = {r["from_instance"]: r["latency_seconds"] for r in rc["replies"]}
@@ -147,6 +159,45 @@ def test_dashboard():
     t0 = time.time()
     console_api.handle_get(conn, "/api/dashboard")
     check("dashboard 二次调用走缓存且快", time.time() - t0 < 1.0, round(time.time() - t0, 3))
+    conn.close()
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_dashboard_recent_failed_in_badge():
+    """近 24h 的 failed/新死信计入角标；更早的只进归档。"""
+    d, conn = fresh()
+    now = int(time.time())
+    seed(conn, now)
+    task(conn, "dead", {"to_agent": "trae-chief", "text": "刚死"}, now - 600, done_at=now - 600)
+    task(conn, "failed", {"to_agent": "dsh-chief", "text": "刚失败"}, now - 120, done_at=now - 120)
+    console_v2.clear_cache()
+    code, body = console_api.handle_get(conn, "/api/dashboard")
+    check("recent dashboard 200", code == 200 and body.get("ok"), code)
+    k = body["data"]["kpi"]["anomalies"]
+    ag = {a["agent_id"]: a["anomalies"] for a in body["data"]["agents"]}
+    check("最近失败计入角标", k["recent_failed"] == 2 and k["dead"] == 2, k)
+    check("角标=未认领1+最近失败2", k["total"] == 3 and k["unclaimed"] == 1, k)
+    check("历史归档仍含旧死信+新死信", k["archive"]["dead"] == 7, k["archive"])
+    check("最近失败按 agent 拆开",
+          ag["trae-chief"]["recent_failed"] == 1 and ag["dsh-chief"]["recent_failed"] == 1
+          and ag["dsh-chief"]["total"] == 2, ag)
+    conn.close()
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_dashboard_storm_not_in_badge():
+    """模拟告警风暴存量：上千条历史 dead 不得抬高红角标。"""
+    d, conn = fresh()
+    now = int(time.time())
+    seed(conn, now)
+    for i in range(200):
+        task(conn, "dead", {"kind": "告警", "from": "内核", "to_agent": "trae-chief", "text": "风暴"},
+             now - 200000, done_at=now - 200000)
+    console_v2.clear_cache()
+    _, body = console_api.handle_get(conn, "/api/dashboard")
+    k = body["data"]["kpi"]["anomalies"]
+    check("风暴存量进归档", k["archive"]["dead"] >= 200, k["archive"])
+    check("风暴不进红角标", k["total"] == 1 and k["recent_failed"] == 0 and k["unclaimed"] == 1, k)
     conn.close()
     shutil.rmtree(d, ignore_errors=True)
 
@@ -260,9 +311,14 @@ def test_http(d):
                      'name="apple-mobile-web-app-capable"'):
             check("index 含 " + need, need in html)
         check("首屏不直接加载 three.js（3D 懒加载）", "three.min.js" not in html)
-        etag = hdr.get("ETag")
-        code304, _, _ = _req(port, "/console/prototype/index.html", headers={"If-None-Match": etag or "x"})
-        check("静态资源 ETag 协商 304", etag and code304 == 304, (etag, code304))
+        # HTML 入口一律重发（避免 iPhone 主屏幕卡住旧脚本）；js/css 仍走 ETag 304
+        etag_html = hdr.get("ETag")
+        code_html, _, _ = _req(port, "/console/prototype/index.html", headers={"If-None-Match": etag_html or "x"})
+        check("HTML 入口不协商 304", code_html == 200, code_html)
+        code_js, _, hdr_js = _req(port, "/console/prototype/v2/app.js")
+        etag = hdr_js.get("ETag")
+        code304, _, _ = _req(port, "/console/prototype/v2/app.js", headers={"If-None-Match": etag or "x"})
+        check("静态资源 ETag 协商 304", code_js == 200 and etag and code304 == 304, (etag, code304))
         code, body, hdr = _req(port, "/console/prototype/manifest.webmanifest")
         man = json.loads(body)
         check("manifest 类型正确", code == 200 and "manifest+json" in hdr.get("Content-Type", ""), hdr.get("Content-Type"))
@@ -297,6 +353,8 @@ def test_http(d):
 
 def main():
     test_dashboard()
+    test_dashboard_recent_failed_in_badge()
+    test_dashboard_storm_not_in_badge()
     test_server_health()
     d, conn = fresh()
     seed(conn, int(time.time()))
