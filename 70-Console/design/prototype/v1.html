@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Super-Brain · 多 Agent 操作台</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../base.css">
+<link rel="stylesheet" href="ops.css?v=20261111">
+</head>
+<body>
+<div id="app" class="sb-app">
+  <aside class="sb-sidebar sb-glass ops-side">
+    <div class="ops-brand">
+      <span class="ops-mark" aria-hidden="true">S</span>
+      <div class="ops-brand-text">
+        <strong>操作台</strong>
+        <span>v1 · 轨迹视图（旧版）</span>
+      </div>
+    </div>
+    <nav id="nav" class="ops-nav" aria-label="主导航"></nav>
+  </aside>
+  <main class="sb-main">
+    <header class="sb-topbar sb-glass">
+      <h1 id="page-title">总览</h1>
+      <span class="sb-status" id="health-pill" data-status="idle">检查中</span>
+      <span class="sb-status" id="conn-state" data-status="idle">未连接</span>
+      <button id="theme-toggle" class="sb-button sb-button-secondary" type="button">深色</button>
+    </header>
+    <div class="sb-content" id="views"></div>
+  </main>
+</div>
+
+<div id="backdrop" class="ops-backdrop" hidden></div>
+<aside id="drawer" class="sb-detail-panel ops-drawer" data-open="false" aria-label="上下文"></aside>
+<script src="ops.js?v=20261111"></script>
+</body>
+</html>

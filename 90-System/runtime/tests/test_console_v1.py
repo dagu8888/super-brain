@@ -298,9 +298,11 @@ def test_http_and_pages(db_path, port):
     check("操作台 SSE 免口令", b"200" in pub.split(b"\r\n", 1)[0] or b"connected" in pub, pub[:180])
     denied = _sse_query(port, urllib.parse.urlencode({"instance": "幕僚长@云端", "since": "1"}))
     check("带 instance 的 SSE 无口令 401", b"401" in denied[:80], denied[:120])
-    text = urllib.request.urlopen("http://127.0.0.1:%s/console/prototype/index.html" % port, timeout=8).read().decode()
-    check("入口仍是 prototype", "多 Agent 操作台" in text and "ops.js" in text and "three.min.js" not in text)
+    text = urllib.request.urlopen("http://127.0.0.1:%s/console/prototype/v1.html" % port, timeout=8).read().decode()
+    check("v1 保留为 v1.html", "多 Agent 操作台" in text and "ops.js" in text and "three.min.js" not in text)
     check("前端无口令框", 'id="token"' not in text and "gate-form" not in text)
+    idx = urllib.request.urlopen("http://127.0.0.1:%s/console/prototype/index.html" % port, timeout=8).read().decode()
+    check("入口 index.html 是 v2", "v2/app.js" in idx and 'id="token"' not in idx)
     raw = _sse(port, "幕僚长@云端")
     check("SSE 实例连接", b"200" in raw.split(b"\r\n", 1)[0] or b"connected" in raw, raw[:180])
     conn = sqlite3.connect(db_path)
@@ -322,8 +324,16 @@ def test_http_and_pages(db_path, port):
 
 
 def shoot(port):
-    art = Path("/opt/cursor/artifacts")
-    art.mkdir(parents=True, exist_ok=True)
+    art = Path(os.environ.get("SB_ARTIFACTS", "/opt/cursor/artifacts"))
+    try:
+        art.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        art = Path(tempfile.mkdtemp(prefix="sb-shots-"))
+    chrome = next((c for c in ("/usr/local/bin/google-chrome", "/usr/bin/google-chrome")
+                   if Path(c).exists()), None)
+    if os.environ.get("SB_SKIP_SHOTS") or not chrome:
+        print("SKIP 截图（SB_SKIP_SHOTS 或本机无 Chrome）")
+        return
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -335,11 +345,11 @@ def shoot(port):
                 if str(p) not in sys.path:
                     sys.path.append(str(p))
         from playwright.sync_api import sync_playwright
-    url = "http://127.0.0.1:%s/console/prototype/index.html" % port
+    url = "http://127.0.0.1:%s/console/prototype/v1.html" % port
     shots = []
     with sync_playwright() as p:
         browser = p.chromium.launch(
-            executable_path="/usr/local/bin/google-chrome",
+            executable_path=chrome,
             headless=True,
             args=["--no-sandbox", "--disable-dev-shm-usage"])
         page = browser.new_page(viewport={"width": 1440, "height": 900})

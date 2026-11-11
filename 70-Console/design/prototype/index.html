@@ -1,38 +1,123 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-tab="overview">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Super-Brain · 多 Agent 操作台</title>
-<link rel="stylesheet" href="../tokens.css">
-<link rel="stylesheet" href="../base.css">
-<link rel="stylesheet" href="ops.css?v=20261111">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Super-Brain · 协作中枢 v2</title>
+<meta name="description" content="Super-Brain 多 Agent 协作网操作台（只读，实时）">
+<meta name="theme-color" content="#070b14">
+<meta name="color-scheme" content="dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="超脑中枢">
+<meta name="format-detection" content="telephone=no">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="v2/icons/favicon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="v2/icons/apple-touch-icon.png">
+<link rel="stylesheet" href="v2/app.css?v=2.0.0">
 </head>
 <body>
-<div id="app" class="sb-app">
-  <aside class="sb-sidebar sb-glass ops-side">
-    <div class="ops-brand">
-      <span class="ops-mark" aria-hidden="true">S</span>
-      <div class="ops-brand-text">
-        <strong>操作台</strong>
-        <span>v1 · 轨迹视图</span>
+<a class="skip" href="#main">跳到主要内容</a>
+<div class="bg-aurora" aria-hidden="true"></div>
+
+<header class="top glass">
+  <div class="brand">
+    <span class="brand-orb" aria-hidden="true"></span>
+    <div class="brand-text">
+      <strong>SUPER-BRAIN</strong>
+      <span>协作中枢 · v2</span>
+    </div>
+  </div>
+  <div class="top-meta">
+    <span class="pill" id="conn" data-s="idle" role="status" aria-live="polite"><i></i><b>连接中</b></span>
+    <span class="pill pill-ghost" id="health-pill" data-s="idle"><i></i><b>服务器检查中</b></span>
+    <span class="clock" id="clock" title="北京时间">--:--:--<small>北京时间</small></span>
+    <a class="pill pill-ghost link-v1" href="v1.html" title="打开旧版 v1 操作台">旧版 v1</a>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <section class="kpis sec" data-t="overview" aria-label="关键指标" id="kpis">
+    <div class="kpi skeleton"></div><div class="kpi skeleton"></div><div class="kpi skeleton"></div>
+    <div class="kpi skeleton"></div><div class="kpi skeleton"></div><div class="kpi skeleton"></div>
+  </section>
+
+  <section class="stage sec" data-t="overview" aria-label="协作网拓扑">
+    <div class="stage-head">
+      <h2>协作网拓扑 <small id="stage-mode">加载中</small></h2>
+      <div class="stage-tools">
+        <button class="chip" id="btn-reset" type="button" title="回到全景">全景</button>
+        <button class="chip" id="btn-mode" type="button" title="切换 3D / 平面">切到平面</button>
       </div>
     </div>
-    <nav id="nav" class="ops-nav" aria-label="主导航"></nav>
-  </aside>
-  <main class="sb-main">
-    <header class="sb-topbar sb-glass">
-      <h1 id="page-title">总览</h1>
-      <span class="sb-status" id="health-pill" data-status="idle">检查中</span>
-      <span class="sb-status" id="conn-state" data-status="idle">未连接</span>
-      <button id="theme-toggle" class="sb-button sb-button-secondary" type="button">深色</button>
-    </header>
-    <div class="sb-content" id="views"></div>
-  </main>
-</div>
+    <div class="stage-body" id="stage">
+      <div class="stage-loading" id="stage-loading"><span class="spinner"></span>正在载入协作网…</div>
+    </div>
+    <div class="legend glass" id="legend" aria-label="图例"></div>
+    <div class="stage-hint" id="stage-hint">拖拽旋转 · 滚轮/双指缩放 · 点节点看详情</div>
+    <div class="stage-ticker glass" id="ticker" aria-live="off"></div>
+  </section>
 
-<div id="backdrop" class="ops-backdrop" hidden></div>
-<aside id="drawer" class="sb-detail-panel ops-drawer" data-open="false" aria-label="上下文"></aside>
-<script src="ops.js?v=20261111"></script>
+  <section class="feed sec glass" data-t="feed" aria-label="实时消息流">
+    <div class="sec-head">
+      <h2>实时消息流</h2>
+      <div class="seg" id="feed-filter" role="tablist">
+        <button class="on" data-f="all" type="button">全部</button>
+        <button data-f="msg" type="button">消息</button>
+        <button data-f="ping" type="button">点名</button>
+        <button data-f="event" type="button">事件</button>
+      </div>
+    </div>
+    <ol class="feed-list" id="feed" aria-live="polite" aria-relevant="additions"></ol>
+  </section>
+
+  <section class="panel sec glass" data-t="overview rollcall" aria-label="点名历史" id="sec-rollcall">
+    <div class="sec-head"><h2>点名历史</h2><small id="rc-note">只算每个节点的首条回复；重复回复单独计</small></div>
+    <div id="rollcalls" class="rollcalls"></div>
+  </section>
+
+  <section class="panel sec glass" data-t="agents" aria-label="Agent 矩阵" id="sec-agents">
+    <div class="sec-head">
+      <h2>Agent 矩阵</h2>
+      <div class="seg" id="agent-filter">
+        <button class="on" data-f="all" type="button">全部</button>
+        <button data-f="chief" type="button">指挥入口</button>
+        <button data-f="worker" type="button">执行者</button>
+        <button data-f="issue" type="button">有异常</button>
+      </div>
+    </div>
+    <div id="agents" class="agent-grid"></div>
+  </section>
+
+  <section class="panel sec glass" data-t="server" aria-label="服务器健康" id="sec-server">
+    <div class="sec-head"><h2>服务器健康</h2><small id="srv-note">香港节点</small></div>
+    <div id="server" class="server"></div>
+  </section>
+
+  <section class="panel sec glass wide" data-t="kb" aria-label="知识库检索" id="sec-kb">
+    <div class="sec-head"><h2>知识库检索</h2><small id="kb-note"></small></div>
+    <form id="kb-form" class="kb-form" role="search">
+      <label class="sr" for="kb-q">搜索知识库</label>
+      <input id="kb-q" type="search" placeholder="搜标题、标签、正文…" autocomplete="off" enterkeyhint="search">
+      <button class="btn" type="submit">检索</button>
+    </form>
+    <div id="kb" class="kb-list"></div>
+  </section>
+</main>
+
+<nav class="tabbar glass" id="tabbar" aria-label="底部导航">
+  <button data-tab="overview" class="on" type="button"><i class="ti ti-ov"></i>总览</button>
+  <button data-tab="feed" type="button"><i class="ti ti-feed"></i>消息</button>
+  <button data-tab="agents" type="button"><i class="ti ti-ag"></i>Agent</button>
+  <button data-tab="kb" type="button"><i class="ti ti-kb"></i>知识</button>
+  <button data-tab="server" type="button"><i class="ti ti-srv"></i>健康</button>
+</nav>
+
+<div id="scrim" class="scrim" hidden></div>
+<aside id="drawer" class="drawer glass" aria-hidden="true" aria-label="详情" tabindex="-1"></aside>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="v2/app.js?v=2.0.0" defer></script>
 </body>
 </html>
