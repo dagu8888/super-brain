@@ -296,8 +296,57 @@ def test_http_sse_rollcall():
     return mid, lats
 
 
+
+
+def test_poll_targeted_not_starved_by_old_broadcasts():
+    """复现 2026-11-11：since=0 时全表最旧 200 条里都是别人的消息和旧广播 ping，
+    定向给 Muse 的新消息排在 200 条之后，旧实现永远推不到桥。"""
+    d, conn = fresh()
+    message_bus.ensure_schema(conn)
+    conn.execute(
+        "INSERT OR IGNORE INTO registry(name,kind,location,agent_ref,status,registered_at) "
+        "VALUES('Muse@本机','instance','sandbox','muse-chief','active',?)", (1,))
+    # 两条旧广播 ping（可见）+ 250 条发给别人的消息（不可见）+ 一条新的定向任务
+    conn.execute(
+        'INSERT INTO messages(msg_id,from_agent,from_instance,"to",kind,text,reply_to,thread_id,created_at) '
+        "VALUES('ping_old','grok-chief','幕僚长@云端','all','ping','所有在线回复 1',NULL,'ping_old',100)")
+    conn.execute(
+        'INSERT INTO messages(msg_id,from_agent,from_instance,"to",kind,text,reply_to,thread_id,created_at) '
+        "VALUES('ping_old2','grok-chief','幕僚长@云端','all','ping','再点一次',NULL,'ping_old2',101)")
+    rows = []
+    for i in range(250):
+        mid = "other_%03d" % i
+        rows.append((mid, "dsh-chief", "DSH一号@主机", "dsh2-chief", "chat", "别人的话 %d" % i,
+                     None, mid, 200 + i))
+    conn.executemany(
+        'INSERT INTO messages(msg_id,from_agent,from_instance,"to",kind,text,reply_to,thread_id,created_at) '
+        "VALUES(?,?,?,?,?,?,?,?,?)", rows)
+    conn.execute(
+        'INSERT INTO messages(msg_id,from_agent,from_instance,"to",kind,text,reply_to,thread_id,created_at) '
+        "VALUES('msg_target','grok-chief','幕僚长@云端','muse-chief','chat',"
+        "'【自审计交付】请初审并回执',NULL,'msg_target',900)")
+    conn.commit()
+    got = message_bus.poll_for_connection(conn, 0, "muse-chief", "Muse@本机")
+    ids = [m["msg_id"] for m in got]
+    check("定向新消息出现在第一轮（未被旧广播饿死）", "msg_target" in ids, ids[:8] + ["..."] + ids[-3:])
+    check("旧广播 ping 仍然可见", "ping_old" in ids and "ping_old2" in ids, ids[:5])
+    check("别人的定向消息不可见", all(not i.startswith("other_") for i in ids), len(ids))
+    check("第一轮条数=2 条广播+1 条定向", len(ids) == 3, len(ids))
+    # 自己发出的广播不应出现
+    conn.execute(
+        'INSERT INTO messages(msg_id,from_agent,from_instance,"to",kind,text,reply_to,thread_id,created_at) '
+        "VALUES('self_all','muse-chief','Muse@本机','all','ping','我发的广播',NULL,'self_all',50)")
+    conn.commit()
+    got2 = message_bus.poll_for_connection(conn, 0, "muse-chief", "Muse@本机")
+    ids2 = [m["msg_id"] for m in got2]
+    check("不回推自己发出的广播", "self_all" not in ids2, ids2[:5])
+    conn.close()
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     test_schema_and_cmds()
+    test_poll_targeted_not_starved_by_old_broadcasts()
     test_http_sse_rollcall()
     print("\n== %s 项失败 ==" % len(FAILS) if FAILS else "\n== 全部通过 ==")
     return 1 if FAILS else 0

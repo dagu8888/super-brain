@@ -7,10 +7,10 @@
   const T = window.THREE;
   if (!T) return;
   const HUB = "__hub__";
-  const C = { hub: 0xf5c451, chief: 0xff5fa2, worker: 0x3ee6c1, off: 0x5a6880, cyan: 0x4cc9ff, red: 0xff4d5e, white: 0xffffff };
+  const C = { hub: 0xf5c451, chief: 0xff5fa2, worker: 0x3ee6c1, off: 0x5a6880, cyan: 0x4cc9ff, red: 0xff4d5e, white: 0xffffff, amber: 0xffb547 };
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const big = (n) => (n >= 10000 ? (n / 10000).toFixed(n >= 100000 ? 1 : 2) + "万" : String(n));
-  const LIVE = { working: "执行中", idle: "在线", offline: "离线", unused: "未接入", disabled: "已暂停" };
+  const LIVE = { working: "执行中", idle: "在线", degraded: "在场但回执失败", offline: "离线", unused: "未接入", disabled: "已暂停" };
 
   let GLOW = null;
   function glowTex() {
@@ -141,8 +141,8 @@
       place(chiefs, 9, 0, -Math.PI / 2);
       place(workers, 15, -1.5, -Math.PI / 2 + Math.PI / Math.max(1, workers.length));
       list.forEach((n) => {
-        const on = n.live === "idle" || n.live === "working";
-        const base = n.kind === "chief" ? C.chief : C.worker;
+        const on = n.live === "idle" || n.live === "working" || n.live === "degraded";
+        const base = n.live === "degraded" ? C.amber : (n.kind === "chief" ? C.chief : C.worker);
         const col = on ? base : C.off;
         const r = clamp((n.kind === "chief" ? 0.55 : 0.4) + 0.11 * Math.log2(1 + (n.weight || 0)), 0.4, n.kind === "chief" ? 1.25 : 0.95);
         const grp = new T.Group(); grp.position.copy(n._p);

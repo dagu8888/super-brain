@@ -1,7 +1,8 @@
 /* Super-Brain 协作中枢 v2（查看免口令；写操作：每台设备每天第一次输入口令）
    数据源：/api/dashboard（KPI/异常/点名/消息）、/api/server（服务器健康）、/api/relations、
           /api/agents/{id}、/api/messages?agent=、/api/tasks/{id}、/api/knowledge、/api/stream（SSE）。
-   纪律：在线只认心跳/在场信号；“执行中”只认任务租约；粒子只在真实消息/事件到达时出现；
+   纪律：健康在线 = 5 分钟内心跳且近期消息有回执；心跳在但超过约 60 秒无回执 = 降级（在场但回执失败），
+        不计入「在线 Agent」。执行中只认任务租约；粒子只在真实消息/事件到达时出现；
         数字只在两次真实取数之间过渡，不编数据。不需要口令，也不保存任何口令。 */
 "use strict";
 (function () {
@@ -15,7 +16,7 @@
     "trae-developer": "开发", "test-agent-worker": "测试",
   };
   const CHIEF_NAME = { "grok-chief": "幕僚长", "deepseek-chief": "DeepSeek", "muse-chief": "Muse", "trae-chief": "Trae" };
-  const LIVE = { working: "执行中", idle: "在线", offline: "离线", unused: "未接入", disabled: "已暂停" };
+  const LIVE = { working: "执行中", idle: "在线", degraded: "在场但回执失败", offline: "离线", unused: "未接入", disabled: "已暂停" };
   const OWNER = "dagu-owner";
   const CHAT_PEER = "grok-chief";
   const TASK = { pending: "待办", doing: "执行中", done: "已完成", failed: "失败", dead: "死信", cancelled: "已取消" };
@@ -112,6 +113,7 @@
       case "offline": return { k: "offline", cls: "offline", text: st.since ? "离线 " + span(t - st.since) : "离线" };
       case "busy": return { k: "busy", cls: "busy", text: "忙碌", work: st.work, src: st.work_source, since: st.since };
       case "idle": return { k: "idle", cls: "idle", text: st.idle_since ? "空闲 " + span(t - st.idle_since) : "空闲" };
+      case "degraded": return { k: "degraded", cls: "degraded", text: "在场但回执失败" };
       default: { const lv = liveOf(a); return { k: lv, cls: lv, text: LIVE[lv] }; }
     }
   }
@@ -308,7 +310,7 @@
     const d = S.dash; if (!d) return;
     const k = d.kpi, an = k.anomalies, rc = d.last_rollcall, sv = S.server;
     const act = d.agents.filter((a) => a.status === "active");
-    const seg = act.map((a) => `<span class="${a.live_status === "idle" || a.live_status === "working" ? "on-" + a.kind : ""}" title="${esc(a._label)} · ${LIVE[liveOf(a)]}"></span>`).join("");
+    const seg = act.map((a) => `<span class="${a.live_status === "degraded" ? "on-degraded" : (a.live_status === "idle" || a.live_status === "working" ? "on-" + a.kind : "")}" title="${esc(a._label)} · ${LIVE[liveOf(a)] || a.live_status}"></span>`).join("");
     const hours = d.messages.hourly_24h || [];
     const mx = Math.max(1, ...hours);
     const spark = hours.map((h, i) => `<span class="${i === hours.length - 1 ? "now" : ""}" style="height:${Math.max(4, (h / mx) * 100)}%" title="${h} 条"></span>`).join("");
@@ -331,9 +333,9 @@
     const stale = act.filter((a) => a.anomalies.stale > 0).map((a) => a._label).join("、");
     const html = `
       <button class="kpi" style="--accent:var(--ok)" data-go="agents" type="button">
-        <div class="k-label">在线 Agent <span class="tag">心跳已证实</span></div>
+        <div class="k-label">在线 Agent <span class="tag">链路通</span></div>
         <div class="k-val"><span data-k="on">${k.agents_online}</span><small>/ ${k.agents_total}</small></div>
-        <div class="k-sub">指挥入口 <b>${k.chiefs_online}/${k.chiefs_total}</b> · 执行中 <b>${k.agents_working}</b>（按任务租约）</div>
+        <div class="k-sub">指挥入口 <b>${k.chiefs_online}/${k.chiefs_total}</b> · 执行中 <b>${k.agents_working}</b>${k.agents_degraded ? ` · 降级 <b style="color:var(--amber)">${k.agents_degraded}</b>（在场但回执失败）` : ""}</div>
         <div class="segbar">${seg}</div></button>
       <button class="kpi" style="--accent:var(--cyan)" data-go="feed" type="button">
         <div class="k-label">消息 · 近 1 小时</div>
@@ -383,7 +385,7 @@
   }
 
   /* ---------- Agent 矩阵 ---------- */
-  const dotColor = (a) => (liveOf(a) === "idle" || liveOf(a) === "working" ? (a.kind === "chief" ? "var(--chief)" : "var(--worker)") : "var(--gray)");
+  const dotColor = (a) => (liveOf(a) === "degraded" ? "var(--amber)" : (liveOf(a) === "idle" || liveOf(a) === "working" ? (a.kind === "chief" ? "var(--chief)" : "var(--worker)") : "var(--gray)"));
   function anChips(an) {
     const recent = an.recent_failed || an.dead || 0;
     const arch = an.archive_dead || (an.archive && an.archive.dead) || 0;
@@ -473,6 +475,7 @@
       <div class="lg"><span class="dot" style="background:var(--gold);box-shadow:0 0 8px var(--gold)"></span>中台 / 选中</div>
       <div class="lg"><span class="dot" style="background:var(--chief)"></span>指挥入口（chief）</div>
       <div class="lg"><span class="dot" style="background:var(--worker)"></span>执行者（worker）</div>
+      <div class="lg"><span class="dot" style="background:var(--amber);box-shadow:0 0 8px var(--amber)"></span>在场但回执失败（心跳在，回执没到）</div>
       <div class="lg"><span class="dot" style="background:var(--gray)"></span>离线 / 未接入（暗、无光晕）</div>
       <div class="lg"><span class="ln" style="background:var(--gold)"></span>粗金线：24h 消息往来</div>
       <div class="lg"><span class="ln" style="background:var(--cyan);height:1px"></span>细青线：任务委派 / 无消息</div>
@@ -480,7 +483,7 @@
       <div class="lg"><span class="dot" style="background:var(--red)"></span>右上红角标：异常数</div>
       <div class="lg"><span class="dot" style="background:var(--red);box-shadow:0 0 0 2px #fff inset"></span>左上红点+数字：待审批/等协助</div>
       <div class="lg"><span class="dot" style="background:transparent;border:1px dashed var(--gold)"></span>金色虚环：忙碌（自报/租约）</div>
-      <div class="lt">中台是恒星，Agent 是行星。节点大小 = 24h 消息 + 任务量；亮度 = 在线（5 分钟内心跳）；标签 = 名称 · 状态 · 在做什么。没有消息时画面静止，不做假动态。</div>`;
+      <div class="lt">中台是恒星，Agent 是行星。节点大小 = 24h 消息 + 任务量；亮度 = 健康在线（心跳且回执通）；琥珀色 = 在场但回执失败；标签 = 名称 · 状态 · 在做什么。没有消息时画面静止，不做假动态。</div>`;
   }
 
   /* ---------- 视图：3D（桌面）/ 平面（手机、低端、减少动效） ---------- */
@@ -538,7 +541,7 @@
       box.appendChild(cv);
       const ctx = cv.getContext("2d");
       let W = 0, H = 0, dpr = 1, nodes = [], pos = {}, sel = null, parts = [], raf = 0, flash = {};
-      const COL = { hub: "#f5c451", chief: "#ff5fa2", worker: "#3ee6c1", off: "#6b7a90" };
+      const COL = { hub: "#f5c451", chief: "#ff5fa2", worker: "#3ee6c1", off: "#6b7a90", degraded: "#ffb547" };
       function layout() {
         const r = box.getBoundingClientRect();
         dpr = Math.min(2, window.devicePixelRatio || 1); W = r.width; H = r.height;
@@ -550,7 +553,7 @@
         workers.forEach((n, i) => { const a = -Math.PI / 2 + ((i + 0.5) / workers.length) * Math.PI * 2; pos[n.id] = { x: cx + R2 * Math.cos(a), y: cy + R2 * 0.8 * Math.sin(a) }; });
         draw();
       }
-      const isOn = (n) => n.kind === "hub" || n.live === "idle" || n.live === "working";
+      const isOn = (n) => n.kind === "hub" || n.live === "idle" || n.live === "working" || n.live === "degraded";
       const rad = (n) => (n.kind === "hub" ? 18 : (n.kind === "chief" ? 8 : 6) + Math.min(6, Math.log2(1 + (n.weight || 0))));
       function draw(t) {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -567,7 +570,7 @@
         ctx.globalAlpha = 1;
         nodes.forEach((n) => {
           const p = pos[n.id]; if (!p) return;
-          const c = n.kind === "hub" ? COL.hub : isOn(n) ? COL[n.kind] : COL.off;
+          const c = n.kind === "hub" ? COL.hub : n.live === "degraded" ? (COL.degraded || COL.amber || "#e6a23c") : isOn(n) ? COL[n.kind] : COL.off;
           const r = rad(n);
           if (isOn(n)) { const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 3); g.addColorStop(0, c + "66"); g.addColorStop(1, c + "00"); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, r * 3, 0, 7); ctx.fill(); }
           const fl = flash[n.id]; if (fl && t && t - fl < 900) { ctx.strokeStyle = "rgba(255,255,255," + (1 - (t - fl) / 900) + ")"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x, p.y, r + 4 + (t - fl) / 60, 0, 7); ctx.stroke(); }
@@ -648,7 +651,7 @@
   function openHub() {
     const d = S.dash, k = d.kpi;
     openDrawer(head("中台 · 消息总线", "所有 Agent 经中台收发；香港服务器 super-brain.service", "var(--gold)") + `<div class="dr-body">
-      <div class="stats4"><div><b>${k.msgs_1h}</b><span>近 1 小时消息</span></div><div><b>${k.msgs_24h}</b><span>近 24 小时消息</span></div><div><b>${k.events_1h}</b><span>近 1 小时事件</span></div><div><b>${k.agents_online}/${k.agents_total}</b><span>在线 Agent</span></div></div>
+      <div class="stats4"><div><b>${k.msgs_1h}</b><span>近 1 小时消息</span></div><div><b>${k.msgs_24h}</b><span>近 24 小时消息</span></div><div><b>${k.events_1h}</b><span>近 1 小时事件</span></div><div><b>${k.agents_online}/${k.agents_total}</b><span>在线 Agent</span></div>${k.agents_degraded ? `<div><b style="color:var(--amber)">${k.agents_degraded}</b><span>在场但回执失败</span></div>` : ""}</div>
       <div><h4>任务队列</h4><div class="an">${Object.entries(k.queue).map(([s, n]) => `<span class="${s === "failed" ? "hot" : ""}">${s === "dead" ? "历史死信" : (TASK[s] || s)} ${big(n)}</span>`).join("")}</div></div>
       <div><h4>24 小时消息连线</h4><div class="list">${(d.messages.links_24h || []).map((l) => `<div class="li"><div class="li-top"><span class="who ${whoCls(l.from)}">${esc(agentName(l.from))}</span><span class="arrow">→</span><span class="who">${esc(agentName(toAgent(l.to) || l.to))}</span><span style="margin-left:auto">${l.count_24h} 条 · 最近 ${ago(l.last_at)}</span></div></div>`).join("") || '<div class="note">24 小时内无消息</div>'}</div></div>
       <div class="note">异常口径（红角标）：未认领=点名该 Agent、pending 超过 ${d.rules.unclaimed_seconds / 60} 分钟无人领；最近失败=近 ${(d.rules.recent_fail_seconds || 86400) / 3600} 小时内 failed/新死信。历史归档死信不计入角标（记录保留）。心跳过期=曾接入但超过 ${d.rules.offline_seconds / 60} 分钟无在场信号，单独展示、不进红角标。待审批是独立红点。</div></div>`);
@@ -656,8 +659,9 @@
   async function openAgent(id) {
     const a = S.agentById[id]; if (!a) return;
     const lv = liveOf(a);
-    const dot = lv === "idle" || lv === "working" ? (a.kind === "chief" ? "var(--chief)" : "var(--worker)") : "var(--gray)";
-    const inst = (a.instances || []).map((i) => `<div class="li"><div class="li-top"><b style="color:var(--ink)">${esc(i.name)}</b><span>${esc(i.location || "")}</span><span class="st ${i.online ? "idle" : "offline"}">${i.online ? "心跳正常" : "心跳过期"}</span></div><div class="note">最近心跳 ${i.heartbeat_at ? dtm(i.heartbeat_at) + "（" + ago(i.heartbeat_at) + "）" : "从未"} · 通道 ${esc(i.note || "—")}</div></div>`).join("");
+    const dot = lv === "degraded" ? "var(--amber)" : (lv === "idle" || lv === "working" ? (a.kind === "chief" ? "var(--chief)" : "var(--worker)") : "var(--gray)");
+    const instSt = (i) => i.degraded || i.link_status === "degraded" ? { cls: "degraded", text: "在场但回执失败" } : i.online ? { cls: "idle", text: "心跳正常" } : { cls: "offline", text: "心跳过期" };
+    const inst = (a.instances || []).map((i) => { const s = instSt(i); return `<div class="li"><div class="li-top"><b style="color:var(--ink)">${esc(i.name)}</b><span>${esc(i.location || "")}</span><span class="st ${s.cls}">${s.text}</span></div><div class="note">最近心跳 ${i.heartbeat_at ? dtm(i.heartbeat_at) + "（" + ago(i.heartbeat_at) + "）" : "从未"} · 通道 ${esc(i.note || "—")}</div></div>`; }).join("");
     const opBind = () => { $$("#drawer [data-op]").forEach((b) => { b.onclick = () => onAgentOp(b, id); }); };
     const so = stateOf(a), npa = (a.pending_approvals || 0) + (a.pending_assists || 0);
     openDrawer(head(esc(a._label), `${esc(a.agent_id)} · ${a.kind === "chief" ? "指挥入口" : "执行者"} · <span class="st ${so.cls}">${esc(so.text)}</span>`, dot) + `<div class="dr-body">
@@ -669,7 +673,7 @@
       ${inst ? `<div><h4>实例与心跳</h4><div class="list">${inst}</div></div>` : ""}
       <div><h4>最近消息</h4><div class="list" id="dr-msgs"><div class="note"><span class="spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle"></span> 读取中</div></div></div>
       <div><h4>任务轨迹</h4><div class="list" id="dr-tasks"><div class="note">读取中</div></div></div>
-      <div class="note">“在线”只认 5 分钟内心跳 / 在场信号；“忙碌”只认 Agent 自报（/cmd work）或任务租约，心跳不算在干活。离线时长按最近在场计算，空闲时长按最近一次发消息/交任务计算。</div></div>`);
+      <div class="note">“在线”= 5 分钟内心跳且近期消息有回执；心跳在但超过约 60 秒无回执，显示为「在场但回执失败」，不计入在线人数。“忙碌”只认 Agent 自报（/cmd work）或任务租约。离线时长按最近在场计算，空闲时长按最近一次发消息/交任务计算。</div></div>`);
     opBind();
     if (npa) renderAgentApprovals(id);
     const [m, t] = await Promise.allSettled([api(`/api/messages?agent=${encodeURIComponent(id)}&limit=30`), api(`/api/agents/${encodeURIComponent(id)}`)]);
