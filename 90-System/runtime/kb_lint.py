@@ -111,7 +111,10 @@ def run(consolidate=False, notify=True, dry=False):
     rpath = rdir / f"{today}-知识库周体检.md"
     drafts = []
     if consolidate and dups:
-        drafts = consolidation_drafts(dups[:5], st_dir, dry)
+        lay = {p["rel"]: p["layer"] for p in pages}
+        # 只为涉及编译层的重复对出合并草稿；原料层之间的相似（如同类任务回执）只进报告，不生成草稿
+        cdups = [d for d in dups if "编译层" in (lay.get(d[1]), lay.get(d[2]))]
+        drafts = consolidation_drafts(cdups[:5], st_dir, dry)
     if not dry:
         rdir.mkdir(parents=True, exist_ok=True)
         rpath.write_text(report, encoding="utf-8")
