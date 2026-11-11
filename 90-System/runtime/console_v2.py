@@ -12,9 +12,11 @@
 # 口径（与手册第 5 章一致，不冒充）：
 #   在线 = 5 分钟内有心跳 / last_seen / 名册实例心跳（同 console_api._annotate_agent）；
 #   执行中 = 只认 tasks.status='doing' 且 lease_owner=该 Agent，心跳不算执行；
-#   死信 = 点名该 Agent（payload.to_agent / payload.to → 名册折回）的 dead 任务数；
+#   当前异常（红角标 total）= 未认领 + 近 24h 失败/新死信；不含历史 status=dead。
 #   未认领 = 点名该 Agent、pending、无人领取且超过 10 分钟的任务数；
-#   心跳过期 = 该 Agent 曾接入过、但现在超过 5 分钟没有任何在场信号（实例逐个计）。
+#   最近失败 = 点名该 Agent、status 为 failed 或 dead、且 COALESCE(done_at,created_at) 在 24h 内；
+#   历史归档死信 = 全部 status=dead 的存量（含 2026-11-09 告警风暴），默认不进红角标；
+#   心跳过期 = 该 Agent 曾接入过、但现在超过 5 分钟没有任何在场信号（实例逐个计），单独展示，不进红角标。
 import glob
 import os
 import shutil
@@ -30,7 +32,8 @@ import owner_ops
 
 OFFLINE_SECONDS = console_api.OFFLINE_SECONDS
 UNCLAIMED_SECONDS = 600
-DEAD_CACHE_SECONDS = 300           # 死信是历史存量（十几万行），5 分钟算一次
+RECENT_FAIL_SECONDS = 24 * 3600    # 角标只计近 24 小时的失败/新死信
+DEAD_CACHE_SECONDS = 300           # 历史死信是存量（十几万行），5 分钟算一次
 SERVER_CACHE_SECONDS = 30
 CERT_CACHE_SECONDS = 3600
 CERT_GLOB = os.environ.get(
@@ -77,24 +80,46 @@ def _fold(name, inst_map, agent_ids):
     return ref or None
 
 
-def _dead_by_agent(conn, inst_map, agent_ids):
+def _group_targets(rows, inst_map, agent_ids):
+    out, unassigned, total = {}, 0, 0
+    for tgt, n in rows:
+        total += n
+        aid = _fold(tgt, inst_map, agent_ids)
+        if aid:
+            out[aid] = out.get(aid, 0) + n
+        else:
+            unassigned += n
+    return {"by_agent": out, "unassigned": unassigned, "total": total}
+
+
+def _dead_archive_by_agent(conn, inst_map, agent_ids):
+    """全部历史死信（含告警风暴存量），只供归档计数，不进红角标。"""
     def calc():
-        out, unassigned, total = {}, 0, 0
         try:
             rows = conn.execute(
                 f"SELECT {_target_sql()} AS tgt, COUNT(*) FROM tasks WHERE status='dead' GROUP BY tgt"
             ).fetchall()
         except Exception:
             rows = []
-        for tgt, n in rows:
-            total += n
-            aid = _fold(tgt, inst_map, agent_ids)
-            if aid:
-                out[aid] = out.get(aid, 0) + n
-            else:
-                unassigned += n
-        return {"by_agent": out, "unassigned": unassigned, "total": total}
-    return _cached("dead", DEAD_CACHE_SECONDS, calc)
+        return _group_targets(rows, inst_map, agent_ids)
+    return _cached("dead_archive", DEAD_CACHE_SECONDS, calc)
+
+
+def _recent_failed_by_agent(conn, inst_map, agent_ids, now):
+    """近 24 小时的 failed + dead，属于当前可处理项。"""
+    try:
+        rows = conn.execute(
+            f"SELECT {_target_sql()} AS tgt, COUNT(*) FROM tasks "
+            "WHERE status IN ('failed','dead') AND COALESCE(done_at, created_at)>=? GROUP BY tgt",
+            (now - RECENT_FAIL_SECONDS,)).fetchall()
+    except Exception:
+        rows = []
+    return _group_targets(rows, inst_map, agent_ids)
+
+
+# 兼容旧测试/调用名：历史归档
+def _dead_by_agent(conn, inst_map, agent_ids):
+    return _dead_archive_by_agent(conn, inst_map, agent_ids)
 
 
 def _unclaimed_by_agent(conn, inst_map, agent_ids, now):
@@ -235,7 +260,8 @@ def dashboard(conn, now=None):
     agents = _agents(conn, now)
     ids = {a["agent_id"] for a in agents}
     inst_map = _instance_map(conn)
-    dead = _dead_by_agent(conn, inst_map, ids)
+    archive = _dead_archive_by_agent(conn, inst_map, ids)
+    recent = _recent_failed_by_agent(conn, inst_map, ids, now)
     unclaimed = _unclaimed_by_agent(conn, inst_map, ids, now)
     active = [a for a in agents if a.get("status") == "active"]
     import current_work
@@ -251,10 +277,14 @@ def dashboard(conn, now=None):
     for a in agents:
         st = _stale(a, now)
         stale_total += st
-        an = {"dead": dead["by_agent"].get(a["agent_id"], 0),
-              "unclaimed": unclaimed["by_agent"].get(a["agent_id"], 0),
-              "stale": st}
-        an["total"] = an["dead"] + an["unclaimed"] + an["stale"]
+        recent_n = recent["by_agent"].get(a["agent_id"], 0)
+        unclaimed_n = unclaimed["by_agent"].get(a["agent_id"], 0)
+        an = {"dead": recent_n,  # 仅近 24h，避免历史风暴顶满角标
+              "unclaimed": unclaimed_n,
+              "stale": st,
+              "recent_failed": recent_n,
+              "archive_dead": archive["by_agent"].get(a["agent_id"], 0)}
+        an["total"] = an["unclaimed"] + an["recent_failed"]
         w = works.get(a["agent_id"])
         ap = appr_by.get(a["agent_id"], {})
         live = a["live_status"]
@@ -321,11 +351,16 @@ def dashboard(conn, now=None):
             "events_1h": ev(now - 3600),
             "events_24h": ev(now - 86400),
             "anomalies": {
-                "dead": dead["total"],
-                "dead_unassigned": dead["unassigned"],
+                "dead": recent["total"],
+                "dead_unassigned": recent["unassigned"],
                 "unclaimed": unclaimed["total"],
                 "stale": stale_total,
-                "total": dead["total"] + unclaimed["total"] + stale_total,
+                "recent_failed": recent["total"],
+                "total": unclaimed["total"] + recent["total"],
+                "archive": {
+                    "dead": archive["total"],
+                    "dead_unassigned": archive["unassigned"],
+                },
             },
             "queue": queue,
             "approvals_pending": appr_pending,
@@ -339,6 +374,7 @@ def dashboard(conn, now=None):
             "offline_seconds": OFFLINE_SECONDS,
             "unclaimed_seconds": UNCLAIMED_SECONDS,
             "dead_cache_seconds": DEAD_CACHE_SECONDS,
+            "recent_fail_seconds": RECENT_FAIL_SECONDS,
         },
     }
 
