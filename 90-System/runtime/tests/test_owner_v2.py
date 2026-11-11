@@ -389,6 +389,16 @@ def test_http():
         c, b = _req(port, "/api/audit")
         aud = json.dumps(b, ensure_ascii=False)
         check("审计含 unlock 且不含口令原文", "unlock" in aud and PHRASE_A not in aud and PHRASE_B not in aud)
+        c, b, h = _req(port, "/api/owner/pair", "POST",
+                       json.dumps({"code": "  " + PHRASE_A + "  ", "device_name": "旧配对框"}).encode(), J, with_headers=True)
+        check("旧配对框输入当日口令也可解锁", c == 200 and b.get("ok") and b.get("token") and b.get("expires_at"), c)
+        pair_tok = b.get("token")
+        c, b = _req(port, "/api/owner/act", "POST",
+                    json.dumps({"action": "msg", "args": {"to": "grok-chief", "text": "旧框口令自测，可忽略"}}).encode(),
+                    dict(J, Authorization="Bearer " + pair_tok))
+        check("旧框解锁令牌可发消息", c == 200 and b.get("ok"), c)
+        c, b = _req(port, "/api/owner/pair", "POST", json.dumps({"code": "错的口令", "device_name": "旧配对框"}).encode(), J)
+        check("旧配对框错口令仍拒绝", c in (400, 401) and not b.get("token"), c)
         # 先成功一次，清掉服务端子进程里的失败计数，再连续错 10 次
         c, _b = _req(port, "/api/owner/unlock", "POST", json.dumps({"phrase": PHRASE_A, "device_name": "限速前清零"}).encode(), J)
         check("限速测试前成功解锁", c == 200, c)
