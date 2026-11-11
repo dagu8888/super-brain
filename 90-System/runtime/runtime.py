@@ -20,6 +20,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from migrate_v2 import migrate, CANONICAL_USER, CHIEF_CAPS as CHIEF_CAPS_DEFAULT  # noqa: E402
 from path_guard import PathGuard, PermissionDenied      # noqa: E402
 import message_bus                                      # noqa: E402
+import kb_engine                                        # noqa: E402  2026-11-11 检索引擎/遮蔽
+import kb_intake                                        # noqa: E402  2026-11-11 入库闸门
+import presence_notify                                  # noqa: E402  2026-11-11 在线状态提示
 
 try:
     import yaml
@@ -595,42 +598,16 @@ def chief_execute(conn, chief_id, cmd, args):
 
     # ---- 知识库只读指令（2026-11-09 任务包 T4）：不写库、不触发任务、不经 router/模型层 ----
     if cmd == "kb_search":
-        kw = str(args.get("q") or args.get("text") or args.get("keyword") or "").strip()
-        if not kw:
-            return {"ok": False, "error": "空关键词（q/text/keyword 任选其一）"}
-        try:
-            limit = max(1, min(int(args.get("limit", 10)), 20))
-        except (TypeError, ValueError):
-            limit = 10
-        hits, kwl = [], kw.lower()
-        skip_dirs = {".git", "__pycache__", "node_modules", "incoming"}
-        exts = {".md", ".txt", ".yaml", ".yml", ".py", ".js", ".json"}
-        for dirpath, dirnames, filenames in os.walk(ROOT):
-            dirnames[:] = [d for d in dirnames if d not in skip_dirs]
-            for fn in filenames:
-                if len(hits) >= limit:
-                    break
-                if _is_sensitive(fn):        # 凭据/密钥文件不参与检索（2026-11-09 止血包）
-                    continue
-                if Path(fn).suffix.lower() not in exts:
-                    continue
-                fp = Path(dirpath) / fn
-                try:
-                    if fp.stat().st_size > 2 * 1024 * 1024:
-                        continue
-                    text = fp.read_text(encoding="utf-8", errors="replace")
-                except Exception:
-                    continue
-                pos = text.lower().find(kwl)
-                if pos < 0:
-                    continue
-                start = max(0, pos - 60)
-                snippet = re.sub(r"\s+", " ", text[start:pos + 120]).strip()
-                hits.append({"path": str(fp.relative_to(ROOT)),
-                             "snippet": ("…" if start else "") + snippet + "…"})
-            if len(hits) >= limit:
-                break
-        return {"ok": True, "q": kw, "count": len(hits), "hits": hits}
+        # 2026-11-11 第二阶段：只检索 git 跟踪的 .md；引擎 legacy/hybrid/shadow 由 kb_config.json 切换；输出过凭据遮蔽
+        return kb_engine.kb_search(args, log=log_event)
+
+    # ---- 入库闸门（2026-11-11）：草稿清单 / 审批入编译层 / 丢弃草稿 ----
+    if cmd == "kb_staging":
+        return {"ok": True, "drafts": kb_intake.list_staging()}
+    if cmd == "kb_promote":
+        return kb_intake.promote(conn, chief_id, args)
+    if cmd == "kb_reject":
+        return kb_intake.reject(conn, chief_id, args)
 
     if cmd == "kb_read":
         rel = str(args.get("path", "")).strip()
@@ -642,6 +619,9 @@ def chief_execute(conn, chief_id, cmd, args):
             return {"ok": False, "error": f"越界路径当场拒绝：{rel}（只允许仓库根目录内）"}
         if _is_sensitive(fp.name):
             return {"ok": False, "error": "敏感文件拒绝读取（凭据/密钥类不参与知识库检索）"}
+        rel_posix = fp.relative_to(root_real).as_posix()
+        if rel_posix.startswith(tuple(kb_engine.section("search").get("read_deny_prefixes") or ())):
+            return {"ok": False, "error": "私密区不对 Agent 开放（kb_config.search.read_deny_prefixes）"}
         if not fp.is_file():
             return {"ok": False, "error": f"文件不存在：{rel}"}
         try:
@@ -653,7 +633,7 @@ def chief_execute(conn, chief_id, cmd, args):
         return {"ok": True, "path": str(fp.relative_to(root_real)), "chars": len(text),
                 "truncated": truncated,
                 "note": "正文过长已截断，可用 max_chars 调窗（上限 8000）" if truncated else "完整正文",
-                "content": text[:max_chars]}
+                "content": kb_engine.redact(text[:max_chars])}
 
     # ---- 节点心跳（任务包 T6）：沿用现有 heartbeats 机制，不新造协议 ----
     # ---- 口令包：Agent 只能凭大古签发的限时限次票据取值，不能列出或直接读 ----
@@ -851,13 +831,12 @@ def cron_adapter(conn):
 
 
 def watchdog_adapter(conn):
-    """Worker 心跳 >15min 未更新 → heartbeat_lost 事件（每小时去重）。"""
-    dead_line = int(time.time()) - 15 * 60
-    for agent, ts in conn.execute("SELECT agent,ts FROM heartbeats WHERE ts<?", (dead_line,)):
-        if agent in ("router", "supervisor"):
-            continue
-        emit_event(conn, "watchdog", "heartbeat_lost", {"agent": agent, "last_ts": ts},
-                   priority=1, dedupe_key=f"wd:{agent}:{time.strftime('%Y%m%d%H')}")
+    """2026-11-11 起：不再每小时发 heartbeat_lost 事件（会被路由成对话页写进 60-Outputs，停几天就几万条）。
+    改为在线⇄离线翻转时给大古推一条提示（限频、去重），见 presence_notify.py / kb_config.json presence。"""
+    try:
+        presence_notify.check(conn)
+    except Exception as e:
+        log_event("presence_error", error=str(e)[:200])
 
 
 # ---------- Router ----------
@@ -1324,6 +1303,8 @@ def handle_inbox_triage(payload, ctx):
         log_event("triage_json_failed", path=path_rel, chars=len(raw or ""), error=str(e)[:120])
         raise RetryableError(f"模型输出 JSON 不完整：{e}")
     info["category"] = info.get("category") if info.get("category") in CATEGORIES else "Concepts"
+    if kb_intake.gate_on():
+        return _triage_to_staging(info, src, path_rel, ctx)
     title = re.sub(r'[\\/:*?"<>|\s]+', "-", (info.get("title") or src.stem).strip())[:60].strip("-") or src.stem
     # 同源幂等：已归档过同 source → 更新 version 而非新建
     for old in KNOWLEDGE.rglob("*.md"):
@@ -1351,6 +1332,45 @@ def handle_inbox_triage(payload, ctx):
     src.unlink(missing_ok=True)
     ctx.progress(f"归档至 {dest.relative_to(ROOT)}", 100)
     return f"已整理 → {dest.relative_to(ROOT)}（{info.get('summary', '')}）"
+
+
+def _triage_to_staging(info, src, path_rel, ctx):
+    """入库闸门：整理结果只落暂存区草稿 + 推一条待审提示；同源已有编译页 → 草稿标 supersedes，审批后才覆盖。"""
+    title = re.sub(r'[\\/:*?"<>|\s]+', "-", (info.get("title") or src.stem).strip())[:60].strip("-") or src.stem
+    sroot = kb_intake.staging_root()
+    ver, supersedes, dest = 1, "", None
+    for old in list(KNOWLEDGE.rglob("*.md")):
+        try:
+            head = old.read_text(encoding="utf-8", errors="replace")[:600]
+        except Exception:
+            continue
+        if f"source: {path_rel}" in head:
+            mv = re.search(r"version: (\d+)", head)
+            ver = int(mv.group(1)) + 1 if mv else 2
+            if sroot in old.parents:
+                dest = old                                   # 已有草稿 → 原地更新草稿
+            else:
+                supersedes = str(old.relative_to(ROOT))
+            break
+    if dest is None:
+        dest, i = sroot / info["category"] / f"{title}.md", 1
+        while dest.exists():
+            i += 1
+            dest = sroot / info["category"] / f"{title}-{i}.md"
+    fm = _frontmatter(info, path_rel, ver).replace("quality: auto-triaged\n",
+          "quality: auto-triaged\nstatus: 草稿\nlayer: 暂存区\n" + (f"supersedes: {supersedes}\n" if supersedes else ""))
+    body = (fm + f"# {info.get('title', title)}\n\n"
+            f"> {info.get('summary', '')}\n> 来源：{path_rel} ｜ {time.strftime('%Y-%m-%d')} knowledge-worker 自动整理（待审草稿 v{ver}）\n\n"
+            f"{info.get('content', '').strip()}\n")
+    ctx.guard.write_text(dest, body)
+    src.unlink(missing_ok=True)
+    rel = str(dest.relative_to(ROOT))
+    try:
+        kb_intake.notify_draft(ctx.conn, rel, info.get("title", title), info.get("summary", ""))
+    except Exception as e:
+        log_event("draft_notify_error", error=str(e)[:200])
+    ctx.progress(f"草稿待审 {rel}", 100)
+    return f"已整理为待审草稿 → {rel}（{info.get('summary', '')}）"
 
 
 def handle_kb_organize(payload, ctx):
