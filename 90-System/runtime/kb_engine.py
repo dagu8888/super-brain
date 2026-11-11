@@ -294,7 +294,8 @@ def _snippet(text, qtoks, idf, width):
 def search_hybrid(q, limit=10, extra_exclude=(), with_debug=False):
     s = section("search")
     build_index(extra_exclude=extra_exclude)
-    qt = list(dict.fromkeys(tokens(q, query=True)))
+    qseq = tokens(q, query=True)
+    qt = list(dict.fromkeys(qseq))
     ents = entities(q)
     if not qt and not ents:
         return {"hits": [], "refused": True, "best_coverage": 0.0, "note": "查询里没有可检索的词"}
@@ -306,6 +307,15 @@ def search_hybrid(q, limit=10, extra_exclude=(), with_debug=False):
             r = c.execute("SELECT n FROM df WHERE tok=?", (t,)).fetchone()
             dfn = r[0] if r else 0
             idf[t] = math.log(1 + (ndoc - dfn + 0.5) / (dfn + 0.5))
+        # 跨词边界的二元组（如「网关端口」里的「关端」）库里没有、左右邻都有 → 视为切分噪声丢掉，不拉低覆盖率
+        dfz = {t for t in qt if c.execute("SELECT 1 FROM df WHERE tok=?", (t,)).fetchone() is None}
+        junk = set()
+        for i, t in enumerate(qseq):
+            if t in dfz and len(t) == 2 and 0 < i < len(qseq) - 1 \
+                    and qseq[i - 1] not in dfz and qseq[i + 1] not in dfz \
+                    and qseq[i - 1][-1:] == t[:1] and qseq[i + 1][:1] == t[-1:]:
+                junk.add(t)
+        qt = [t for t in qt if t not in junk]
         qt_known = [t for t in qt if idf[t] > 0]
         expr = " OR ".join('"' + t.replace('"', '') + '"' for t in qt_known[:64]) if qt_known else ""
         cand = {}
