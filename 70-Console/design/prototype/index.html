@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-tab="overview">
+<html lang="zh-CN" data-tab="chat">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Super-Brain · 协作中枢 v2</title>
-<meta name="description" content="Super-Brain 多 Agent 协作网操作台（只读，实时）">
+<meta name="description" content="Super-Brain 多 Agent 协作网操作台：查看免口令，操作需配对">
 <meta name="theme-color" content="#070b14">
 <meta name="color-scheme" content="dark">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -15,7 +15,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="v2/icons/favicon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="v2/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="v2/app.css?v=2.0.0">
+<link rel="stylesheet" href="v2/app.css?v=2.1.0">
 </head>
 <body>
 <a class="skip" href="#main">跳到主要内容</a>
@@ -33,6 +33,7 @@
     <span class="pill" id="conn" data-s="idle" role="status" aria-live="polite"><i></i><b>连接中</b></span>
     <span class="pill pill-ghost" id="health-pill" data-s="idle"><i></i><b>服务器检查中</b></span>
     <span class="clock" id="clock" title="北京时间">--:--:--<small>北京时间</small></span>
+    <button class="pill pill-ghost" id="owner-pill" type="button" data-s="idle" title="本设备的操作权限"><i></i><b>未配对 · 只读</b></button>
     <a class="pill pill-ghost link-v1" href="v1.html" title="打开旧版 v1 操作台">旧版 v1</a>
   </div>
 </header>
@@ -47,6 +48,7 @@
     <div class="stage-head">
       <h2>协作网拓扑 <small id="stage-mode">加载中</small></h2>
       <div class="stage-tools">
+        <button class="chip chip-gold" id="btn-rollcall" type="button" title="向全体广播点名（需配对）">发起点名</button>
         <button class="chip" id="btn-reset" type="button" title="回到全景">全景</button>
         <button class="chip" id="btn-mode" type="button" title="切换 3D / 平面">切到平面</button>
       </div>
@@ -57,6 +59,30 @@
     <div class="legend glass" id="legend" aria-label="图例"></div>
     <div class="stage-hint" id="stage-hint">拖拽旋转 · 滚轮/双指缩放 · 点节点看详情</div>
     <div class="stage-ticker glass" id="ticker" aria-live="off"></div>
+  </section>
+
+  <section class="chat sec glass" data-t="chat" aria-label="指挥官对话" id="sec-chat">
+    <div class="sec-head">
+      <h2>指挥官对话 <small id="chat-sub">大古 ↔ 幕僚长</small></h2>
+      <div class="chat-tools">
+        <button class="chip" id="btn-tts" type="button" aria-pressed="false" title="朗读幕僚长的新回复">朗读 关</button>
+        <button class="chip" id="btn-chat-more" type="button" title="加载更早的消息">更早</button>
+      </div>
+    </div>
+    <ol class="chat-list" id="chat" aria-live="polite" aria-relevant="additions"><li class="empty">读取中…</li></ol>
+    <div class="chat-reply" id="chat-reply" hidden></div>
+    <form class="chat-form" id="chat-form" autocomplete="off">
+      <button class="mic" id="btn-mic" type="button" aria-label="按住说话" title="按住说话（浏览器原生语音识别）"><i></i></button>
+      <label class="sr" for="chat-input">给幕僚长的消息</label>
+      <textarea id="chat-input" rows="1" placeholder="给幕僚长下指令 / 提问…" enterkeyhint="send"></textarea>
+      <button class="btn" id="chat-send" type="submit">发送</button>
+    </form>
+    <div class="chat-foot" id="chat-foot"></div>
+  </section>
+
+  <section class="panel sec glass" data-t="projects overview" aria-label="项目" id="sec-projects">
+    <div class="sec-head"><h2>项目 <small id="pj-sub">完成度 = 已验收且已核实的阶段 / 全部阶段</small></h2><button class="chip" id="btn-new-project" type="button">新建项目</button></div>
+    <div id="projects" class="projects"><div class="empty">读取中…</div></div>
   </section>
 
   <section class="feed sec glass" data-t="feed" aria-label="实时消息流">
@@ -72,12 +98,17 @@
     <ol class="feed-list" id="feed" aria-live="polite" aria-relevant="additions"></ol>
   </section>
 
+  <section class="panel sec glass" data-t="approvals" aria-label="审批中心" id="sec-approvals">
+    <div class="sec-head"><h2>审批中心 <small id="ap-count"></small></h2><small>Agent 提交的待批示事项 + 待拍板任务；裁决经消息总线推回申请方</small></div>
+    <div id="approvals" class="approvals"><div class="empty">读取中…</div></div>
+  </section>
+
   <section class="panel sec glass" data-t="overview rollcall" aria-label="点名历史" id="sec-rollcall">
     <div class="sec-head"><h2>点名历史</h2><small id="rc-note">只算每个节点的首条回复；重复回复单独计</small></div>
     <div id="rollcalls" class="rollcalls"></div>
   </section>
 
-  <section class="panel sec glass" data-t="agents" aria-label="Agent 矩阵" id="sec-agents">
+  <section class="panel sec glass" data-t="agents more" aria-label="Agent 矩阵" id="sec-agents">
     <div class="sec-head">
       <h2>Agent 矩阵</h2>
       <div class="seg" id="agent-filter">
@@ -90,12 +121,17 @@
     <div id="agents" class="agent-grid"></div>
   </section>
 
-  <section class="panel sec glass" data-t="server" aria-label="服务器健康" id="sec-server">
+  <section class="panel sec glass" data-t="server more" aria-label="服务器健康" id="sec-server">
     <div class="sec-head"><h2>服务器健康</h2><small id="srv-note">香港节点</small></div>
     <div id="server" class="server"></div>
   </section>
 
-  <section class="panel sec glass wide" data-t="kb" aria-label="知识库检索" id="sec-kb">
+  <section class="panel sec glass" data-t="server more" aria-label="操作审计" id="sec-audit">
+    <div class="sec-head"><h2>操作审计</h2><small>大古的每一次写操作：谁 · 何时 · 做了什么 · 成败</small></div>
+    <div id="audit" class="audit"><div class="empty">读取中…</div></div>
+  </section>
+
+  <section class="panel sec glass wide" data-t="kb more" aria-label="知识库检索" id="sec-kb">
     <div class="sec-head"><h2>知识库检索</h2><small id="kb-note"></small></div>
     <form id="kb-form" class="kb-form" role="search">
       <label class="sr" for="kb-q">搜索知识库</label>
@@ -107,17 +143,31 @@
 </main>
 
 <nav class="tabbar glass" id="tabbar" aria-label="底部导航">
-  <button data-tab="overview" class="on" type="button"><i class="ti ti-ov"></i>总览</button>
+  <button data-tab="chat" class="on" type="button"><i class="ti ti-chat"></i>指挥<em class="badge" id="tab-chat-badge" hidden></em></button>
+  <button data-tab="overview" type="button"><i class="ti ti-ov"></i>总览</button>
+  <button data-tab="projects" type="button"><i class="ti ti-pj"></i>项目</button>
+  <button data-tab="approvals" type="button"><i class="ti ti-ap"></i>审批<em class="badge" id="tab-ap-badge" hidden></em></button>
   <button data-tab="feed" type="button"><i class="ti ti-feed"></i>消息</button>
-  <button data-tab="agents" type="button"><i class="ti ti-ag"></i>Agent</button>
-  <button data-tab="kb" type="button"><i class="ti ti-kb"></i>知识</button>
-  <button data-tab="server" type="button"><i class="ti ti-srv"></i>健康</button>
+  <button data-tab="more" type="button"><i class="ti ti-ag"></i>更多</button>
 </nav>
 
 <div id="scrim" class="scrim" hidden></div>
 <aside id="drawer" class="drawer glass" aria-hidden="true" aria-label="详情" tabindex="-1"></aside>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
+<dialog id="dlg" class="dlg glass" aria-labelledby="dlg-title">
+  <form method="dialog" id="dlg-form">
+    <h3 id="dlg-title"></h3>
+    <p id="dlg-desc" class="note"></p>
+    <div id="dlg-extra"></div>
+    <label class="sr" for="dlg-input">内容</label>
+    <textarea id="dlg-input" rows="4"></textarea>
+    <div class="dlg-actions">
+      <button class="chip" value="cancel" type="button" id="dlg-cancel">取消</button>
+      <button class="btn" value="ok" id="dlg-ok" type="submit">确定</button>
+    </div>
+  </form>
+</dialog>
 
-<script src="v2/app.js?v=2.0.0" defer></script>
+<script src="v2/app.js?v=2.1.0" defer></script>
 </body>
 </html>

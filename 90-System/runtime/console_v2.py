@@ -5,6 +5,10 @@
 #   /api/dashboard           KPI、各 Agent 异常计数、点名历史（含各节点首回耗时）、近 24h 消息分时、消息连线
 #   /api/server              服务器健康：运行时长、负载、内存、磁盘、数据库体积、证书到期
 #   /api/messages?agent=<id> 某 Agent 收发的最近消息（新→旧），供详情抽屉
+#   /api/approvals           审批中心：approvals 表 + 待拍板任务（只读）
+#   /api/audit               大古写操作审计（只读，不含 IP）
+#   /api/chat                指挥官对话线程：大古 ↔ grok-chief（旧→新）
+#   /api/projects            项目 / 阶段 / 完成度（按阶段验收真实计算）
 # 口径（与手册第 5 章一致，不冒充）：
 #   在线 = 5 分钟内有心跳 / last_seen / 名册实例心跳（同 console_api._annotate_agent）；
 #   执行中 = 只认 tasks.status='doing' 且 lease_owner=该 Agent，心跳不算执行；
@@ -22,6 +26,7 @@ from pathlib import Path
 
 import console_api
 import message_bus
+import owner_ops
 
 OFFLINE_SECONDS = console_api.OFFLINE_SECONDS
 UNCLAIMED_SECONDS = 600
@@ -233,6 +238,14 @@ def dashboard(conn, now=None):
     dead = _dead_by_agent(conn, inst_map, ids)
     unclaimed = _unclaimed_by_agent(conn, inst_map, ids, now)
     active = [a for a in agents if a.get("status") == "active"]
+    import current_work
+    works = current_work.load_all(conn, now)
+    owner_ops.ensure_schema(conn)
+    appr_by = {}
+    for req, kind, n in conn.execute(
+            "SELECT requester, kind, COUNT(*) FROM approvals WHERE status='pending' GROUP BY 1,2"):
+        d = appr_by.setdefault(req, {"approval": 0, "assist": 0})
+        d[kind or "approval"] = d.get(kind or "approval", 0) + n
     out_agents = []
     stale_total = 0
     for a in agents:
@@ -242,7 +255,33 @@ def dashboard(conn, now=None):
               "unclaimed": unclaimed["by_agent"].get(a["agent_id"], 0),
               "stale": st}
         an["total"] = an["dead"] + an["unclaimed"] + an["stale"]
+        w = works.get(a["agent_id"])
+        ap = appr_by.get(a["agent_id"], {})
+        live = a["live_status"]
+        online = live in ("idle", "working")
+        # 细分状态：忙碌只认任务租约或自报工作；心跳只说明在线
+        if a["status"] != "active":
+            detail = {"state": "paused", "label": "已暂停"}
+        elif not online:
+            detail = {"state": "offline" if a["ever_connected"] else "unused",
+                      "label": "离线" if a["ever_connected"] else "未接入",
+                      "since": a["presence_at"]}
+        elif a["doing_task_ids"] or w:
+            detail = {"state": "busy", "label": "忙碌",
+                      "work": (w or {}).get("title") or ("执行任务 #%s" % a["doing_task_ids"][0]),
+                      "work_source": "self_report" if w else "task_lease",
+                      "since": (w or {}).get("started_at")}
+        else:
+            idle_since = max([x for x in (
+                conn.execute("SELECT MAX(created_at) FROM messages WHERE from_agent=?", (a["agent_id"],)).fetchone()[0],
+                conn.execute("SELECT MAX(done_at) FROM tasks WHERE lease_owner=? AND status IN ('done','failed')",
+                             (a["agent_id"],)).fetchone()[0]) if x] or [None])
+            detail = {"state": "idle", "label": "空闲", "idle_since": idle_since}
         out_agents.append({
+            "state": detail,
+            "current_work": w,
+            "pending_approvals": ap.get("approval", 0),
+            "pending_assists": ap.get("assist", 0),
             "agent_id": a["agent_id"],
             "kind": a["kind"],
             "status": a["status"],
@@ -264,6 +303,9 @@ def dashboard(conn, now=None):
         queue = {}
     ev = lambda s: conn.execute("SELECT COUNT(*) FROM events WHERE created_at>=?", (s,)).fetchone()[0]
     online = [a for a in active if a["live_status"] in ("idle", "working")]
+    owner_ops.ensure_schema(conn)
+    appr_pending = conn.execute("SELECT COUNT(*) FROM approvals WHERE status='pending'").fetchone()[0]
+    dec_tasks = conn.execute("SELECT COUNT(*) FROM tasks WHERE status='pending' AND (priority>=1 OR type='fuse-review')").fetchone()[0]
     return {
         "console_rev": 2,
         "now": now,
@@ -286,6 +328,8 @@ def dashboard(conn, now=None):
                 "total": dead["total"] + unclaimed["total"] + stale_total,
             },
             "queue": queue,
+            "approvals_pending": appr_pending,
+            "decision_tasks": dec_tasks,
         },
         "agents": out_agents,
         "rollcalls": rollcalls,
@@ -421,10 +465,64 @@ def server_health(now=None):
     return d
 
 
+CHAT_PEER = "grok-chief"
+
+
+def chat_thread(conn, limit=80, before=None):
+    """指挥官对话：dagu-owner ↔ grok-chief（含其实例）双向消息，旧→新。"""
+    message_bus.ensure_schema(conn)
+    names = [CHAT_PEER] + [n for n, a in _instance_map(conn).items() if a == CHAT_PEER]
+    ph = ",".join("?" * len(names))
+    sql = ('SELECT msg_id,from_agent,from_instance,"to",kind,text,reply_to,thread_id,created_at FROM messages '
+           'WHERE ((from_agent=? AND "to" IN (%s)) OR (from_agent=? AND "to"=?))' % ph)
+    args = [owner_ops.OWNER_ID] + names + [CHAT_PEER, owner_ops.OWNER_ID]
+    if before:
+        sql += " AND created_at < ?"
+        args.append(int(before))
+    sql += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
+    args.append(int(limit))
+    keys = ("msg_id", "from_agent", "from_instance", "to", "kind", "text", "reply_to", "thread_id", "created_at")
+    rows = [dict(zip(keys, r)) for r in conn.execute(sql, args)]
+    rows.reverse()
+    # 附上转达指挥官 webhook 的投递状态（只给状态，不给地址/密钥）
+    try:
+        ids = [r["msg_id"] for r in rows if r["from_agent"] == owner_ops.OWNER_ID]
+        if ids:
+            hk = {m: (sa, at, le) for m, sa, at, le in conn.execute(
+                "SELECT msg_id,sent_at,attempts,last_error FROM webhook_outbox WHERE msg_id IN (%s)" % ",".join("?" * len(ids)), ids)}
+            for r in rows:
+                if r["msg_id"] in hk:
+                    sa, at, le = hk[r["msg_id"]]
+                    r["hook"] = {"sent_at": sa, "attempts": at, "error": (le or "")[:80] or None}
+    except Exception:
+        pass
+    import commander_hook
+    return {"peer": CHAT_PEER, "hook_configured": commander_hook.configured(), "owner": owner_ops.OWNER_ID, "names": names, "messages": rows}
+
+
 def handle(conn, path, q, now):
     """命中返回 (code, body)，未命中返回 None。"""
     if path == "/api/dashboard":
         return 200, {"ok": True, "ts": now, "data": dashboard(conn, now)}
+    if path == "/api/approvals":
+        owner_ops.ensure_schema(conn)
+        return 200, {"ok": True, "ts": now, "data": {
+            "approvals": owner_ops.list_approvals(conn),
+            "decision_tasks": owner_ops.decision_tasks(conn)}}
+    if path == "/api/projects":
+        import projects
+        return 200, {"ok": True, "ts": now, "data": projects.list_projects(conn)}
+    if path == "/api/audit":
+        lim = console_api._qp_int(q, "limit", 60, 1, 300)
+        if lim is None:
+            return 400, {"ok": False, "error": "limit 必须是整数"}
+        return 200, {"ok": True, "ts": now, "data": owner_ops.list_audit(conn, lim)}
+    if path == "/api/chat":
+        lim = console_api._qp_int(q, "limit", 80, 1, 300)
+        if lim is None:
+            return 400, {"ok": False, "error": "limit 必须是整数"}
+        bf = q.get("before")
+        return 200, {"ok": True, "ts": now, "data": chat_thread(conn, lim, int(bf) if bf and bf.isdigit() else None)}
     if path == "/api/server":
         return 200, {"ok": True, "ts": now, "data": server_health(now)}
     if path == "/api/messages" and q.get("agent"):
