@@ -84,6 +84,9 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None)
             # 带 instance 的连接可冒充在场、收取定向消息，必须持有口令。
             # 不带 instance 的连接是操作台只读推送，按 2026-11-11 批示免口令。
             instance = (q.get("instance") or "").strip()
+            # 操作台 v2 观察模式：?observe=1 且不带 instance 时，推送全部消息（与免口令的
+            # GET /api/messages 同口径，只读）。带 instance 的节点连接不受影响。
+            observe = (not instance) and q.get("observe") == "1"
             if instance and not authed:
                 log_event("api_auth_failed", ip=self.client_address[0], path="/api/stream")
                 return self._send(401, {"ok": False, "error": "无效口令"})
@@ -152,8 +155,11 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None)
                             "FROM events WHERE created_at>=? ORDER BY created_at ASC, rowid ASC "
                             "LIMIT 200", (since,)).fetchall()
                         try:
-                            msgs = message_bus.poll_for_connection(
-                                conn, msg_since, agent_ref, instance)
+                            if observe:
+                                msgs = message_bus.list_messages(conn, since=msg_since, limit=200)
+                            else:
+                                msgs = message_bus.poll_for_connection(
+                                    conn, msg_since, agent_ref, instance)
                         except Exception:
                             msgs = []
                     finally:
@@ -218,13 +224,28 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None)
                 return self._send(404, {"ok": False, "error": "not found"})
             if not target.is_file():
                 return self._send(404, {"ok": False, "error": "not found"})
-            data = target.read_bytes()
+            st = target.stat()
+            etag = '"%x-%x"' % (int(st.st_mtime_ns // 1000), st.st_size)
             ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-            if ctype.startswith("text/") or ctype in ("application/javascript", "application/json"):
+            if target.suffix == ".webmanifest":
+                ctype = "application/manifest+json"
+            if ctype.startswith("text/") or ctype in (
+                    "application/javascript", "application/json", "application/manifest+json"):
                 ctype += "; charset=utf-8"
+            # 静态资源协商缓存：内容不变则 304，手机二次打开不再整包下载（three.js 600KB+）
+            if self.headers.get("If-None-Match") == etag:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                self.send_header("Cache-Control", "no-cache")
+                for k, v in CORS:
+                    self.send_header(k, v)
+                self.end_headers()
+                return
+            data = target.read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
+            self.send_header("ETag", etag)
             self.send_header("Cache-Control", "no-cache")
             for k, v in CORS:
                 self.send_header(k, v)
