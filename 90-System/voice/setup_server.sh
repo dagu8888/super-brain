@@ -7,7 +7,9 @@ MODEL_URL="https://download.moonshine.ai/model/tiny-streaming-zh/quantized_26_08
 MODEL_DIR=/opt/sb-voice/models/tiny-streaming-zh
 install -d -m 755 /opt/sb-voice "$MODEL_DIR"
 install -d -m 700 /var/lib/super-brain/audio
-if [ ! -x /opt/sb-voice/venv/bin/python ]; then python3 -m venv /opt/sb-voice/venv; fi
+# Ubuntu 默认不带 venv/ensurepip（2026-11-11 部署时实际踩到），缺则装系统包（免费）
+python3 -c "import ensurepip" 2>/dev/null || DEBIAN_FRONTEND=noninteractive apt-get install -y -q python3-venv
+if [ ! -x /opt/sb-voice/venv/bin/pip ]; then rm -rf /opt/sb-voice/venv; python3 -m venv /opt/sb-voice/venv; fi
 /opt/sb-voice/venv/bin/pip install -q --disable-pip-version-check "moonshine-voice==${PKG_VER}"
 cd "$MODEL_DIR"
 while read -r sum name; do
