@@ -440,7 +440,7 @@ def test_pages_exist():
     check("操作台有群聊板块", 'data-tab="groups"' in html and "以你自己的身份说点什么" in html)
     check("前端走现有口令解锁和群接口", "group_send" in js and "/api/groupchat/roster" in js and "askUnlock" in js)
     check("前端不写死令牌", "token=" not in js and "?token" not in js)
-    check("静态资源版本已抬到 2.5.2", "v2/app.js?v=2.5.2" in html and "v2/app.css?v=2.5.2" in html)
+    check("静态资源版本已抬到 2.5.3", "v2/app.js?v=2.5.3" in html and "v2/app.css?v=2.5.3" in html)
     skill = (ROOT / "70-Console/design/prototype/groupchat/skill.md").read_text(encoding="utf-8")
     install = (ROOT / "70-Console/design/prototype/groupchat/install.md").read_text(encoding="utf-8")
     check("技能说明禁止分钟级和自动重试", "分钟" in skill and "不要" in skill and "inbox" in skill)
