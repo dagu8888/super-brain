@@ -790,16 +790,23 @@ def execute(conn, who, action, args, emit=None):
             out["auth"] = who["auth"]
         return out
 
+    if str(action or "").startswith("group_"):
+        import group_chat
+        return group_chat.owner_act(conn, who, action, args)
+
     return {"ok": False, "error": f"未知操作 {action}"}
 
 
 # 审计里不记录正文全文和任何令牌，只记摘要
 def audit_detail(action, args, res):
     a = dict(args or {})
-    for k in ("token", "code", "content", "reply", "secret", "password", "value", "phrase", "_ticket_secret", "ticket"):
+    for k in ("token", "code", "content", "reply", "secret", "password", "value", "phrase",
+              "_ticket_secret", "ticket", "webhook_url", "url"):
         if k in a:
             a[k] = f"<{len(str(a[k]))} 字>" if k == "content" else "<已隐去>"
     if "text" in a:
         a["text"] = str(a["text"])[:120]
-    r = {k: v for k, v in (res or {}).items() if k not in ("token", "code", "text", "devices", "items", "audit", "value", "ticket")}
+    r = {k: v for k, v in (res or {}).items() if k not in (
+        "token", "code", "text", "devices", "items", "audit", "value", "ticket",
+        "message", "group", "wakes")}
     return {"args": a, "result": r}

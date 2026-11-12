@@ -1,0 +1,397 @@
+#!/usr/bin/env python3
+# 群聊：建群、主人发言、外部 Agent 配对后发言、叫醒不含正文和令牌、失败不派任务、
+# 名册不把心跳当成可对话。
+# 用法：python3 90-System/runtime/tests/test_group_chat.py
+import json
+import os
+import shutil
+import sqlite3
+import sys
+import tempfile
+import threading
+import time
+import urllib.error
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+RT = Path(__file__).resolve().parents[1]
+ROOT = RT.parents[1]
+sys.path.insert(0, str(RT))
+
+os.environ["SB_OWNER_UNLOCK_PHRASE"] = "群聊测试口令甲|群聊测试口令乙"
+
+import api_server  # noqa: E402
+import console_api  # noqa: E402
+import group_chat  # noqa: E402
+import message_bus  # noqa: E402
+import migrate_v2  # noqa: E402
+import owner_ops  # noqa: E402
+import runtime  # noqa: E402
+
+FAILS = []
+WHO = {"actor": "dagu-owner", "device": "test", "device_id": None}
+TOKENS = {"grok-chief": "test-token-grok", "dsh-chief": "test-token-dsh"}
+
+
+def check(name, cond, detail=""):
+    print(("PASS " if cond else "FAIL ") + name + ((" | " + str(detail)) if detail and not cond else ""))
+    if not cond:
+        FAILS.append(name)
+
+
+def fresh():
+    d = Path(tempfile.mkdtemp(prefix="sb-group-"))
+    runtime.EVENTS_DIR = d / "50-Events"
+    runtime.EVENTS_DIR.mkdir(parents=True, exist_ok=True)
+    runtime.ROOT = d
+    conn = sqlite3.connect(str(d / "state.db"))
+    conn.execute("PRAGMA journal_mode=WAL")
+    migrate_v2.migrate(conn)
+    message_bus.ensure_schema(conn)
+    owner_ops.ensure_schema(conn)
+    group_chat.ensure_schema(conn)
+    group_chat.set_wake_transport(None)
+    return d, conn
+
+
+def counts(conn):
+    ev = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+    tk = conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+    return ev, tk
+
+
+def dump_db(conn):
+    parts = []
+    for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type='table'"):
+        try:
+            rows = conn.execute("SELECT * FROM %s" % name).fetchall()
+        except sqlite3.OperationalError:
+            continue
+        parts.append(name + ":" + json.dumps(rows, ensure_ascii=False, default=str))
+    return "\n".join(parts)
+
+
+def test_create_send_and_roster():
+    d, conn = fresh()
+    ev0, tk0 = counts(conn)
+    now = int(time.time())
+    conn.execute(
+        "INSERT INTO heartbeats(agent, ts, note) VALUES('muse-chief', ?, 'sse')", (now,))
+    conn.commit()
+    made = owner_ops.execute(conn, WHO, "group_create",
+                             {"name": "外部协作", "members": ["grok-chief", "不存在的人"]})
+    check("建群成功", made.get("ok") and str(made.get("group_id", "")).startswith("grp_"), made.get("error"))
+    gid = made["group_id"]
+    check("主人自动进群", any(m["member_id"] == "dagu-owner" and m["sender_badge"] == "人"
+                           for m in made["group"]["members"]))
+    check("名册里的 Agent 被拉进群", "grok-chief" in made["added"], made["added"])
+    check("不在名册的人拉不进来", any("不存在" in (s.get("error") or "") for s in made["skipped"]))
+    check("建群不写 events / tasks", counts(conn) == (ev0, tk0))
+
+    code, roster = console_api.handle_get(conn, "/api/groupchat/roster")
+    by_id = {a["id"]: a for a in roster["data"]}
+    check("名册接口可读", code == 200 and "grok-chief" in by_id and "muse-chief" in by_id)
+    check("心跳不构成可对话", by_id["muse-chief"]["talk_state"] == "unproven" and "online" not in by_id["muse-chief"],
+          by_id["muse-chief"].get("talk_label"))
+    check("名册文案不说在线", "在线" not in by_id["muse-chief"]["talk_label"] and "离线" not in by_id["muse-chief"]["talk_label"])
+
+    sent = owner_ops.execute(conn, WHO, "group_send", {"group_id": gid, "text": "大家好，我是主人"})
+    check("主人发言成功", sent.get("ok"), sent.get("error"))
+    msg = sent["message"]
+    check("主人消息标成人", msg["sender_role"] == "human" and msg["sender_badge"] == "人" and msg["sender_name"] == "大古")
+    check("发言写在 messages 且线程是群", conn.execute(
+        'SELECT thread_id, "to", from_agent FROM messages WHERE msg_id=?', (sent["msg_id"],)).fetchone()
+          == (gid, gid, "dagu-owner"))
+    check("发言仍不写 events / tasks", counts(conn) == (ev0, tk0))
+
+    hist = console_api.handle_get(conn, "/api/groupchat/groups/%s/messages" % gid)[1]["data"]
+    texts = [m["text"] for m in hist]
+    check("历史里看得到主人的话", "大家好，我是主人" in texts)
+    check("历史里有加入记录", any("加入了群聊" in t for t in texts))
+
+    # 群消息不把指挥入口打成「回执失败」
+    conn.execute("INSERT INTO heartbeats(agent, ts, note) VALUES('幕僚长@云端', ?, 'sse')", (now,))
+    conn.execute("UPDATE agents SET last_seen=? WHERE agent_id='grok-chief'", (now,))
+    conn.commit()
+    code, agents = console_api.handle_get(conn, "/api/agents")
+    grok = next(a for a in agents["data"] if a["agent_id"] == "grok-chief")
+    check("群消息不把 Agent 打成回执失败", grok["live_status"] != "degraded", grok["live_status"])
+
+    # 已接入 Agent 用 /cmd msg 进同一群
+    via = runtime.chief_execute(conn, "grok-chief", "msg", {
+        "to": gid, "text": "幕僚长收到", "from": "dagu-owner"})
+    check("成员可以用 /cmd msg 发言", via.get("ok") and via["message"]["sender_badge"] == "你的 agent", via.get("error"))
+    check("不能伪造 from", via["message"]["from_agent"] == "grok-chief")
+    outsider = runtime.chief_execute(conn, "dsh-chief", "msg", {"to": gid, "text": "我不在群里"})
+    check("群外的人不能发言", not outsider.get("ok") and "不在这个群" in (outsider.get("error") or ""))
+
+    # 有过真实收发之后才算证实，仍然不看心跳
+    code, roster = console_api.handle_get(conn, "/api/groupchat/roster")
+    by_id = {a["id"]: a for a in roster["data"]}
+    check("发言后才证实可收发", by_id["grok-chief"]["talk_state"] == "proven" and by_id["grok-chief"]["last_tx_at"])
+    check("只有心跳的仍未证实", by_id["muse-chief"]["talk_state"] == "unproven")
+
+    rec = owner_ops.execute(conn, WHO, "group_recall", {"group_id": gid, "msg_id": sent["msg_id"]})
+    check("可以撤回自己的消息", rec.get("ok"), rec.get("error"))
+    hist = console_api.handle_get(conn, "/api/groupchat/groups/%s/messages" % gid)[1]["data"]
+    check("撤回后原文不在群历史里", "大家好，我是主人" not in json.dumps(hist, ensure_ascii=False))
+    check("撤回是单独一行系统事件", any(m["sender_role"] == "system" and "撤回了一条消息" in m["text"] for m in hist))
+    check("撤回也不派任务", counts(conn) == (ev0, tk0))
+    conn.close()
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_wake_once_without_body():
+    d, conn = fresh()
+    ev0, tk0 = counts(conn)
+    made = owner_ops.execute(conn, WHO, "group_create", {"name": "叫醒", "members": ["grok-chief"]})
+    gid = made["group_id"]
+    owner_ops.execute(conn, WHO, "group_webhook",
+                      {"member_id": "grok-chief", "url": "http://127.0.0.1:9/hook"})
+    seen = []
+
+    def transport(url, body):
+        seen.append((url, body))
+        return 500, "HTTPError"
+
+    group_chat.set_wake_transport(transport)
+    secret = "这句话不能出现在叫醒里-TOKEN-abc"
+    try:
+        sent = owner_ops.execute(conn, WHO, "group_send", {"group_id": gid, "text": secret})
+    finally:
+        group_chat.set_wake_transport(None)
+    check("失败的叫醒只打一次", len(seen) == 1, len(seen))
+    raw = seen[0][1].decode("utf-8") if seen else ""
+    payload = json.loads(raw) if raw else {}
+    check("叫醒只有信号字段", set(payload) == {"event", "group_id", "msg_id", "pull"}, sorted(payload))
+    check("叫醒不含正文和令牌", secret not in raw and "TOKEN" not in raw and "Authorization" not in raw)
+    check("叫醒指向收件箱", payload.get("event") == "inbox" and payload.get("pull") == "/api/groupchat/inbox")
+    check("状态是 missed 且不派任务", sent["wakes"][0]["status"] == "missed" and counts(conn) == (ev0, tk0),
+          sent.get("wakes"))
+    code, wakes = console_api.handle_get(conn, "/api/groupchat/wakes?msg_id=" + sent["msg_id"])
+    check("漏通知只查得到状态", code == 200 and wakes["data"][0]["status"] == "missed")
+    # 再查一次不会补打
+    check("查询状态不会再次叫醒", len(seen) == 1)
+    conn.close()
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_external_pair_and_speak():
+    d, conn = fresh()
+    ev0, tk0 = counts(conn)
+    made = owner_ops.execute(conn, WHO, "group_create", {"name": "外部群", "members": []})
+    gid = made["group_id"]
+    paired = owner_ops.execute(conn, WHO, "group_pair", {"group_id": gid, "name": "Claude"})
+    code = paired.get("code")
+    check("能签发配对码", paired.get("ok") and code and "code" not in json.dumps(owner_ops.audit_detail("group_pair", {}, paired)))
+    short = owner_ops.execute(conn, WHO, "group_checkin", {"ext_id": "ext_nope", "seconds": 60})
+    check("拒绝分钟级 check-in", not short.get("ok") and "1 小时" in (short.get("error") or ""))
+
+    res = group_chat.redeem_pair(conn, code, "Claude", checkin_seconds=60)
+    check("过短的 check-in 不能换令牌", not res.get("ok"))
+    res = group_chat.redeem_pair(conn, code, "Claude", webhook_url="http://127.0.0.1:9/wake",
+                                 checkin_seconds=21600)
+    token = res.get("token")
+    check("配对码换到令牌并进群", res.get("ok") and res.get("group_id") == gid and token, res.get("error"))
+    again = group_chat.redeem_pair(conn, code, "Claude")
+    check("配对码只能用一次", not again.get("ok"))
+    blob = dump_db(conn)
+    check("库里没有配对码和令牌明文", code not in blob and token not in blob)
+
+    seen = []
+
+    def transport(url, body):
+        seen.append(body)
+        return 204, ""
+
+    group_chat.set_wake_transport(transport)
+    try:
+        posted = group_chat.handle_post(
+            conn, "/api/groupchat/messages",
+            {"group_id": gid, "text": "外部 Agent 到了"},
+            token, {})
+    finally:
+        group_chat.set_wake_transport(None)
+    check("外部 Agent 发言接口成功", posted[0] == 200 and posted[1].get("ok"), posted[1].get("error"))
+    check("外部消息标成外部", posted[1]["message"]["sender_role"] == "external" and posted[1]["message"]["sender_badge"] == "外部")
+    hist = group_chat.list_group_messages(conn, gid)
+    check("群历史看得到外部发言", any(m["text"] == "外部 Agent 到了" for m in hist))
+    check("外部发言不派任务", counts(conn) == (ev0, tk0))
+    # 主人没有 webhook，被叫醒的是... 外部自己发的，其他成员只有主人，主人不叫醒。seen 应为空。
+    check("不会叫醒发件人自己", seen == [])
+
+    # 主人再发一句，应该叫醒外部 Agent 一次，且正文不在信号里
+    group_chat.set_wake_transport(transport)
+    try:
+        owner_ops.execute(conn, WHO, "group_send", {"group_id": gid, "text": "主人回复外部"})
+    finally:
+        group_chat.set_wake_transport(None)
+    check("主人发言会叫醒外部 Agent 一次", len(seen) == 1)
+    raw = seen[0].decode("utf-8")
+    check("这次叫醒也没有正文和令牌", "主人回复外部" not in raw and token not in raw and code not in raw)
+
+    early = group_chat.checkin(conn, group_chat.external_by_token(conn, token))
+    check("第一次稀疏打卡被接受", early.get("accepted") is True and counts(conn) == (ev0, tk0))
+    late = group_chat.checkin(conn, group_chat.external_by_token(conn, token))
+    check("间隔未到不重试不派任务", late.get("accepted") is False and late.get("reason") == "too_soon" and counts(conn) == (ev0, tk0))
+
+    inbox = group_chat.handle_authed_get(conn, "/api/groupchat/inbox", {}, token, {})
+    check("收件箱要令牌且能读到群", inbox[0] == 200 and any(
+        m["text"] == "外部 Agent 到了" for m in inbox[1]["data"]["messages"]))
+    naked = group_chat.handle_authed_get(conn, "/api/groupchat/inbox", {}, "", {})
+    check("没有令牌不能拉收件箱", naked[0] == 401)
+    conn.close()
+    shutil.rmtree(d, ignore_errors=True)
+
+
+class _WakeHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        self.server.got = self.rfile.read(n)
+        self.server.auth = self.headers.get("Authorization")
+        self.send_response(204)
+        self.end_headers()
+
+    def log_message(self, fmt, *args):
+        return
+
+
+def _free_port():
+    import socket
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def _req(port, path, method="GET", body=None, token=""):
+    data = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    req = urllib.request.Request("http://127.0.0.1:%s%s" % (port, path), data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status, json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", "replace")
+        try:
+            obj = json.loads(raw or "{}")
+        except Exception:
+            obj = {"ok": False, "error": raw[:180]}
+        return e.code, obj
+
+
+def test_http_pair_speak_and_real_wake():
+    d, conn = fresh()
+    db_path = str(d / "state.db")
+    conn.close()
+    port = _free_port()
+    wake_port = _free_port()
+    stop = threading.Event()
+
+    def db_fn():
+        c = sqlite3.connect(db_path, timeout=10, check_same_thread=False)
+        c.execute("PRAGMA busy_timeout=5000")
+        return c
+
+    def log_event(kind, **fields):
+        return None
+
+    handler = api_server._make_handler(
+        db_fn, runtime.chief_execute, log_event, TOKENS, {}, stop)
+    server = api_server.ThreadingHTTPServer(("127.0.0.1", port), handler)
+    server.daemon_threads = True
+    threading.Thread(target=server.serve_forever, name="group-api", daemon=True).start()
+
+    wake = ThreadingHTTPServer(("127.0.0.1", wake_port), _WakeHandler)
+    wake.got = b""
+    wake.auth = "unset"
+    wake.daemon_threads = True
+    threading.Thread(target=wake.serve_forever, name="group-wake", daemon=True).start()
+    group_chat.set_wake_transport(None)
+    try:
+        urllib.request.urlopen("http://127.0.0.1:%s/healthz" % port, timeout=3).read()
+        st, unlocked = _req(port, "/api/owner/unlock", "POST",
+                            {"phrase": "群聊测试口令甲", "device_name": "测试"})
+        check("HTTP 当日口令可解锁", st == 200 and unlocked.get("token"), st)
+        owner = unlocked.get("token") or ""
+        st, made = _req(port, "/api/owner/act", "POST",
+                        {"action": "group_create", "args": {"name": "接口群", "members": ["grok-chief"]}},
+                        owner)
+        check("HTTP 建群", st == 200 and made.get("ok"), made.get("error"))
+        gid = made.get("group_id")
+        st, said = _req(port, "/api/owner/act", "POST",
+                        {"action": "group_send", "args": {"group_id": gid, "text": "从接口发出"}},
+                        owner)
+        check("HTTP 主人发言", st == 200 and said.get("message", {}).get("sender_badge") == "人", said.get("error"))
+        st, hist = _req(port, "/api/groupchat/groups/%s/messages" % gid)
+        check("免口令能看历史", st == 200 and any(m.get("text") == "从接口发出" for m in hist.get("data") or []))
+
+        st, paired = _req(port, "/api/owner/act", "POST",
+                          {"action": "group_pair", "args": {"group_id": gid}}, owner)
+        check("HTTP 生成配对码", st == 200 and paired.get("code"))
+        st, ext = _req(port, "/api/groupchat/pair", "POST", {
+            "code": paired["code"], "name": "ChatGPT",
+            "webhook_url": "http://127.0.0.1:%s/hook" % wake_port,
+        })
+        check("HTTP 配对码换令牌", st == 200 and ext.get("token") and ext.get("group_id") == gid, ext.get("error"))
+        token = ext.get("token") or ""
+        st, spoken = _req(port, "/api/groupchat/messages", "POST",
+                          {"group_id": gid, "text": "ChatGPT 进群了"}, token)
+        check("HTTP 外部 Agent 发言", st == 200 and spoken.get("ok"), spoken.get("error"))
+        # 外部发言不该叫醒自己；再让主人说一句，真实 HTTP 叫醒应打到本地
+        wake.got = b""
+        st, said2 = _req(port, "/api/owner/act", "POST",
+                         {"action": "group_send", "args": {"group_id": gid, "text": "请看收件箱"}},
+                         owner)
+        check("HTTP 主人再次发言", st == 200 and said2.get("ok"))
+        deadline = time.time() + 3
+        while time.time() < deadline and not wake.got:
+            time.sleep(0.02)
+        body = (wake.got or b"").decode("utf-8")
+        payload = json.loads(body) if body else {}
+        check("真实 webhook 收到且无正文无令牌",
+              payload.get("event") == "inbox" and "请看收件箱" not in body and token not in body
+              and wake.auth in (None, "", "unset"), body[:180])
+        st, inbox = _req(port, "/api/groupchat/inbox", token=token)
+        check("外部 Agent 拉到收件箱", st == 200 and any(
+            m.get("text") == "请看收件箱" for m in inbox.get("data", {}).get("messages") or []))
+        st, doc = 200, urllib.request.urlopen(
+            "http://127.0.0.1:%s/console/prototype/groupchat/install.md" % port, timeout=3).read().decode("utf-8")
+        check("接入文档能从操作台路径读到", "webhook" in doc and "/api/groupchat/pair" in doc and "分钟" in doc)
+        c = sqlite3.connect(db_path)
+        blob = dump_db(c)
+        c.close()
+        check("HTTP 流程后库里仍无令牌明文", token not in blob and paired["code"] not in blob)
+    finally:
+        stop.set()
+        server.shutdown()
+        wake.shutdown()
+        group_chat.set_wake_transport(None)
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_pages_exist():
+    html = (ROOT / "70-Console/design/prototype/index.html").read_text(encoding="utf-8")
+    js = (ROOT / "70-Console/design/prototype/v2/app.js").read_text(encoding="utf-8")
+    check("操作台有群聊板块", 'data-tab="groups"' in html and "以你自己的身份说点什么" in html)
+    check("前端走现有口令解锁和群接口", "group_send" in js and "/api/groupchat/roster" in js and "askUnlock" in js)
+    check("前端不写死令牌", "token=" not in js and "?token" not in js)
+    skill = (ROOT / "70-Console/design/prototype/groupchat/skill.md").read_text(encoding="utf-8")
+    check("技能说明禁止分钟级和自动重试", "分钟" in skill and "不要" in skill and "inbox" in skill)
+
+
+if __name__ == "__main__":
+    test_create_send_and_roster()
+    test_wake_once_without_body()
+    test_external_pair_and_speak()
+    test_http_pair_speak_and_real_wake()
+    test_pages_exist()
+    print("----")
+    if FAILS:
+        print("FAILED %d: %s" % (len(FAILS), ", ".join(FAILS)))
+        sys.exit(1)
+    print("ALL PASS")

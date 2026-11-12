@@ -16,7 +16,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="v2/icons/favicon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="v2/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="v2/app.css?v=2.4.0">
+<link rel="stylesheet" href="v2/app.css?v=2.5.0">
 </head>
 <body>
 <a class="skip" href="#main">跳到主要内容</a>
@@ -142,10 +142,51 @@
     </form>
     <div id="kb" class="kb-list"></div>
   </section>
+
+  <section class="grp sec glass" data-t="groups" id="sec-groups" aria-label="群聊">
+    <div class="grp-app" id="grp-app" data-pane="list">
+      <aside class="grp-col grp-roster" id="grp-roster" aria-label="已接入的 Agent"></aside>
+      <div class="grp-col grp-mid">
+        <div class="grp-mid-top">
+          <div class="seg" id="grp-switch" role="tablist" aria-label="聊天或通讯录">
+            <button type="button" data-grp-tab="chats" class="on">聊天</button>
+            <button type="button" data-grp-tab="contacts">通讯录</button>
+          </div>
+        </div>
+        <div class="grp-mid-body" id="grp-mid"></div>
+        <button class="grp-create" id="grp-create" type="button">+ 建群</button>
+      </div>
+      <section class="grp-col grp-main" id="grp-main" aria-label="当前群聊">
+        <header class="grp-head" id="grp-head">
+          <button class="grp-back" id="grp-back" type="button">返回</button>
+          <div class="grp-head-text"><h2>群聊</h2><p>选择一个群，或新建一个</p></div>
+        </header>
+        <div class="grp-stream-wrap">
+          <ol class="grp-stream" id="grp-stream" aria-live="polite"></ol>
+          <button type="button" class="grp-jump" id="grp-jump" hidden>1 条新消息</button>
+        </div>
+        <div class="grp-reply" id="grp-reply" hidden></div>
+        <form class="grp-form" id="grp-form" autocomplete="off">
+          <div class="grp-form-label">以主人身份发言</div>
+          <div class="grp-at-box" id="grp-at-box" hidden></div>
+          <div class="grp-form-row">
+            <button class="grp-tool" id="grp-at" type="button" aria-label="提到成员">@</button>
+            <button class="grp-tool" id="grp-file-btn" type="button" aria-label="附件">附件</button>
+            <input id="grp-file" type="file" hidden>
+            <label class="sr" for="grp-input">以你自己的身份发言</label>
+            <textarea id="grp-input" rows="1" placeholder="以你自己的身份说点什么" enterkeyhint="send"></textarea>
+            <button class="btn" id="grp-send" type="submit">发送</button>
+          </div>
+        </form>
+      </section>
+    </div>
+    <div class="grp-overlay" id="grp-overlay" hidden></div>
+  </section>
 </main>
 
 <nav class="tabbar glass" id="tabbar" aria-label="底部导航">
   <button data-tab="chat" class="on" type="button"><i class="ti ti-chat"></i>指挥<em class="badge" id="tab-chat-badge" hidden></em></button>
+  <button data-tab="groups" type="button"><i class="ti ti-grp"></i>群聊</button>
   <button data-tab="overview" type="button"><i class="ti ti-ov"></i>总览</button>
   <button data-tab="projects" type="button"><i class="ti ti-pj"></i>项目</button>
   <button data-tab="approvals" type="button"><i class="ti ti-ap"></i>审批<em class="badge" id="tab-ap-badge" hidden></em></button>
@@ -170,6 +211,6 @@
   </form>
 </dialog>
 
-<script src="v2/app.js?v=2.4.0" defer></script>
+<script src="v2/app.js?v=2.5.0" defer></script>
 </body>
 </html>
