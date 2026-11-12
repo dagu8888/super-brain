@@ -536,9 +536,12 @@ button.pill { cursor: pointer; }
 .grp-bub.ext { background: rgba(76, 201, 255, .08); border-color: rgba(76, 201, 255, .28); }
 .grp-bub.me { align-self: flex-end; border-radius: 14px 14px 4px 14px; background: rgba(245, 196, 81, .1); border-color: rgba(245, 196, 81, .38); }
 .grp-bub .who { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; font-size: 11px; color: var(--ink3); }
-.grp-bub .badge { border-radius: 999px; padding: 0 6px; line-height: 18px; border: 1px solid var(--line2); color: var(--gold2); }
-.grp-bub.ext .badge { color: #d6f3ff; }
-.grp-bub:not(.me):not(.ext) .badge { color: #ffd0e2; }
+.grp-bub .badge, .side-badge { display: inline-block; border-radius: 999px; padding: 0 6px; line-height: 18px; border: 1px solid var(--line2); font-size: 11px; font-style: normal; font-weight: 700; letter-spacing: 0; vertical-align: 1px; }
+.grp-bub .badge[data-side="human"], .side-badge[data-side="human"] { color: #2a2108; background: var(--gold); border-color: var(--gold); }
+.grp-bub .badge[data-side="agent"], .side-badge[data-side="agent"] { color: #ffd0e2; background: rgba(255, 95, 162, .16); border-color: rgba(255, 95, 162, .7); }
+.grp-bub .badge[data-side="external"], .side-badge[data-side="external"] { color: #041018; background: #7ad7ff; border-color: #7ad7ff; }
+.grp-members { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 6px 0 0; padding: 0; }
+.grp-members li { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink2); }
 .grp-bub .quote { display: block; margin-bottom: 4px; padding-left: 8px; border-left: 2px solid var(--line2); color: var(--ink3); font-size: 12px; white-space: pre-wrap; }
 .grp-bub .at { color: var(--cyan); }
 .grp-bub .ops { display: flex; gap: 8px; margin-top: 4px; }
@@ -563,7 +566,7 @@ button.pill { cursor: pointer; }
 .grp-overlay[hidden] { display: none; }
 .grp-sheet { width: min(520px, 100%); max-height: 100%; overflow: auto; padding: 16px; border-radius: 16px; background: rgba(14, 22, 38, .96); border: 1px solid var(--line2); }
 .grp-sheet h3 { margin: 0 0 6px; }
-.grp-sheet textarea { width: 100%; min-height: 140px; margin: 8px 0; border-radius: 10px; border: 1px dashed rgba(245, 196, 81, .45); background: rgba(0, 0, 0, .35); color: var(--ink); padding: 10px; font: 12px/1.5 var(--mono); }
+.grp-sheet textarea { width: 100%; min-height: 220px; margin: 8px 0; border-radius: 10px; border: 1px dashed rgba(245, 196, 81, .45); background: rgba(0, 0, 0, .35); color: var(--ink); padding: 10px; font: 13px/1.55 var(--font); }
 .grp-checks { display: grid; gap: 6px; margin: 8px 0; max-height: 240px; overflow: auto; }
 .grp-checks label { display: flex; gap: 8px; align-items: center; font-size: 13px; }
 @media (max-width: 760px) {
