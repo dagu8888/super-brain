@@ -1412,24 +1412,32 @@
     if (label === "人") return "human";
     return "agent";
   }
+  // 内部 Agent 不打标签。中台若仍带回「你的 agent」，这里收掉，不渲染。
+  function suppressInternalBadge(label) {
+    const text = String(label || "").trim();
+    return text === "你的 agent" ? "" : text;
+  }
   function badgeHtml(label) {
-    return `<span class="side-badge" data-side="${sideOf(label)}">${esc(label)}</span>`;
+    const text = suppressInternalBadge(label);
+    if (!text) return "";
+    return `<span class="side-badge" data-side="${sideOf(text)}">${esc(text)}</span>`;
   }
   function rosterBadge(a) {
-    if (a && a.sender_badge) return a.sender_badge;
-    return a && a.kind === "external" ? "外部" : "你的 agent";
+    if (a && (a.kind === "external" || a.sender_badge === "外部")) return "外部";
+    return "";
   }
   function memberBadge(m) {
-    if (m && m.sender_badge) return m.sender_badge;
+    const sent = suppressInternalBadge(m && m.sender_badge);
+    if (sent) return sent;
     if (m && m.member_kind === "human") return "人";
     if (m && m.member_kind === "external") return "外部";
-    return "你的 agent";
+    return "";
   }
   function personButton(a) {
-    const label = rosterBadge(a);
+    const badge = badgeHtml(rosterBadge(a));
     return `<button type="button" class="grp-person" data-grp-who="${esc(a.id)}">
       <i class="grp-av" data-k="${esc(a.kind)}">${esc(initial(a.name))}</i>
-      <span><b>${esc(a.name)} ${badgeHtml(label)}</b><small class="grp-tx">${esc(txLine(a))}${a.wake_registered ? " · 可唤醒" : ""}</small></span>
+      <span><b>${esc(a.name)}${badge ? " " + badge : ""}</b><small class="grp-tx">${esc(txLine(a))}${a.wake_registered ? " · 可唤醒" : ""}</small></span>
     </button>`;
   }
   function initial(name) { const s = String(name || "?").trim(); return s ? s.slice(0, 1) : "?"; }
@@ -1494,9 +1502,9 @@
     if (!box) return;
     const yours = G.roster.filter((a) => rosterBadge(a) !== "外部");
     const outs = G.roster.filter((a) => rosterBadge(a) === "外部");
-    const yoursHtml = yours.length ? yours.map(personButton).join("") : '<div class="empty">还没有你的 agent</div>';
+    const yoursHtml = yours.length ? yours.map(personButton).join("") : '<div class="empty">还没有已接入的 Agent</div>';
     const outsHtml = outs.length ? `<h3>外部</h3><div class="grp-people">${outs.map(personButton).join("")}</div>` : "";
-    box.innerHTML = `<h3>你的 agent</h3><div class="grp-people">${yoursHtml}</div>${outsHtml}
+    box.innerHTML = `<div class="grp-people">${yoursHtml}</div>${outsHtml}
       <button class="grp-pair" type="button" data-grp-pair>接入 agent</button>`;
   }
   function renderMid() {
@@ -1506,17 +1514,19 @@
     if (G.tab === "contacts") {
       const row = (a) => {
         const label = rosterBadge(a);
+        const badge = badgeHtml(label);
         const status = a.roster_label && a.roster_label !== label ? esc(a.roster_label) + " · " : "";
         return `<div class="grp-citem">
         <i class="grp-av" data-k="${esc(a.kind)}">${esc(initial(a.name))}</i>
-        <span class="grow"><b>${esc(a.name)} ${badgeHtml(label)}</b><small class="grp-tx">${status}${esc(txLine(a))}</small></span>
+        <span class="grow"><b>${esc(a.name)}${badge ? " " + badge : ""}</b><small class="grp-tx">${status}${esc(txLine(a))}</small></span>
         <button class="act" type="button" data-grp-with="${esc(a.id)}" data-grp-with-name="${esc(a.name)}">建群</button>
       </div>`;
       };
       const yours = G.roster.filter((a) => rosterBadge(a) !== "外部");
       const outs = G.roster.filter((a) => rosterBadge(a) === "外部");
-      const block = (title, list) => list.length ? `<h3 class="grp-block-title">${esc(title)}</h3>${list.map(row).join("")}` : "";
-      box.innerHTML = (block("你的 agent", yours) + block("外部", outs)) || '<div class="empty">还没有可联络的 Agent</div>';
+      const yoursHtml = yours.map(row).join("");
+      const outsHtml = outs.length ? `<h3 class="grp-block-title">外部</h3>${outs.map(row).join("")}` : "";
+      box.innerHTML = (yoursHtml + outsHtml) || '<div class="empty">还没有可联络的 Agent</div>';
       return;
     }
     box.innerHTML = G.groups.length ? G.groups.map((g) => `<button type="button" class="grp-gitem${g.group_id === G.current ? " on" : ""}" data-grp-open="${esc(g.group_id)}">
@@ -1534,7 +1544,10 @@
       head.innerHTML = `<button class="grp-back" type="button" data-grp-back>返回</button><div class="grp-head-text"><h2>群聊</h2><p>选一个群，或点「+ 建群」</p></div>`;
       return;
     }
-    const members = (g.members || []).map((m) => `<li>${esc(m.display_name)} ${badgeHtml(memberBadge(m))}</li>`).join("");
+    const members = (g.members || []).map((m) => {
+      const badge = badgeHtml(memberBadge(m));
+      return `<li>${esc(m.display_name)}${badge ? " " + badge : ""}</li>`;
+    }).join("");
     head.innerHTML = `<button class="grp-back" type="button" data-grp-back>返回</button>
       <div class="grp-head-text"><h2>${esc(g.name)}</h2><p>${esc(g.join_label || "仅限邀请加入")} · ${g.agent_count || 0} 个 agent · ${g.human_count || 0} 人</p>
       <ul class="grp-members" aria-label="群成员">${members}</ul></div>
@@ -1545,7 +1558,10 @@
     if (!box) return;
     const m = G.messages.find((x) => x.msg_id === G.reply);
     box.hidden = !m;
-    if (m) box.innerHTML = `<span>回复 ${esc(m.sender_badge || "")} ${esc((m.text || "").slice(0, 48))}</span><button type="button" data-grp-reply-x aria-label="取消回复">×</button>`;
+    if (m) {
+      const badge = suppressInternalBadge(m.sender_badge);
+      box.innerHTML = `<span>回复 ${badge ? esc(badge) + " " : ""}${esc((m.text || "").slice(0, 48))}</span><button type="button" data-grp-reply-x aria-label="取消回复">×</button>`;
+    }
   }
   function wakeLine(m) {
     const ws = m.wakes || [];
@@ -1579,11 +1595,12 @@
       }
       const me = m.sender_role === "human" || m.from_agent === OWNER;
       const ext = m.sender_role === "external";
-      const badge = me ? "人" : (m.sender_badge || (ext ? "外部" : "你的 agent"));
+      const badge = me ? "人" : (suppressInternalBadge(m.sender_badge) || (ext ? "外部" : ""));
+      const badgeEl = badge ? `<span class="badge side-badge" data-side="${sideOf(badge)}">${esc(badge)}</span>` : "";
       const name = me ? "大古" : (m.sender_name || m.from_agent);
       const q = m.reply_to && byId.get(m.reply_to);
       return `<li class="grp-bub${me ? " me" : ""}${ext ? " ext" : ""}">
-        <div class="who"><b>${esc(name)}</b><span class="badge side-badge" data-side="${sideOf(badge)}">${esc(badge)}</span><time>${dtm(m.created_at)}</time></div>
+        <div class="who"><b>${esc(name)}</b>${badgeEl}<time>${dtm(m.created_at)}</time></div>
         ${q ? `<span class="quote">${esc((q.text || "").slice(0, 80))}</span>` : ""}
         ${richText(m.text || "")}
         ${wakeLine(m)}
@@ -1600,7 +1617,10 @@
     box.hidden = !G.at || !g;
     if (!g) { box.innerHTML = ""; return; }
     const members = (g.members || []).filter((m) => m.member_kind !== "human");
-    box.innerHTML = members.map((m) => `<button type="button" data-grp-at-name="${esc(m.display_name)}">@${esc(m.display_name)} ${badgeHtml(memberBadge(m))}</button>`).join("") || '<span class="note">这个群还没有其他成员</span>';
+    box.innerHTML = members.map((m) => {
+      const badge = badgeHtml(memberBadge(m));
+      return `<button type="button" data-grp-at-name="${esc(m.display_name)}">@${esc(m.display_name)}${badge ? " " + badge : ""}</button>`;
+    }).join("") || '<span class="note">这个群还没有其他成员</span>';
   }
   function showOverlay(html) {
     const ov = $("#grp-overlay");
@@ -1647,7 +1667,10 @@
     if (!g) { toast("先打开一个群"); return; }
     const inside = new Set((g.members || []).map((m) => m.member_id));
     const cands = G.roster.filter((a) => !inside.has(a.id));
-    const checks = cands.map((a) => `<label><input type="checkbox" value="${esc(a.id)}"> ${esc(a.name)} ${badgeHtml(rosterBadge(a))} · ${esc(txLine(a))}</label>`).join("");
+    const checks = cands.map((a) => {
+      const badge = badgeHtml(rosterBadge(a));
+      return `<label><input type="checkbox" value="${esc(a.id)}"> ${esc(a.name)}${badge ? " " + badge : ""} · ${esc(txLine(a))}</label>`;
+    }).join("");
     showOverlay(`<h3>邀请到「${esc(g.name)}」</h3><p class="note">${esc(g.join_label || "仅限邀请加入")}。拉的是名册里的 Agent，或生成一次性配对码给外部 Agent。</p>
       <div class="grp-checks">${checks || '<div class="note">名册里的 Agent 都已经在群里</div>'}</div>
       <div class="dlg-actions"><button class="btn" type="button" data-grp-do-add>拉进群</button><button class="act gold" type="button" data-grp-do-pair>生成外部配对码</button><button class="chip" type="button" data-grp-close>关闭</button></div>`);
