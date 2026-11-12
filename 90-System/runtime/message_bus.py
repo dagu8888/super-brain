@@ -179,6 +179,12 @@ def handle_cmd(conn, chief_id, cmd, args):
     text = args.get("text", "")
     kind = args.get("kind", "chat")
     inst = args.get("instance") or args.get("from_instance")
+    if cmd in ("msg", "reply"):
+        # 群 id（grp_）走群聊：仍写入 messages，但不改点对点 msg/reply 的老行为。
+        import group_chat
+        routed = group_chat.route_cmd(conn, chief_id, cmd, args)
+        if routed is not None:
+            return routed
     if cmd == "reply":
         reply_to = str(args.get("reply_to") or args.get("id") or "").strip()
         if not reply_to:

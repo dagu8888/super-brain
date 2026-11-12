@@ -257,6 +257,8 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
             ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
             if target.suffix == ".webmanifest":
                 ctype = "application/manifest+json"
+            if target.suffix.lower() == ".md":
+                ctype = "text/markdown"
             if ctype.startswith("text/") or ctype in (
                     "application/javascript", "application/json", "application/manifest+json"):
                 ctype += "; charset=utf-8"
@@ -403,7 +405,8 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
                 except Exception as e:
                     res = {"ok": False, "error": f"内部错误: {type(e).__name__}"}
                 if action not in ("whoami", "devices", "vault_list"):   # 只读动作不记审计
-                    target = args.get("to") or args.get("agent") or args.get("task_id") or args.get("id") or args.get("path") or ""
+                    target = (args.get("to") or args.get("agent") or args.get("task_id")
+                              or args.get("id") or args.get("path") or args.get("group_id") or "")
                     owner_ops.audit(conn, who, action, target, self._audit_ua(owner_ops.audit_detail(action, args, res)),
                                     ok=bool(res.get("ok")), ip=self._client_ip())
                     log_event("owner_act", action=action, ok=bool(res.get("ok")), device=who.get("device", ""))
@@ -475,9 +478,37 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
                 data = b""
                 STT_BUSY.release()
 
+        def _groupchat(self, method):
+            """外部 Agent / 已接入 Agent 的群聊写接口与收件箱。令牌不进日志。"""
+            import group_chat
+            parsed = urlparse(self.path)
+            path = parsed.path.rstrip("/") or "/"
+            q = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+            auth = self.headers.get("Authorization", "")
+            token = auth[7:].strip() if auth.startswith("Bearer ") else ""
+            conn = db_fn()
+            try:
+                if method == "GET":
+                    code, obj = group_chat.handle_authed_get(conn, path, q, token, tokens)
+                else:
+                    try:
+                        req = self._read_json()
+                    except Exception:
+                        return self._send(400, {"ok": False, "error": "请求无效"})
+                    code, obj = group_chat.handle_post(conn, path, req, token, tokens)
+            except Exception as e:
+                code, obj = 500, {"ok": False, "error": "内部错误: %s" % type(e).__name__}
+            finally:
+                conn.close()
+            log_event("groupchat", method=method, path=path[-80:], ok=bool(obj.get("ok")))
+            return self._send(code, obj)
+
         def do_GET(self):
             if self.path.startswith("/healthz"):        # 免鉴权探活
                 return self._send(200, {"ok": True, "service": "super-brain-api"})
+            gpath = urlparse(self.path).path.rstrip("/")
+            if gpath in ("/api/groupchat/inbox", "/api/groupchat/me"):
+                return self._groupchat("GET")
             if self.path.startswith("/api/owner/"):     # 大古身份自查（需设备令牌）
                 conn = db_fn()
                 try:
@@ -512,6 +543,8 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
                 return self._owner_stt()
             if self.path.startswith("/api/owner/"):
                 return self._owner_post()
+            if urlparse(self.path).path.startswith("/api/groupchat"):
+                return self._groupchat("POST")
             if self.path != "/cmd":
                 return self._send(404, {"ok": False, "error": "not found"})
             auth = self.headers.get("Authorization", "")

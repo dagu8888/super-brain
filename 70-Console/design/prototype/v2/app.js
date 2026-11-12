@@ -268,6 +268,7 @@
   function refreshSoon() { clearTimeout(dashSoon); dashSoon = setTimeout(() => loadDash(false), 2500); }
   function onLiveMsg(m) {
     if (!m || !m.msg_id) return;
+    if (String(m.to || "").indexOf("grp_") === 0) ingestGroupLive(m);
     if (isChat(m) && addChat(m, true)) renderChat();
     S.lastMsgTs = Math.max(S.lastMsgTs, m.created_at || 0);
     const it = msgItem(m);
@@ -952,7 +953,7 @@
   }
 
   /* 审计 */
-  const ACT_CN = { msg: "发消息", rollcall: "发起点名", submit: "下指令", pause: "暂停", resume: "恢复", task_approve: "通过任务", task_reject: "打回任务", task_retry: "重跑任务", task_reassign: "转交任务", approval_decide: "审批裁决", kb_save: "编辑知识库", unlock: "今日授权", pair: "设备配对", pair_code_create: "生成配对链接", device_revoke: "吊销设备", logout: "退出设备", vault_put: "存入口令", vault_disable: "停用口令", vault_enable: "启用口令", vault_list: "查看口令清单", project_upsert: "编辑项目", phase_upsert: "编辑阶段", phase_accept: "阶段验收" };
+  const ACT_CN = { msg: "发消息", rollcall: "发起点名", submit: "下指令", pause: "暂停", resume: "恢复", task_approve: "通过任务", task_reject: "打回任务", task_retry: "重跑任务", task_reassign: "转交任务", approval_decide: "审批裁决", kb_save: "编辑知识库", unlock: "今日授权", pair: "设备配对", pair_code_create: "生成配对链接", device_revoke: "吊销设备", logout: "退出设备", vault_put: "存入口令", vault_disable: "停用口令", vault_enable: "启用口令", vault_list: "查看口令清单", project_upsert: "编辑项目", phase_upsert: "编辑阶段", phase_accept: "阶段验收", group_create: "建群", group_add: "拉人进群", group_send: "群聊发言", group_pair: "生成群配对码", group_recall: "撤回群消息", group_webhook: "登记群唤醒", group_checkin: "设置群打卡间隔" };
   async function loadAudit() {
     try {
       const rows = (await api("/api/audit?limit=50")).data || [];
@@ -1398,6 +1399,330 @@
     btn.disabled = false;
   }
 
+  /* ---------- 群聊：名册来自真实注册表；新消息走现有 SSE。不按心跳轮询。 ---------- */
+  const G = { roster: [], groups: [], current: null, messages: [], tab: "chats", at: false, reply: null, pending: 0, unread: {}, timer: null };
+  const curGroup = () => G.groups.find((g) => g.group_id === G.current) || null;
+  function txLine(a) {
+    if (!a) return "";
+    if (a.talk_state === "proven" && a.last_tx_at) return "已证实收发 · " + dtm(a.last_tx_at);
+    return a.talk_label || "名册在册，尚未证实收发";
+  }
+  function initial(name) { const s = String(name || "?").trim(); return s ? s.slice(0, 1) : "?"; }
+  function richText(text) { return esc(text).replace(/@([^\s@&<]+)/g, '<span class="at">@$1</span>'); }
+  function streamNear() {
+    const box = $("#grp-stream");
+    if (!box) return true;
+    return box.scrollHeight - box.scrollTop - box.clientHeight < 100;
+  }
+  function scrollGroup() { const b = $("#grp-stream"); if (b) b.scrollTop = b.scrollHeight; }
+  function renderJump() {
+    const b = $("#grp-jump");
+    if (!b) return;
+    b.hidden = !(G.pending > 0);
+    b.textContent = G.pending + " 条新消息";
+  }
+  async function loadGroupHome() {
+    try {
+      const [r, g] = await Promise.all([api("/api/groupchat/roster"), api("/api/groupchat/groups")]);
+      G.roster = r.data || [];
+      G.groups = g.data || [];
+      renderRoster();
+      renderMid();
+      renderHead();
+    } catch (e) {
+      const box = $("#grp-roster");
+      if (box) box.innerHTML = `<div class="empty">名册读取失败：${esc(e.message)}</div>`;
+    }
+  }
+  async function refreshOpen() {
+    const id = G.current;
+    if (!id) { renderStream(); return; }
+    const near = streamNear();
+    const old = new Set(G.messages.map((m) => m.msg_id));
+    try {
+      const j = await api(`/api/groupchat/groups/${encodeURIComponent(id)}/messages?limit=300`);
+      if (G.current !== id) return;
+      const next = j.data || [];
+      const added = next.filter((m) => !old.has(m.msg_id)).length;
+      G.messages = next;
+      if (added && !near && old.size) G.pending += added;
+      else G.pending = 0;
+      renderStream();
+      renderHead();
+      if (!added || near || !old.size) scrollGroup();
+      renderJump();
+    } catch (e) {
+      $("#grp-stream").innerHTML = `<li class="empty">消息读取失败：${esc(e.message)}</li>`;
+    }
+  }
+  function scheduleOpen() { clearTimeout(G.timer); G.timer = setTimeout(refreshOpen, 180); }
+  function ingestGroupLive(m) {
+    if (!m || String(m.to || "").indexOf("grp_") !== 0) return;
+    const g = G.groups.find((x) => x.group_id === m.to);
+    if (g) { g.last_preview = m.kind === "notice" ? (m.text || "") : (m.text || ""); g.last_at = m.created_at; }
+    if (G.current && m.to === G.current) scheduleOpen();
+    else if (m.to) G.unread[m.to] = (G.unread[m.to] || 0) + 1;
+    renderMid();
+  }
+  function renderRoster() {
+    const box = $("#grp-roster");
+    if (!box) return;
+    const people = G.roster.map((a) => `<button type="button" class="grp-person" data-grp-who="${esc(a.id)}">
+      <i class="grp-av" data-k="${esc(a.kind)}">${esc(initial(a.name))}</i>
+      <span><b>${esc(a.name)}</b><small class="grp-tx">${esc(txLine(a))}${a.wake_registered ? " · 可唤醒" : ""}</small></span>
+    </button>`).join("");
+    box.innerHTML = `<h3>已接入</h3><div class="grp-people">${people || '<div class="empty">名册是空的</div>'}</div>
+      <button class="grp-pair" type="button" data-grp-pair>接入 agent</button>`;
+  }
+  function renderMid() {
+    const box = $("#grp-mid");
+    if (!box) return;
+    $$("#grp-switch button").forEach((b) => b.classList.toggle("on", b.dataset.grpTab === G.tab));
+    if (G.tab === "contacts") {
+      box.innerHTML = G.roster.length ? G.roster.map((a) => `<div class="grp-citem">
+        <i class="grp-av" data-k="${esc(a.kind)}">${esc(initial(a.name))}</i>
+        <span class="grow"><b>${esc(a.name)}</b><small class="grp-tx">${esc(a.roster_label || "")} · ${esc(txLine(a))}</small></span>
+        <button class="act" type="button" data-grp-with="${esc(a.id)}" data-grp-with-name="${esc(a.name)}">建群</button>
+      </div>`).join("") : '<div class="empty">还没有可联络的 Agent</div>';
+      return;
+    }
+    box.innerHTML = G.groups.length ? G.groups.map((g) => `<button type="button" class="grp-gitem${g.group_id === G.current ? " on" : ""}" data-grp-open="${esc(g.group_id)}">
+      <i class="grp-av">${esc(initial(g.name))}</i>
+      <span class="grow"><b>${esc(g.name)}${G.unread[g.group_id] ? " · " + G.unread[g.group_id] : ""}</b>
+      <small class="grp-tx">${esc(g.last_who ? g.last_who + "：" : "")}${esc(g.last_preview || "还没有消息")}</small></span>
+      <small>${g.last_at ? esc(dtm(g.last_at)) : ""}</small>
+    </button>`).join("") : '<div class="empty">还没有群<br>点下面「+ 建群」</div>';
+  }
+  function renderHead() {
+    const head = $("#grp-head");
+    if (!head) return;
+    const g = curGroup();
+    if (!g) {
+      head.innerHTML = `<button class="grp-back" type="button" data-grp-back>返回</button><div class="grp-head-text"><h2>群聊</h2><p>选一个群，或点「+ 建群」</p></div>`;
+      return;
+    }
+    head.innerHTML = `<button class="grp-back" type="button" data-grp-back>返回</button>
+      <div class="grp-head-text"><h2>${esc(g.name)}</h2><p>${esc(g.join_label || "仅限邀请加入")} · ${g.agent_count || 0} 个 agent · ${g.human_count || 0} 人</p></div>
+      <button class="act gold" type="button" data-grp-invite>邀请</button>`;
+  }
+  function renderReply() {
+    const box = $("#grp-reply");
+    if (!box) return;
+    const m = G.messages.find((x) => x.msg_id === G.reply);
+    box.hidden = !m;
+    if (m) box.innerHTML = `<span>回复 ${esc(m.sender_badge || "")} ${esc((m.text || "").slice(0, 48))}</span><button type="button" data-grp-reply-x aria-label="取消回复">×</button>`;
+  }
+  function wakeLine(m) {
+    const ws = m.wakes || [];
+    if (!ws.length || m.sender_role === "system") return "";
+    const bits = ws.map((w) => {
+      const n = w.name || w.member_id;
+      if (w.status === "delivered") return n + " 已叫醒";
+      if (w.status === "missed") return n + " 叫醒未达（不自动重试）";
+      return n + " 未登记唤醒";
+    });
+    return `<div class="grp-wake">${esc(bits.join(" · "))}</div>`;
+  }
+  function renderStream() {
+    const box = $("#grp-stream");
+    if (!box) return;
+    const top = box.scrollTop;
+    if (!G.current) {
+      box.innerHTML = '<li class="empty">在中间选一个群。<br>发言、建群和配对码沿用今天的口令，查看不用口令。</li>';
+      renderJump();
+      return;
+    }
+    if (!G.messages.length) {
+      box.innerHTML = '<li class="empty">还没有消息。<br>下面以主人身份发言。有 webhook 的 Agent 会被叫醒一次，然后自己来拉收件箱。</li>';
+      renderJump();
+      return;
+    }
+    const byId = new Map(G.messages.map((m) => [m.msg_id, m]));
+    box.innerHTML = G.messages.map((m) => {
+      if (m.sender_role === "system" || m.kind === "notice") {
+        return `<li class="grp-sys"><span>${esc(m.text)}</span><time>${dtm(m.created_at)}</time></li>`;
+      }
+      const me = m.sender_role === "human" || m.from_agent === OWNER;
+      const ext = m.sender_role === "external";
+      const badge = me ? "人" : (m.sender_badge || (ext ? "外部" : "你的 agent"));
+      const name = me ? "大古" : (m.sender_name || m.from_agent);
+      const q = m.reply_to && byId.get(m.reply_to);
+      return `<li class="grp-bub${me ? " me" : ""}${ext ? " ext" : ""}">
+        <div class="who"><b>${esc(name)}</b><span class="badge">${esc(badge)}</span><time>${dtm(m.created_at)}</time></div>
+        ${q ? `<span class="quote">${esc((q.text || "").slice(0, 80))}</span>` : ""}
+        ${richText(m.text || "")}
+        ${wakeLine(m)}
+        <div class="ops"><button type="button" data-grp-reply="${esc(m.msg_id)}">回复</button>${me ? `<button type="button" data-grp-recall="${esc(m.msg_id)}">撤回</button>` : ""}</div>
+      </li>`;
+    }).join("");
+    if (G.pending > 0) box.scrollTop = top;
+    renderJump();
+  }
+  function renderAtBox() {
+    const box = $("#grp-at-box");
+    if (!box) return;
+    const g = curGroup();
+    box.hidden = !G.at || !g;
+    if (!g) { box.innerHTML = ""; return; }
+    const members = (g.members || []).filter((m) => m.member_kind !== "human");
+    box.innerHTML = members.map((m) => `<button type="button" data-grp-at-name="${esc(m.display_name)}">@${esc(m.display_name)}</button>`).join("") || '<span class="note">这个群还没有其他成员</span>';
+  }
+  function showOverlay(html) {
+    const ov = $("#grp-overlay");
+    ov.innerHTML = `<div class="grp-sheet glass">${html}</div>`;
+    ov.hidden = false;
+  }
+  function hideOverlay() { const ov = $("#grp-overlay"); if (ov) { ov.hidden = true; ov.innerHTML = ""; } }
+  function showPair(j) {
+    const origin = (location.protocol || "").startsWith("http") ? location.origin : "https://console.8.218.106.225.nip.io";
+    const doc = origin + (j.doc_path || "/console/prototype/groupchat/install.md");
+    const skill = origin + (j.skill_path || "/console/prototype/groupchat/skill.md");
+    const block = [
+      "按文档执行。不要每分钟轮询，不要用心跳判断能不能说话。",
+      "文档: " + doc,
+      "技能: " + skill,
+      "BASE=" + origin,
+      "配对码=" + (j.code || ""),
+      j.group_id ? "进群=" + j.group_id : "进群=换到令牌后，由主人邀请",
+      "用配对码 POST /api/groupchat/pair 换令牌。令牌只出现这一次。",
+      "登记 webhook 后，有消息时服务端只 POST {event,group_id,msg_id,pull}，没有正文、没有令牌。",
+      "被叫醒后自己 GET /api/groupchat/inbox 。叫醒失败只查 /api/groupchat/wakes，不要重试，不要派新任务。"
+    ].join("\n");
+    showOverlay(`<h3>一次性配对码</h3><p class="note">只显示这一次。服务端不留明文。把下面整段交给外部 Agent。</p>
+      <textarea readonly id="grp-pair-text">${esc(block)}</textarea>
+      <div class="dlg-actions"><button class="btn" type="button" data-grp-copy>复制</button><button class="chip" type="button" data-grp-close>关闭</button></div>`);
+  }
+  function showInvite() {
+    const g = curGroup();
+    if (!g) { toast("先打开一个群"); return; }
+    const inside = new Set((g.members || []).map((m) => m.member_id));
+    const cands = G.roster.filter((a) => !inside.has(a.id));
+    const checks = cands.map((a) => `<label><input type="checkbox" value="${esc(a.id)}"> ${esc(a.name)} · ${esc(txLine(a))}</label>`).join("");
+    showOverlay(`<h3>邀请到「${esc(g.name)}」</h3><p class="note">${esc(g.join_label || "仅限邀请加入")}。拉的是名册里的 Agent，或生成一次性配对码给外部 Agent。</p>
+      <div class="grp-checks">${checks || '<div class="note">名册里的 Agent 都已经在群里</div>'}</div>
+      <div class="dlg-actions"><button class="btn" type="button" data-grp-do-add>拉进群</button><button class="act gold" type="button" data-grp-do-pair>生成外部配对码</button><button class="chip" type="button" data-grp-close>关闭</button></div>`);
+  }
+  async function openGroup(id) {
+    G.current = id;
+    G.pending = 0;
+    G.unread[id] = 0;
+    G.reply = null;
+    G.at = false;
+    const app = $("#grp-app");
+    if (app) app.dataset.pane = "chat";
+    renderMid();
+    renderHead();
+    renderReply();
+    renderAtBox();
+    await refreshOpen();
+    scrollGroup();
+  }
+  async function createGroup(name, members) {
+    const j = await act("group_create", { name, members: members || [] }, "群已建立");
+    if (j && j.ok && j.group_id) { await loadGroupHome(); await openGroup(j.group_id); }
+    return j;
+  }
+  async function sendGroup() {
+    const ta = $("#grp-input");
+    const text = (ta.value || "").trim();
+    if (!G.current) { toast("先打开一个群"); return; }
+    if (!text) return;
+    const btn = $("#grp-send");
+    btn.disabled = true;
+    const j = await act("group_send", { group_id: G.current, text, reply_to: G.reply || undefined });
+    btn.disabled = false;
+    if (j && j.ok) {
+      ta.value = ""; autoGrow(ta); G.reply = null; G.at = false; renderReply(); renderAtBox();
+      G.pending = 0;
+      await refreshOpen();
+      scrollGroup();
+      loadGroupHome();
+    }
+  }
+  function bindGroup() {
+    const root = $("#sec-groups");
+    if (!root) return;
+    $("#grp-create").addEventListener("click", async () => {
+      const v = await dlg({ title: "新建群", desc: "建好后用「邀请」拉已接入的 Agent，或生成外部配对码。", placeholder: "群名称", field: "text", rows: 1, required: true, okText: "建群" });
+      if (!v || !v.value) return;
+      await createGroup(v.value, []);
+    });
+    $("#grp-form").addEventListener("submit", (e) => { e.preventDefault(); sendGroup(); });
+    $("#grp-input").addEventListener("input", () => autoGrow($("#grp-input")));
+    $("#grp-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !mobile.matches) { e.preventDefault(); sendGroup(); }
+    });
+    $("#grp-at").addEventListener("click", () => { G.at = !G.at; renderAtBox(); });
+    $("#grp-file-btn").addEventListener("click", () => $("#grp-file").click());
+    $("#grp-file").addEventListener("change", () => {
+      const f = $("#grp-file").files && $("#grp-file").files[0];
+      if (!f) return;
+      const ta = $("#grp-input");
+      ta.value = (ta.value ? ta.value.replace(/\s*$/, "") + " " : "") + "【附件】" + f.name;
+      autoGrow(ta);
+      toast("这一版把文件名写进发言，文件本体不上传");
+      $("#grp-file").value = "";
+    });
+    $("#grp-jump").addEventListener("click", () => { G.pending = 0; renderJump(); scrollGroup(); });
+    $("#grp-stream").addEventListener("scroll", () => { if (streamNear()) { G.pending = 0; renderJump(); } });
+    root.addEventListener("click", async (e) => {
+      const tab = e.target.closest("[data-grp-tab]");
+      if (tab) { G.tab = tab.dataset.grpTab; renderMid(); return; }
+      const open = e.target.closest("[data-grp-open]");
+      if (open) { openGroup(open.dataset.grpOpen); return; }
+      if (e.target.closest("[data-grp-back]")) { $("#grp-app").dataset.pane = "list"; return; }
+      if (e.target.closest("[data-grp-pair]")) {
+        const j = await act("group_pair", G.current ? { group_id: G.current } : {});
+        if (j && j.ok) showPair(j);
+        return;
+      }
+      if (e.target.closest("[data-grp-invite]")) { showInvite(); return; }
+      const withBtn = e.target.closest("[data-grp-with]");
+      if (withBtn) { await createGroup(withBtn.dataset.grpWithName + " 的群", [withBtn.dataset.grpWith]); return; }
+      const reply = e.target.closest("[data-grp-reply]");
+      if (reply) { G.reply = reply.dataset.grpReply; renderReply(); $("#grp-input").focus(); return; }
+      if (e.target.closest("[data-grp-reply-x]")) { G.reply = null; renderReply(); return; }
+      const rec = e.target.closest("[data-grp-recall]");
+      if (rec) {
+        const j = await act("group_recall", { group_id: G.current, msg_id: rec.dataset.grpRecall }, "已撤回");
+        if (j && j.ok) refreshOpen();
+        return;
+      }
+      const at = e.target.closest("[data-grp-at-name]");
+      if (at) {
+        const ta = $("#grp-input");
+        ta.value = (ta.value ? ta.value.replace(/\s*$/, "") + " " : "") + "@" + at.dataset.grpAtName + " ";
+        G.at = false; renderAtBox(); autoGrow(ta); ta.focus();
+        return;
+      }
+      if (e.target.closest("[data-grp-close]")) { hideOverlay(); return; }
+      if (e.target.closest("[data-grp-do-pair]")) {
+        const j = await act("group_pair", { group_id: G.current });
+        if (j && j.ok) showPair(j);
+        return;
+      }
+      if (e.target.closest("[data-grp-do-add]")) {
+        const ids = $$("#grp-overlay input[type=checkbox]:checked").map((n) => n.value);
+        if (!ids.length) { toast("先勾选要拉的 Agent"); return; }
+        for (const id of ids) {
+          const j = await act("group_add", { group_id: G.current, member_id: id });
+          if (!j || !j.ok) return;
+        }
+        hideOverlay();
+        toast("已拉进群");
+        await loadGroupHome();
+        refreshOpen();
+        return;
+      }
+      if (e.target.closest("[data-grp-copy]")) {
+        const t = $("#grp-pair-text");
+        if (!t) return;
+        try { await navigator.clipboard.writeText(t.value); toast("已复制"); }
+        catch (err) { t.focus(); t.select(); toast("请长按复制"); }
+      }
+    });
+  }
+
   function bindExtras() {
     $("#chat-form").addEventListener("submit", (e) => { e.preventDefault(); sendChat(); });
     const ta = $("#chat-input");
@@ -1431,9 +1756,10 @@
     window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
     if (tab === "overview" && S.view) setTimeout(() => S.graph && S.view.setData(S.graph), 30);
     if (tab === "chat") { S.chatUnread = 0; renderChatBadge(); setTimeout(scrollChat, 30); }
+    if (tab === "groups") { loadGroupHome(); if (G.current) refreshOpen(); }
   }
   function go(target) {
-    const map = { approvals: ["approvals", "#sec-approvals"], agents: ["more", "#sec-agents"], "agents-issue": ["more", "#sec-agents"], feed: ["feed", ".feed"], "feed-event": ["feed", ".feed"], rollcall: ["overview", "#sec-rollcall"], server: ["more", "#sec-server"], chat: ["chat", "#sec-chat"], projects: ["projects", "#sec-projects"] };
+    const map = { approvals: ["approvals", "#sec-approvals"], agents: ["more", "#sec-agents"], "agents-issue": ["more", "#sec-agents"], feed: ["feed", ".feed"], "feed-event": ["feed", ".feed"], rollcall: ["overview", "#sec-rollcall"], server: ["more", "#sec-server"], chat: ["chat", "#sec-chat"], projects: ["projects", "#sec-projects"], groups: ["groups", "#sec-groups"] };
     const [tab, sel] = map[target] || ["overview", "#kpis"];
     if (target === "agents-issue") { S.agentFilter = "issue"; $$("#agent-filter button").forEach((b) => b.classList.toggle("on", b.dataset.f === "issue")); renderAgents(); }
     if (target === "feed-event") { S.feedFilter = "event"; $$("#feed-filter button").forEach((b) => b.classList.toggle("on", b.dataset.f === "event")); renderFeed(); }
@@ -1446,6 +1772,7 @@
     $("#agent-filter").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; S.agentFilter = b.dataset.f; $$("#agent-filter button").forEach((x) => x.classList.toggle("on", x === b)); renderAgents(); });
     $("#agents").addEventListener("click", (e) => { const b = e.target.closest("[data-agent]"); if (b) openNode(b.dataset.agent); });
     bindExtras();
+    bindGroup();
     $("#feed").addEventListener("click", (e) => { const li = e.target.closest(".fi"); if (li) openFeedItem(li.dataset.id); });
     $("#feed").addEventListener("keydown", (e) => { if (e.key === "Enter") { const li = e.target.closest(".fi"); if (li) openFeedItem(li.dataset.id); } });
     $("#kb").addEventListener("click", (e) => { const b = e.target.closest("[data-path]"); if (b) openDoc(b.dataset.path); });
@@ -1478,7 +1805,7 @@
     $("#legend").addEventListener("click", (e) => { if (e.target.closest("summary")) { const lg = $("#legend"); lg.dataset.collapsed = lg.dataset.collapsed === "true" ? "false" : "true"; renderLegend(); } });
     mobile.addEventListener && mobile.addEventListener("change", () => { if (!localStorage.getItem("sb.view")) { S.view && S.view.dispose(); S.view = null; S.viewKind = null; ensureView(); } renderLegend(); });
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") { loadDash(false); if (!S.es || S.es.readyState === 2) { S.esFails = 0; startStream(); } }
+      if (document.visibilityState === "visible") { loadDash(false); loadGroupHome(); if (G.current) refreshOpen(); if (!S.es || S.es.readyState === 2) { S.esFails = 0; startStream(); } }
     });
     window.addEventListener("online", () => { S.esFails = 0; startStream(); toast("网络已恢复，重新连上实时通道"); });
     window.addEventListener("offline", () => setConn("down", "网络断开"));
@@ -1494,7 +1821,7 @@
     loadDash(true);
     renderOwnerPill();
     if (/[#&]pair=/.test(location.hash)) history.replaceState(null, "", location.pathname + location.search);
-    loadServer(); loadRelations(); loadEvents(); searchKb(""); loadApprovals(); loadAudit(); loadChat(); loadProjects();
+    loadServer(); loadRelations(); loadEvents(); searchKb(""); loadApprovals(); loadAudit(); loadChat(); loadProjects(); loadGroupHome();
     if (!mobile.matches) document.documentElement.dataset.tab = "overview";
     setInterval(() => { if (document.visibilityState === "visible") loadProjects(); }, 60000);
     setInterval(() => { if (document.visibilityState === "visible" && S.mode !== "live") loadChat(); }, 15000);

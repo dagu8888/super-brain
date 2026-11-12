@@ -6,6 +6,7 @@
 #       /api/events /api/monitor /api/knowledge /api/memory
 #       /api/messages /api/rollcall/{msg_id}（消息总线 v1，只读查询）
 #       /api/dashboard /api/server /api/messages?agent=（操作台 v2，见 console_v2.py）
+#       /api/groupchat/*（群聊只读：名册、群、历史、叫醒状态；写入走主人当日口令或 Agent 令牌）
 import hashlib
 import json
 import re

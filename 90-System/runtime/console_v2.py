@@ -551,6 +551,9 @@ def chat_thread(conn, limit=80, before=None):
 
 def handle(conn, path, q, now):
     """命中返回 (code, body)，未命中返回 None。"""
+    if path.startswith("/api/groupchat"):
+        import group_chat
+        return group_chat.handle_public_get(conn, path, q, now)
     if path == "/api/dashboard":
         return 200, {"ok": True, "ts": now, "data": dashboard(conn, now)}
     if path == "/api/approvals":
