@@ -1603,17 +1603,6 @@
       box.innerHTML = `<span>回复 ${badge ? esc(badge) + " " : ""}${esc((m.text || "").slice(0, 48))}</span><button type="button" data-grp-reply-x aria-label="取消回复">×</button>`;
     }
   }
-  function wakeLine(m) {
-    const ws = m.wakes || [];
-    if (!ws.length || m.sender_role === "system") return "";
-    const bits = ws.map((w) => {
-      const n = w.name || w.member_id;
-      if (w.status === "delivered") return n + " 已叫醒";
-      if (w.status === "missed") return n + " 叫醒未达（不自动重试）";
-      return n + " 未登记唤醒";
-    });
-    return `<div class="grp-wake">${esc(bits.join(" · "))}</div>`;
-  }
   function renderStream() {
     const box = $("#grp-stream");
     if (!box) return;
@@ -1642,11 +1631,10 @@
       return `<li class="grp-bub${me ? " me" : ""}${ext ? " ext" : ""}">
         <div class="who"><b>${esc(name)}</b>${badgeEl}<time>${dtm(m.created_at)}</time></div>
         <div class="grp-text">
-          ${q ? `<span class="quote">${esc((q.text || "").slice(0, 80))}</span>` : ""}
+          ${q ? `<span class="quote">${esc(q.text || "")}</span>` : ""}
           ${richText(m.text || "")}
-          ${wakeLine(m)}
         </div>
-        <div class="ops"><button type="button" data-grp-reply="${esc(m.msg_id)}">回复</button>${me ? `<button type="button" data-grp-recall="${esc(m.msg_id)}">撤回</button>` : ""}</div>
+        <div class="grp-menu" role="menu"><button type="button" data-grp-reply="${esc(m.msg_id)}">回复</button>${me ? `<button type="button" data-grp-recall="${esc(m.msg_id)}">撤回</button>` : ""}</div>
       </li>`;
     }).join("");
     if (G.pending > 0) box.scrollTop = top;
@@ -1795,7 +1783,31 @@
     });
     $("#grp-jump").addEventListener("click", () => { G.pending = 0; renderJump(); scrollGroup(); });
     $("#grp-stream").addEventListener("scroll", () => { if (streamNear()) { G.pending = 0; renderJump(); } });
+    let hold = null;
+    let holdOpened = false;
+    const clearHold = () => { if (hold) { clearTimeout(hold.timer); hold = null; } };
+    $("#grp-stream").addEventListener("pointerdown", (e) => {
+      if (e.pointerType === "mouse" || e.button || e.target.closest(".grp-menu")) return;
+      const bub = e.target.closest(".grp-bub");
+      if (!bub) return;
+      const x = e.clientX, y = e.clientY;
+      const timer = setTimeout(() => {
+        $$(".grp-bub.menu-on").forEach((n) => n.classList.remove("menu-on"));
+        bub.classList.add("menu-on");
+        hold = null;
+        holdOpened = true;
+      }, 480);
+      hold = { timer, x, y };
+    });
+    $("#grp-stream").addEventListener("pointermove", (e) => {
+      if (!hold) return;
+      if (Math.abs(e.clientX - hold.x) > 8 || Math.abs(e.clientY - hold.y) > 8) clearHold();
+    });
+    $("#grp-stream").addEventListener("pointerup", clearHold);
+    $("#grp-stream").addEventListener("pointercancel", clearHold);
     root.addEventListener("click", async (e) => {
+      if (holdOpened) { holdOpened = false; return; }
+      if (!e.target.closest(".grp-menu")) $$(".grp-bub.menu-on").forEach((n) => n.classList.remove("menu-on"));
       if (e.target.closest("[data-grp-fs]")) { setGroupFullscreen(!groupFsOn()); return; }
       const tab = e.target.closest("[data-grp-tab]");
       if (tab) { G.tab = tab.dataset.grpTab; renderMid(); return; }
@@ -1811,10 +1823,16 @@
       const withBtn = e.target.closest("[data-grp-with]");
       if (withBtn) { await createGroup(withBtn.dataset.grpWithName + " 的群", [withBtn.dataset.grpWith]); return; }
       const reply = e.target.closest("[data-grp-reply]");
-      if (reply) { G.reply = reply.dataset.grpReply; renderReply(); $("#grp-input").focus(); return; }
+      if (reply) {
+        const host = reply.closest(".grp-bub");
+        if (host) host.classList.remove("menu-on");
+        G.reply = reply.dataset.grpReply; renderReply(); $("#grp-input").focus(); return;
+      }
       if (e.target.closest("[data-grp-reply-x]")) { G.reply = null; renderReply(); return; }
       const rec = e.target.closest("[data-grp-recall]");
       if (rec) {
+        const host = rec.closest(".grp-bub");
+        if (host) host.classList.remove("menu-on");
         const j = await act("group_recall", { group_id: G.current, msg_id: rec.dataset.grpRecall }, "已撤回");
         if (j && j.ok) refreshOpen();
         return;
@@ -1895,9 +1913,248 @@
     if (target === "agents-issue") { S.agentFilter = "issue"; $$("#agent-filter button").forEach((b) => b.classList.toggle("on", b.dataset.f === "issue")); renderAgents(); }
     if (target === "feed-event") { S.feedFilter = "event"; $$("#feed-filter button").forEach((b) => b.classList.toggle("on", b.dataset.f === "event")); renderFeed(); }
     if (mobile.matches) setTab(tab);
+    else if (document.documentElement.classList.contains("deck")) deckShow($(sel));
     else $(sel).scrollIntoView({ behavior: reduced.matches ? "auto" : "smooth", block: "start" });
   }
+  /* 电脑端一翻一行。并排的两块算同一屏。滚轮跟手，松手后 420ms 吸到整行；内部列表没滚完不翻页。 */
+  const DECK_MS = 420;
+  let deckMode = "idle";
+  let deckRaf = 0;
+  let deckTimer = 0;
+  let deckScrollTimer = 0;
+  let deckGesture = null;
+  let deckPending = 0;
+  let deckSettleStart = 0;
+  let deckKey = 0;
+  function deckOn() { return document.documentElement.classList.contains("deck"); }
+  function deckBlocked() {
+    if (!deckOn() || groupFsOn()) return true;
+    const dialog = $("#dlg");
+    if (dialog && dialog.open) return true;
+    if ($("#drawer").getAttribute("aria-hidden") === "false") return true;
+    const ov = $("#grp-overlay");
+    return !!(ov && !ov.hidden);
+  }
+  function deckPages() {
+    const topH = ($("header.top") || {}).offsetHeight || 0;
+    const secs = $$("#main > .sec").filter((el) => el.getClientRects().length);
+    secs.sort((a, b) => a.offsetTop - b.offsetTop || a.offsetLeft - b.offsetLeft);
+    const groups = [];
+    secs.forEach((el) => {
+      const y = el.offsetTop;
+      const last = groups[groups.length - 1];
+      if (last && Math.abs(last.y - y) < 12) last.els.push(el);
+      else groups.push({ y, els: [el] });
+    });
+    const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    return groups.map((g) => ({ y: Math.max(0, Math.min(maxScroll, g.y - topH)), els: g.els }));
+  }
+  function deckNearest(list, y) {
+    let best = 0, dist = Infinity;
+    list.forEach((p, i) => { const d = Math.abs(p.y - y); if (d < dist) { dist = d; best = i; } });
+    return best;
+  }
+  function deckEase(t) { return 1 - Math.pow(1 - t, 3); }
+  function deckFinish() {
+    deckMode = "idle";
+    const step = deckKey || deckPending;
+    deckPending = 0;
+    if (!step) return;
+    const list = deckPages();
+    if (!list.length) return;
+    const cur = deckNearest(list, window.scrollY);
+    const next = Math.max(0, Math.min(list.length - 1, cur + step));
+    if (next !== cur) deckSettle(next);
+  }
+  function deckSettle(index) {
+    const list = deckPages();
+    if (!list.length) return;
+    index = Math.max(0, Math.min(list.length - 1, index));
+    const to = list[index].y;
+    const from = window.scrollY;
+    cancelAnimationFrame(deckRaf);
+    deckMode = "settling";
+    deckSettleStart = performance.now();
+    const dur = reduced.matches ? 0 : DECK_MS;
+    if (dur === 0 || Math.abs(to - from) < 1) { window.scrollTo(0, to); deckFinish(); return; }
+    const t0 = performance.now();
+    const frame = (now) => {
+      const t = Math.min(1, (now - t0) / dur);
+      window.scrollTo(0, from + (to - from) * deckEase(t));
+      if (t < 1) deckRaf = requestAnimationFrame(frame);
+      else deckFinish();
+    };
+    deckRaf = requestAnimationFrame(frame);
+  }
+  function deckShow(el) {
+    if (!el) return;
+    const list = deckPages();
+    const i = list.findIndex((p) => p.els.indexOf(el) >= 0);
+    deckSettle(i >= 0 ? i : 0);
+  }
+  function deckSync() {
+    const top = $("header.top");
+    document.documentElement.style.setProperty("--deck-top", ((top && top.offsetHeight) || 58) + "px");
+    const on = !mobile.matches && !groupFsOn();
+    document.documentElement.classList.toggle("deck", on);
+  }
+  function deckInnerScroll(node, dy) {
+    let n = node;
+    while (n && n !== document.body && n !== document.documentElement) {
+      if (n.scrollHeight > n.clientHeight + 2) {
+        const oy = getComputedStyle(n).overflowY;
+        if (oy === "auto" || oy === "scroll" || oy === "overlay") {
+          if (dy > 0 && n.scrollTop + n.clientHeight < n.scrollHeight - 2) return true;
+          if (dy < 0 && n.scrollTop > 2) return true;
+        }
+      }
+      n = n.parentElement;
+    }
+    return false;
+  }
+  function deckWheelPixels(e) {
+    let dy = e.deltaY;
+    if (e.deltaMode === 1) dy *= 16;
+    if (e.deltaMode === 2) dy *= window.innerHeight * 0.9;
+    return dy;
+  }
+  function deckApplyTrack(now) {
+    const list = deckPages();
+    const g = deckGesture;
+    if (!g || !list.length) return;
+    let guard = 0;
+    while (guard++ < list.length) {
+      const i = g.idx;
+      const base = list[i].y;
+      const prev = list[Math.max(0, i - 1)].y;
+      const next = list[Math.min(list.length - 1, i + 1)].y;
+      const y = base + g.accum * 0.86;
+      const spanNext = next - base;
+      const spanPrev = base - prev;
+      const aged = now - g.t0 > 280 && g.events > 8;
+      if (aged && g.accum > 0 && spanNext > 1 && y > next && g.accum * 0.86 > spanNext * 1.12 && i < list.length - 1) {
+        g.idx = i + 1; g.accum -= spanNext / 0.86; continue;
+      }
+      if (aged && g.accum < 0 && spanPrev > 1 && y < prev && -g.accum * 0.86 > spanPrev * 1.12 && i > 0) {
+        g.idx = i - 1; g.accum += spanPrev / 0.86; continue;
+      }
+      window.scrollTo(0, Math.max(prev, Math.min(next, y)));
+      return;
+    }
+  }
+  function deckEndTrack() {
+    const g = deckGesture;
+    deckGesture = null;
+    deckMode = "idle";
+    if (!g) return;
+    const list = deckPages();
+    if (!list.length) return;
+    const dir = Math.sign(g.accum);
+    const origin = Math.max(0, Math.min(list.length - 1, g.startIdx));
+    const y = window.scrollY;
+    let target = deckNearest(list, y);
+    const toward = list[Math.max(0, Math.min(list.length - 1, origin + (dir || 0)))] || list[origin];
+    const span = Math.abs(toward.y - list[origin].y) || 1;
+    const progress = Math.abs(y - list[origin].y) / span;
+    if (dir && target === origin && (progress > 0.22 || g.peakVel > 0.65)) target = Math.max(0, Math.min(list.length - 1, origin + dir));
+    deckSettle(target);
+  }
+  function onDeckWheel(e) {
+    if (!deckOn() || deckBlocked()) return;
+    if (e.ctrlKey || e.metaKey) return;
+    if (Math.abs(e.deltaX) > Math.abs(e.deltaY) + 2) return;
+    if (e.defaultPrevented) return;
+    const dy = deckWheelPixels(e);
+    if (!dy) return;
+    if (deckInnerScroll(e.target, dy)) return;
+    e.preventDefault();
+    const now = performance.now();
+    const notch = e.deltaMode !== 0 || Math.abs(dy) >= 48;
+    if (deckMode === "settling") {
+      if (notch && now - deckSettleStart > 110) deckPending = Math.sign(dy);
+      return;
+    }
+    if (!deckGesture) {
+      clearTimeout(deckTimer);
+      clearTimeout(deckScrollTimer);
+      const list = deckPages();
+      const idx = list.length ? deckNearest(list, window.scrollY) : 0;
+      deckGesture = { startIdx: idx, idx, accum: 0, events: 0, peakVel: 0, last: now, t0: now, notch };
+    }
+    const g = deckGesture;
+    const dt = Math.max(8, now - g.last);
+    g.last = now;
+    g.events += 1;
+    g.accum += dy;
+    g.peakVel = Math.max(g.peakVel, Math.abs(dy) / dt);
+    if (g.notch && g.events >= 3 && now - g.t0 < 90) g.notch = false;
+    clearTimeout(deckTimer);
+    if (g.notch) {
+      deckTimer = setTimeout(() => {
+        const dir = Math.sign((deckGesture && deckGesture.accum) || dy);
+        deckGesture = null;
+        deckMode = "idle";
+        deckSettle(deckNearest(deckPages(), window.scrollY) + dir);
+      }, 80);
+      return;
+    }
+    deckMode = "tracking";
+    deckApplyTrack(now);
+    deckTimer = setTimeout(deckEndTrack, 150);
+  }
+  function onDeckKey(e) {
+    if (e.key === "Escape" || !deckOn() || deckBlocked()) return;
+    const down = e.key === "ArrowDown" || e.key === "PageDown";
+    const up = e.key === "ArrowUp" || e.key === "PageUp";
+    if (!down && !up) return;
+    const field = e.target && e.target.closest && e.target.closest("input, textarea, select, [contenteditable='true']");
+    if (field) return;
+    if (e.defaultPrevented) return;
+    e.preventDefault();
+    const dir = down ? 1 : -1;
+    deckKey = e.repeat ? dir : 0;
+    if (deckMode === "settling") return;
+    clearTimeout(deckTimer);
+    deckGesture = null;
+    deckSettle(deckNearest(deckPages(), window.scrollY) + dir);
+  }
+  function onDeckKeyUp(e) {
+    if (e.key === "ArrowDown" || e.key === "PageDown" || e.key === "ArrowUp" || e.key === "PageUp") deckKey = 0;
+  }
+  function onDeckScroll() {
+    if (!deckOn() || deckMode !== "idle") return;
+    clearTimeout(deckScrollTimer);
+    deckScrollTimer = setTimeout(() => {
+      if (deckMode !== "idle" || !deckOn()) return;
+      const list = deckPages();
+      if (!list.length) return;
+      const y = window.scrollY;
+      const i = deckNearest(list, y);
+      if (Math.abs(list[i].y - y) > 3) deckSettle(i);
+    }, 140);
+  }
+  function bindDeck() {
+    deckSync();
+    if (deckOn() && window.scrollY < 40) {
+      const first = deckPages()[0];
+      if (first && Math.abs(first.y - window.scrollY) > 2) window.scrollTo(0, first.y);
+    }
+    window.addEventListener("wheel", onDeckWheel, { passive: false });
+    document.addEventListener("keydown", onDeckKey);
+    document.addEventListener("keyup", onDeckKeyUp);
+    window.addEventListener("scroll", onDeckScroll, { passive: true });
+    window.addEventListener("resize", deckSync);
+    mobile.addEventListener && mobile.addEventListener("change", deckSync);
+    let sawFs = groupFsOn();
+    new MutationObserver(() => {
+      const fs = groupFsOn();
+      deckSync();
+      if (sawFs && !fs && deckOn()) deckSettle(deckNearest(deckPages(), window.scrollY));
+      sawFs = fs;
+    }).observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+  }
   function bind() {
+    bindDeck();
     $("#kpis").addEventListener("click", (e) => { const b = e.target.closest("[data-go]"); if (b) go(b.dataset.go); });
     $("#feed-filter").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; S.feedFilter = b.dataset.f; $$("#feed-filter button").forEach((x) => x.classList.toggle("on", x === b)); renderFeed(); });
     $("#agent-filter").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; S.agentFilter = b.dataset.f; $$("#agent-filter button").forEach((x) => x.classList.toggle("on", x === b)); renderAgents(); });
@@ -1972,4 +2229,5 @@
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
   window.SB = { state: S };
+  window.SB.deck = { pages: deckPages, nearest: deckNearest, settle: deckSettle, sync: deckSync, show: deckShow };
 })();
