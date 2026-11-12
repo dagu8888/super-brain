@@ -1,8 +1,8 @@
-/* Super-Brain 协作中枢 · 知识宇宙 2.0
-   结构是知识库接口返回的文档和 [[wikilink]]，不是旋臂上撒点。
+/* Super-Brain 协作中枢 · 知识宇宙 2.8
+   结构仍是知识库接口返回的文档和 [[wikilink]]，不编造笔记、不给未解析双链造节点。
    实线 = 解析到本文档集里的双链。团块和虚线 = 同分类 / 同标签的推断分组。
-   未解析双链只留在卡片里，不生成节点。背景星不能点。
-   单击沿邻域展开，双击打开原文。没有 WebGL 时退回同一套平面图。 */
+   展开深度 1–8 级，默认 8，首页尽量密。发光只服务这条数字神经：星点、晕光、星云。
+   单击沿邻域探索，双击打开原文。没有 WebGL 时退回同一套平面图。 */
 (function () {
   "use strict";
   const T = window.THREE;
@@ -34,7 +34,7 @@
     let query = "";
     let filter = { category: "", tag: "", type: "" };
     let focus = -1;
-    let hop = 1;
+    let hop = 8;
 
     function addKey(map, raw, i) {
       const key = String(raw || "").trim().toLowerCase();
@@ -98,7 +98,7 @@
       });
       layout();
       focus = -1;
-      hop = 1;
+      hop = 8;
     }
 
     function layout() {
@@ -186,20 +186,35 @@
       return false;
     }
 
+    function inferredEdges(depth, visible) {
+      const out = [];
+      const seen = new Set();
+      const limit = Math.max(1, Math.min(8, depth || 1));
+      nodes.forEach((n) => {
+        if (visible && !visible[n.i]) return;
+        let taken = 0;
+        groupNeighbors(n.i).forEach((g) => {
+          if (taken >= limit) return;
+          if (visible && !visible[g.i]) return;
+          if ((n.wiki || []).indexOf(g.i) >= 0) return;
+          const a = Math.min(n.i, g.i);
+          const b = Math.max(n.i, g.i);
+          const key = a + ":" + b;
+          if (seen.has(key)) return;
+          seen.add(key);
+          taken += 1;
+          out.push({ a: a, b: b, kind: "inferred", reason: g.reason });
+        });
+      });
+      return out;
+    }
+
     function snapshot() {
       const visible = visibleMask();
       const q = query.trim().toLowerCase();
       const hits = nodes.map((n) => matchDoc(n.doc, q));
       const wikiVis = wiki.filter((e) => visible[e.a] && visible[e.b]);
-      const inferred = [];
-      if (focus >= 0 && nodes[focus]) {
-        const direct = {};
-        nodes[focus].wiki.forEach((j) => { direct[j] = 1; });
-        groupNeighbors(focus).forEach((g) => {
-          if (!visible[g.i] || direct[g.i]) return;
-          inferred.push({ a: focus, b: g.i, kind: "inferred", reason: g.reason });
-        });
-      }
+      const inferred = inferredEdges(hop, visible);
       const byCat = {};
       nodes.forEach((n) => { if (visible[n.i]) (byCat[n.category] = byCat[n.category] || []).push(n); });
       const groups = Object.keys(byCat).map((name) => {
@@ -238,10 +253,11 @@
         filter = { category: (f && f.category) || "", tag: (f && f.tag) || "", type: (f && f.type) || "" };
         if (focus >= 0 && nodes[focus] && !passes(nodes[focus])) focus = -1;
       },
-      focusAt(i) { if (nodes[i] && passes(nodes[i])) { focus = i; hop = 1; } },
+      focusAt(i) { if (nodes[i] && passes(nodes[i])) focus = i; },
       indexOfPath(path) { return nodes.findIndex((n) => n.doc && n.doc.path === path); },
-      expand() { if (canExpand()) hop += 1; },
-      reset() { focus = -1; hop = 1; },
+      expand() { if (hop < 8) hop += 1; },
+      setDepth(n) { hop = Math.max(1, Math.min(8, n | 0)); },
+      reset() { focus = -1; hop = 8; },
       facets() {
         const categories = [], tags = [], types = [];
         const sc = new Set(), st = new Set(), sy = new Set();
@@ -267,7 +283,7 @@
     const quadScene = new T.Scene();
     const quadCam = new T.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     const thresh = new T.ShaderMaterial({
-      uniforms: { tDiffuse: { value: null }, uThreshold: { value: 0.86 }, uSoft: { value: 0.12 } },
+      uniforms: { tDiffuse: { value: null }, uThreshold: { value: 0.42 }, uSoft: { value: 0.22 } },
       vertexShader: FULL_VS,
       fragmentShader: "uniform sampler2D tDiffuse; uniform float uThreshold; uniform float uSoft; varying vec2 vUv; void main(){ vec3 c = texture2D(tDiffuse, vUv).rgb; float l = max(c.r, max(c.g, c.b)); float s = smoothstep(uThreshold, uThreshold + uSoft, l); gl_FragColor = vec4(c * s, 1.0); }",
       depthTest: false, depthWrite: false
@@ -279,7 +295,7 @@
       depthTest: false, depthWrite: false
     });
     const comp = new T.ShaderMaterial({
-      uniforms: { tScene: { value: null }, tBloom: { value: null }, uStrength: { value: 0.38 } },
+      uniforms: { tScene: { value: null }, tBloom: { value: null }, uStrength: { value: 0.92 } },
       vertexShader: FULL_VS,
       fragmentShader: "uniform sampler2D tScene; uniform sampler2D tBloom; uniform float uStrength; varying vec2 vUv; void main(){ vec3 col = texture2D(tScene, vUv).rgb + texture2D(tBloom, vUv).rgb * uStrength; float vig = smoothstep(1.05, 0.28, length(vUv - 0.5)); col *= mix(0.78, 1.0, vig); gl_FragColor = vec4(col, 1.0); }",
       depthTest: false, depthWrite: false
@@ -345,16 +361,16 @@
     const lineG = new T.Group();
     root.add(volG, nodeG, lineG);
 
-    let bloom = null, bloomOn = !mobile && !opts.reduced;
+    let bloom = null, bloomOn = !opts.reduced;
     try { if (bloomOn) bloom = makeBloom(renderer); } catch (e) { bloomOn = false; bloom = null; }
 
     const starMat = new T.ShaderMaterial({
-      uniforms: { uGain: { value: 0.55 } },
+      uniforms: { uGain: { value: 0.92 } },
       vertexShader: "attribute float aSize; void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = clamp(aSize * (180.0 / max(8.0, -mv.z)), 0.0, 2.4); gl_Position = projectionMatrix * mv; }",
       fragmentShader: "uniform float uGain; void main(){ vec2 p = gl_PointCoord * 2.0 - 1.0; float d = dot(p, p); if (d > 1.0) discard; float a = pow(1.0 - d, 1.6) * uGain; gl_FragColor = vec4(vec3(0.75, 0.82, 0.92) * a, a); }",
       transparent: true, depthWrite: false, blending: T.AdditiveBlending
     });
-    const starN = mobile ? 280 : 720;
+    const starN = mobile ? 640 : 1500;
     const sPos = new Float32Array(starN * 3);
     const sSize = new Float32Array(starN);
     for (let i = 0; i < starN; i++) {
@@ -379,10 +395,39 @@
     const volMat = new T.ShaderMaterial({
       uniforms: { uColor: { value: new T.Color(0.5, 0.6, 0.8) } },
       vertexShader: "varying vec3 vN; varying vec3 vView; void main(){ vN = normalize(normalMatrix * normal); vec4 mv = modelViewMatrix * vec4(position, 1.0); vView = mv.xyz; gl_Position = projectionMatrix * mv; }",
-      fragmentShader: "uniform vec3 uColor; varying vec3 vN; varying vec3 vView; void main(){ float mu = clamp(dot(normalize(vN), normalize(-vView)), 0.0, 1.0); float rim = pow(1.0 - mu, 1.5); float a = rim * 0.16; gl_FragColor = vec4(uColor, a); }",
+      fragmentShader: "uniform vec3 uColor; varying vec3 vN; varying vec3 vView; void main(){ float mu = clamp(dot(normalize(vN), normalize(-vView)), 0.0, 1.0); float rim = pow(1.0 - mu, 1.35); float a = rim * 0.42; gl_FragColor = vec4(uColor, a); }",
       transparent: true, depthWrite: false, side: T.BackSide
     });
     const volGeo = new T.SphereGeometry(1, 22, 16);
+
+    const haloMat = new T.ShaderMaterial({
+      vertexShader: `
+        attribute vec3 aColor; attribute float aGlow;
+        varying vec3 vColor; varying float vGlow; varying vec3 vN; varying vec3 vView;
+        void main() {
+          vColor = aColor; vGlow = aGlow;
+          vec3 pos = position;
+          vec3 center = vec3(0.0);
+          #ifdef USE_INSTANCING
+            pos = (instanceMatrix * vec4(position, 1.0)).xyz;
+            center = (instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+          #endif
+          vec4 mv = modelViewMatrix * vec4(pos, 1.0);
+          vec4 mc = modelViewMatrix * vec4(center, 1.0);
+          vView = mv.xyz;
+          vN = normalize(mv.xyz - mc.xyz);
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: `
+        varying vec3 vColor; varying float vGlow; varying vec3 vN; varying vec3 vView;
+        void main() {
+          float fres = pow(1.0 - clamp(dot(normalize(vN), normalize(-vView)), 0.0, 1.0), 1.45);
+          float a = fres * 0.72 * clamp(vGlow, 0.0, 1.2);
+          if (a < 0.03) discard;
+          gl_FragColor = vec4(vColor * a, a);
+        }`,
+      transparent: true, depthWrite: false, blending: T.AdditiveBlending, side: T.BackSide
+    });
 
     const nodeMat = new T.ShaderMaterial({
       vertexShader: `
@@ -410,10 +455,11 @@
           float mu = clamp(dot(N, V), 0.0, 1.0);
           if (mu < 0.03) discard;
           float rim = pow(1.0 - mu, 2.2);
-          vec3 col = vColor * (0.22 + 0.48 * mu);
-          col += vec3(0.80, 0.86, 0.96) * pow(mu, 30.0) * 0.06;
-          col += vColor * rim * 0.22;
-          col *= 0.8 + 0.16 * clamp(vGlow, 0.0, 1.25);
+          vec3 col = vColor * (0.55 + 0.95 * mu);
+          col += vColor * pow(mu, 2.2) * 0.9;
+          col += vec3(0.82, 0.88, 0.98) * pow(mu, 10.0) * 0.42;
+          col += vColor * rim * 0.55;
+          col *= 0.72 + 0.4 * clamp(vGlow, 0.0, 1.25);
           gl_FragColor = vec4(col, 1.0);
         }`,
       transparent: false
@@ -421,6 +467,7 @@
     const nodeGeo = new T.SphereGeometry(1, 20, 14);
 
     let docMesh = null;
+    let haloMesh = null;
     let docSig = "";
     let snap = { nodes: [], visible: [], hits: [], wikiVis: [], inferred: [], groups: [], focus: -1, query: "" };
     let hover = -1;
@@ -463,44 +510,59 @@
         if (docMesh.geometry !== nodeGeo) docMesh.geometry.dispose();
         docMesh = null;
       }
+      if (haloMesh) {
+        nodeG.remove(haloMesh);
+        if (haloMesh.geometry !== nodeGeo) haloMesh.geometry.dispose();
+        haloMesh = null;
+      }
       const list = snap.nodes || [];
       if (!list.length) return;
-      const geo = nodeGeo.clone();
-      const colors = new Float32Array(list.length * 3);
-      const glows = new Float32Array(list.length);
-      list.forEach((n, i) => {
-        colors[i * 3] = n.color[0]; colors[i * 3 + 1] = n.color[1]; colors[i * 3 + 2] = n.color[2];
-        glows[i] = 1;
-      });
-      geo.setAttribute("aColor", new T.InstancedBufferAttribute(colors, 3));
-      geo.setAttribute("aGlow", new T.InstancedBufferAttribute(glows, 1));
-      docMesh = new T.InstancedMesh(geo, nodeMat, list.length);
-      docMesh.frustumCulled = false;
-      nodeG.add(docMesh);
+      function meshWith(mat) {
+        const geo = nodeGeo.clone();
+        const colors = new Float32Array(list.length * 3);
+        const glows = new Float32Array(list.length);
+        list.forEach((n, i) => {
+          colors[i * 3] = n.color[0]; colors[i * 3 + 1] = n.color[1]; colors[i * 3 + 2] = n.color[2];
+          glows[i] = 1;
+        });
+        geo.setAttribute("aColor", new T.InstancedBufferAttribute(colors, 3));
+        geo.setAttribute("aGlow", new T.InstancedBufferAttribute(glows, 1));
+        const mesh = new T.InstancedMesh(geo, mat, list.length);
+        mesh.frustumCulled = false;
+        if (mat === haloMat) mesh.raycast = function () {};
+        nodeG.add(mesh);
+        return mesh;
+      }
+      haloMesh = meshWith(haloMat);
+      docMesh = meshWith(nodeMat);
     }
 
-    function paintNodes() {
-      if (!docMesh) return;
-      const glow = docMesh.geometry.getAttribute("aGlow");
+    function paintOne(mesh, scaleOf) {
+      if (!mesh) return;
+      const glow = mesh.geometry.getAttribute("aGlow");
       const dummy = new T.Object3D();
       const focusNode = snap.focus >= 0 ? snap.nodes[snap.focus] : null;
       const hoverNode = hover >= 0 ? snap.nodes[hover] : null;
       snap.nodes.forEach((n, i) => {
         const on = !!(snap.visible && snap.visible[i]);
-        let g = on ? 0.85 : 0;
-        if (on && snap.query && snap.hits && !snap.hits[i]) g = 0.22;
-        if (on && focusNode && focusNode.wiki && focusNode.wiki.indexOf(i) >= 0) g = Math.max(g, 1.05);
+        let g = on ? 0.9 : 0;
+        if (on && snap.query && snap.hits && !snap.hits[i]) g = 0.28;
+        if (on && focusNode && focusNode.wiki && focusNode.wiki.indexOf(i) >= 0) g = Math.max(g, 1.1);
         if (on && hoverNode && (i === hover || hoverNode.wiki.indexOf(i) >= 0)) g = Math.max(g, 1.25);
-        if (on && i === snap.focus) g = 1.08;
+        if (on && i === snap.focus) g = 1.15;
         glow.setX(i, g);
         dummy.position.set(n.x, n.y, n.z);
-        dummy.scale.setScalar(on ? n.size : 0.0001);
+        dummy.scale.setScalar(on ? scaleOf(n) : 0.0001);
         dummy.rotation.set(0, 0, 0);
         dummy.updateMatrix();
-        docMesh.setMatrixAt(i, dummy.matrix);
+        mesh.setMatrixAt(i, dummy.matrix);
       });
       glow.needsUpdate = true;
-      docMesh.instanceMatrix.needsUpdate = true;
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+    function paintNodes() {
+      paintOne(haloMesh, (n) => n.size * 2.35);
+      paintOne(docMesh, (n) => n.size);
     }
 
     function segmentLine(pairs, colorOf, dashed) {
@@ -522,8 +584,8 @@
       geo.setAttribute("position", new T.BufferAttribute(pos, 3));
       geo.setAttribute("color", new T.BufferAttribute(col, 3));
       const mat = dashed
-        ? new T.LineDashedMaterial({ vertexColors: true, transparent: true, opacity: 0.55, dashSize: 0.22, gapSize: 0.16 })
-        : new T.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.8 });
+        ? new T.LineDashedMaterial({ vertexColors: true, transparent: true, opacity: 0.72, dashSize: 0.22, gapSize: 0.16 })
+        : new T.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.95, blending: T.AdditiveBlending });
       const line = new T.LineSegments(geo, mat);
       if (dashed) line.computeLineDistances();
       line.userData.ownGeo = true;
@@ -532,11 +594,43 @@
       lineG.add(line);
     }
 
+    function edgeSparks(pairs, gain) {
+      if (!pairs.length) return;
+      const pos = [];
+      const col = [];
+      pairs.forEach((e) => {
+        const a = snap.nodes[e.a], b = snap.nodes[e.b];
+        if (!a || !b) return;
+        const tint = e.kind === "inferred" ? [0.84, 0.66, 0.42] : [0.72, 0.84, 0.98];
+        for (let k = 1; k <= 3; k++) {
+          const t = k / 4;
+          pos.push(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
+          col.push(tint[0], tint[1], tint[2]);
+        }
+      });
+      if (!pos.length) return;
+      const geo = new T.BufferGeometry();
+      geo.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
+      geo.setAttribute("color", new T.Float32BufferAttribute(col, 3));
+      const mat = new T.PointsMaterial({
+        size: 0.11 + gain, vertexColors: true, transparent: true, opacity: 0.9,
+        depthWrite: false, blending: T.AdditiveBlending, sizeAttenuation: true
+      });
+      const pts = new T.Points(geo, mat);
+      pts.userData.ownGeo = true;
+      pts.userData.ownMat = true;
+      pts.raycast = function () {};
+      pts.frustumCulled = false;
+      lineG.add(pts);
+    }
+
     function buildLines() {
       clearGroup(lineG);
       const hot = (e) => (e.a === hover || e.b === hover || e.a === snap.focus || e.b === snap.focus);
-      segmentLine(snap.wikiVis || [], (e) => hot(e) ? [0.78, 0.88, 1.0] : [0.50, 0.66, 0.86], false);
-      segmentLine(snap.inferred || [], (e) => hot(e) ? [0.90, 0.74, 0.48] : [0.72, 0.58, 0.38], true);
+      segmentLine(snap.wikiVis || [], (e) => hot(e) ? [0.86, 0.93, 1.0] : [0.55, 0.72, 0.92], false);
+      segmentLine(snap.inferred || [], (e) => hot(e) ? [0.95, 0.78, 0.5] : [0.78, 0.62, 0.4], true);
+      edgeSparks(snap.wikiVis || [], 0.04);
+      edgeSparks(snap.inferred || [], 0);
     }
 
     function sync(next) {
@@ -564,11 +658,11 @@
         ndc.set(n.x, n.y, n.z);
         root.localToWorld(ndc);
         const dist = ndc.distanceTo(camera.position);
-        if (snap.focus < 0 && dist > 34 && pri > 3) return;
+        if (snap.focus < 0 && dist > 52 && pri > 4) return;
         list.push({ n: n, i: i, pri: pri, dist: dist, world: ndc.clone() });
       });
       list.sort((a, b) => a.pri - b.pri || a.dist - b.dist);
-      const cap = snap.focus >= 0 ? 18 : 16;
+      const cap = snap.focus >= 0 ? 36 : 48;
       while (labelPool.length < Math.min(cap, list.length)) {
         const elLab = document.createElement("div");
         elLab.className = "space-label galaxy-label";
@@ -768,7 +862,8 @@
         document.removeEventListener("visibilitychange", onVis);
         clearGroup(volG); clearGroup(lineG);
         if (docMesh) { nodeG.remove(docMesh); docMesh.geometry.dispose(); }
-        volGeo.dispose(); nodeGeo.dispose(); starMat.dispose(); volMat.dispose(); nodeMat.dispose(); sg.dispose();
+        if (haloMesh) { nodeG.remove(haloMesh); haloMesh.geometry.dispose(); }
+        volGeo.dispose(); nodeGeo.dispose(); starMat.dispose(); volMat.dispose(); nodeMat.dispose(); haloMat.dispose(); sg.dispose();
         if (bloom) bloom.dispose();
         renderer.dispose();
         el.remove(); labelLayer.remove();
@@ -850,6 +945,11 @@
         const dim = snap.query && snap.hits && !snap.hits[i] && i !== snap.focus;
         ctx.globalAlpha = dim ? 0.28 : 1;
         const rad = Math.max(4, n.size * p.s * 1.15);
+        const glow = ctx.createRadialGradient(p.x, p.y, rad * 0.2, p.x, p.y, rad * 3.1);
+        glow.addColorStop(0, rgb(n.color, 0.55));
+        glow.addColorStop(1, rgb(n.color, 0));
+        ctx.fillStyle = glow;
+        ctx.beginPath(); ctx.arc(p.x, p.y, rad * 3.1, 0, 7); ctx.fill();
         const g = ctx.createRadialGradient(p.x - rad * 0.3, p.y - rad * 0.35, rad * 0.1, p.x, p.y, rad);
         g.addColorStop(0, "rgba(226, 234, 246, 0.95)");
         g.addColorStop(0.45, rgb(n.color, 1));
@@ -982,6 +1082,7 @@
       const snap = model.snapshot();
       impl.sync(snap);
       if (opts.onFocus) opts.onFocus(snap.card);
+      if (opts.onDepth) opts.onDepth(snap.hop);
       return snap;
     }
     return {
@@ -1015,7 +1116,13 @@
       expand() {
         model.expand();
         const snap = emit();
-        if (snap.focus >= 0) impl.easeTo(snap.focus, clamp(5.6 + (snap.hop - 1) * 3.1, 5.6, 16));
+        if (snap.focus >= 0) impl.easeTo(snap.focus, clamp(8 + (snap.hop - 1) * 1.6, 8, 28));
+      },
+      setDepth(n) {
+        model.setDepth(n);
+        const snap = emit();
+        if (snap.focus >= 0) impl.easeTo(snap.focus, clamp(8 + (snap.hop - 1) * 1.6, 8, 28));
+        return snap;
       },
       flyIn() {
         const snap = model.snapshot();
@@ -1033,5 +1140,5 @@
     };
   }
 
-  window.SBGALAXY = { create: create, version: "2.0.0" };
+  window.SBGALAXY = { create: create, version: "2.8.0" };
 })();

@@ -441,17 +441,19 @@ def test_pages_exist():
     check("操作台有群聊板块", 'data-tab="groups"' in html and "以你自己的身份说点什么" in html)
     check("前端走现有口令解锁和群接口", "group_send" in js and "/api/groupchat/roster" in js and "askUnlock" in js)
     check("前端不写死令牌", "token=" not in js and "?token" not in js)
-    check("静态资源版本已抬到 2.7.0", "v2/app.js?v=2.7.0" in html and "v2/app.css?v=2.7.0" in html)
+    check("静态资源版本已抬到 2.8.0", "v2/app.js?v=2.8.0" in html and "v2/app.css?v=2.8.0" in html)
     css = (ROOT / "70-Console/design/prototype/v2/app.css").read_text(encoding="utf-8")
     meta = html.split('<div class="top-meta">', 1)[1].split("</header>", 1)[0]
     mobile = css.split("@media (max-width: 760px)", 1)[1].split("@media", 1)[0]
-    check("顶栏有背景音乐开关", 'id="btn-bgm"' in meta and ">音乐 关<" in meta
+    check("顶栏有背景音乐开关", 'id="btn-bgm"' in meta and ">音乐 开<" in meta
           and 'title="背景音乐，拉夫劳伦超长版"' in meta and 'aria-label="背景音乐，拉夫劳伦超长版"' in meta)
     check("背景音乐音源先 ogg 再 mp3", 'id="bgm"' in meta and "loop" in meta and 'preload="none"' in meta
           and "autoplay" not in meta and meta.index('src="v2/audio/bgm.ogg"') < meta.index('src="v2/audio/bgm.mp3"'))
     check("手机宽度仍显示音乐开关", "#btn-bgm { display: inline-flex" in mobile and "#btn-bgm { display: none" not in css
           and "#health-pill { display: none" in mobile)
-    check("背景音乐默认关并记在 sb.bgm.on", 'const BGM_KEY = "sb.bgm.on"' in js and "音乐 开" in js and "音乐 关" in js and "BGM_VOL = 0.35" in js)
+    entry = (ROOT / "70-Console/design/prototype/v2/voice-entry.js").read_text(encoding="utf-8")
+    check("背景音乐默认开并记在 sb.bgm.on", 'const BGM_KEY = "sb.bgm.on"' in js and "音乐 开" in js and "音乐 关" in js and "BGM_VOL = 0.35" in js
+          and '!== "0"' in entry)
     audio = ROOT / "70-Console/design/prototype/v2/audio"
     def digest(name):
         blob = (audio / name).read_bytes()
@@ -523,7 +525,7 @@ def test_console_260_deck_and_scenes():
     check("第一屏包住 KPI 和协作网", i_hero < i_kpi < i_stage < i_grp and "sec-hero" in html[i_hero:i_grp])
     check("群聊是后续整页", i_grp < i_gal and '"grp grp grp"' in css)
     check("知识图谱在群聊之后、指挥官对话之前", i_grp < i_gal < i_chat < i_kb)
-    check("知识宇宙有画布钩子", 'id="galaxy-stage"' in html and "SBGALAXY" in js and "v2/galaxy.js?v=2.0.0" in js)
+    check("知识宇宙有画布钩子", 'id="galaxy-stage"' in html and "SBGALAXY" in js and "v2/galaxy.js?v=2.8.0" in js)
     check("星图读取知识库且不靠编造", "/api/knowledge?limit=200" in js and "openDoc" in js)
     check("协作网和星图都能全屏", 'id="btn-stage-fs"' in html and 'id="btn-galaxy-fs"' in html
           and "stage-fs" in js and "gal-fs" in js and "sb.stage.fullscreen" in js and "sb.gal.fullscreen" in js)
@@ -546,14 +548,14 @@ def test_console_270_visual_invariants():
     scene = (ROOT / "70-Console/design/prototype/v2/scene3d.js").read_text(encoding="utf-8")
     galaxy = (ROOT / "70-Console/design/prototype/v2/galaxy.js").read_text(encoding="utf-8")
     api = (ROOT / "90-System/runtime/console_api.py").read_text(encoding="utf-8")
-    check("版本号是 2.7.0", "v=2.7.0" in html and 'version: "2.0.0"' in galaxy and 'version: "4.0.0"' in scene)
+    check("版本号是 2.8.0，场景脚本仍是 4.0.0", "v2/app.js?v=2.8.0" in html and "v=2.7.0" not in html and 'version: "2.8.0"' in galaxy and 'version: "4.0.0"' in scene)
     check("不写死火节点", "火" not in scene and "火" not in galaxy and "__fire__" not in js and "Fire" not in scene)
     check("中台仍是编排中心", "中台" in scene and "中台" in js and "photosphere" in scene)
     check("关系来自接口并可点开证据", "/api/relations" in js and "evidence" in js and "openRelation" in js and "onEdge" in scene)
     check("通信光点只从真实消息入口触发", "S.view.pulse" in js and "function onLiveMsg" in js)
     check("知识仍只读知识接口", "/api/knowledge?limit=200" in js and "openDoc" in js and "/api/knowledge/file" in js)
     check("星图区分真实双链和推断分组", "wikilink" in galaxy and "inferred" in galaxy and "同分类" in galaxy)
-    check("单击探索、双击打开", "onFocus" in galaxy and "onOpen" in galaxy and "再扩一跳" in html and 'id="btn-galaxy-open"' in html)
+    check("单击探索、双击打开", "onFocus" in galaxy and "onOpen" in galaxy and 'data-depth="8"' in html and 'id="btn-galaxy-open"' in html)
     check("全屏类名还在", "stage-fs" in css and "gal-fs" in css and "grp-fs" in css and "sb.stage.fullscreen" in js and "sb.gal.fullscreen" in js and "sb.grp.fullscreen" in js)
     check("三屏顺序还在", html.index('id="sec-hero"') < html.index('id="sec-groups"') < html.index('id="sec-galaxy"') < html.index('id="sec-chat"'))
     check("桌面第一行仍是总览", css.split("grid-template-areas:", 1)[1].split(";", 1)[0].strip().startswith('"hero hero hero"'))

@@ -16,6 +16,9 @@ Thumbs.db
 !90-System/queue/README.md
 api_tokens.json
 api_tokens.json.bak*
+# 语音密钥只放服务器，不入库
+90-System/voice/*.env
+!90-System/voice/*.env.example
 90-System/runtime/state.db*
 *.pyc
 __pycache__/
