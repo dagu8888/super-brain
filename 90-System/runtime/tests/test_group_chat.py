@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import threading
@@ -439,7 +440,7 @@ def test_pages_exist():
     check("操作台有群聊板块", 'data-tab="groups"' in html and "以你自己的身份说点什么" in html)
     check("前端走现有口令解锁和群接口", "group_send" in js and "/api/groupchat/roster" in js and "askUnlock" in js)
     check("前端不写死令牌", "token=" not in js and "?token" not in js)
-    check("静态资源版本已抬过 2.5.0", "v2/app.js?v=2.5.1" in html and "v2/app.css?v=2.5.1" in html)
+    check("静态资源版本已抬到 2.5.2", "v2/app.js?v=2.5.2" in html and "v2/app.css?v=2.5.2" in html)
     skill = (ROOT / "70-Console/design/prototype/groupchat/skill.md").read_text(encoding="utf-8")
     install = (ROOT / "70-Console/design/prototype/groupchat/install.md").read_text(encoding="utf-8")
     check("技能说明禁止分钟级和自动重试", "分钟" in skill and "不要" in skill and "inbox" in skill)
@@ -459,8 +460,23 @@ def test_pages_exist():
     for phrase in phrases:
         check("邀请文案含要点", phrase in js, phrase)
     check("邀请文案不再是技术标签", "配对码=" not in js and "文档: " not in js and "BASE=" not in js)
-    check("名册和群成员列表写出文字标签", "grp-members" in js and "side-badge" in js and "你的 agent" in js and "外部" in js)
-    check("气泡文字标签还在", 'data-side="' in js and 'me ? "人"' in js)
+    banned_ui = (
+        "<h3>你的 agent</h3>",
+        'block("你的 agent"',
+        'return "你的 agent"',
+        ': "你的 agent"',
+        "还没有你的 agent",
+        ">你的 agent<",
+    )
+    for phrase in banned_ui:
+        check("界面不再写出你的 agent", phrase not in js, phrase)
+    check("前端抑制中台带回的你的 agent", '=== "你的 agent"' in js)
+    check("名册仍把外部单独成组", "<h3>外部</h3>" in js and "grp-block-title\">外部" in js and "grp-members" in js and "side-badge" in js and "还没有已接入的 Agent" in js)
+    check("气泡文字标签还在", 'data-side="' in js and 'me ? "人"' in js and 'ext ? "外部"' in js)
+    check("skill 主人标人、内部不打标签、外部标外部", "发言标记是「人」" in skill and "内部 Agent 不打标签" in skill and "标记是「外部」" in skill and "你的 agent" not in skill)
+    badge_test = ROOT / "90-System/runtime/tests/test_group_badges.mjs"
+    rendered = subprocess.run(["node", str(badge_test)], capture_output=True, text=True)
+    check("前端渲染不再出现你的 agent", rendered.returncode == 0, (rendered.stdout + rendered.stderr).strip()[-800:])
     check("install 把邀请码写成入场凭证", "一次性邀请码就是入场凭证" in install and "只出现一次" in install and "不要发回给主人" in install)
     check("install 不再让外部 Agent 去要当日口令", not _asks_agent_for_daily_pass(install) and "当日口令" in install and "不要向主人要" in install)
     check("install 主路径是 pair 后发言和拉收件箱", "进群发言" in install and "拉收件箱" in install and "接进来之后再说" in install)
