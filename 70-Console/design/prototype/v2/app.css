@@ -617,3 +617,43 @@ html.grp-fs #sec-groups {
   .grp-back { display: inline-flex; align-items: center; }
   .grp-overlay { position: fixed; z-index: 45; }
 }
+
+/* 电脑端翻页：一行一块，高度正好是顶栏下面的一屏。手机（≤760px）不套用。 */
+@media (min-width: 761px) {
+  html.deck { scroll-padding-top: var(--deck-top, 58px); }
+  html.deck .wrap > .sec {
+    height: calc(100dvh - var(--deck-top, 58px));
+    min-height: 0;
+    max-height: none;
+    overflow: hidden;
+    scroll-margin-top: var(--deck-top, 58px);
+  }
+  html.deck .stage,
+  html.deck .chat,
+  html.deck .feed,
+  html.deck .grp {
+    height: calc(100dvh - var(--deck-top, 58px));
+    max-height: none;
+    min-height: 0;
+  }
+  html.deck .chat,
+  html.deck .feed { overflow: hidden; }
+  html.deck .wrap > .sec.panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  html.deck .projects,
+  html.deck .approvals,
+  html.deck .rollcalls,
+  html.deck .agent-grid,
+  html.deck .audit,
+  html.deck .kb-list,
+  html.deck .server {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+}
