@@ -2,6 +2,7 @@
 # 群聊：建群、主人发言、外部 Agent 配对后发言、叫醒不含正文和令牌、失败不派任务、
 # 名册不把心跳当成可对话。
 # 用法：python3 90-System/runtime/tests/test_group_chat.py
+import hashlib
 import json
 import os
 import shutil
@@ -440,7 +441,25 @@ def test_pages_exist():
     check("操作台有群聊板块", 'data-tab="groups"' in html and "以你自己的身份说点什么" in html)
     check("前端走现有口令解锁和群接口", "group_send" in js and "/api/groupchat/roster" in js and "askUnlock" in js)
     check("前端不写死令牌", "token=" not in js and "?token" not in js)
-    check("静态资源版本已抬到 2.5.4", "v2/app.js?v=2.5.4" in html and "v2/app.css?v=2.5.4" in html)
+    check("静态资源版本已抬到 2.5.5", "v2/app.js?v=2.5.5" in html and "v2/app.css?v=2.5.5" in html)
+    css = (ROOT / "70-Console/design/prototype/v2/app.css").read_text(encoding="utf-8")
+    meta = html.split('<div class="top-meta">', 1)[1].split("</header>", 1)[0]
+    mobile = css.split("@media (max-width: 760px)", 1)[1].split("@media", 1)[0]
+    check("顶栏有背景音乐开关", 'id="btn-bgm"' in meta and ">音乐 关<" in meta
+          and 'title="背景音乐，拉夫劳伦超长版"' in meta and 'aria-label="背景音乐，拉夫劳伦超长版"' in meta)
+    check("背景音乐音源先 ogg 再 mp3", 'id="bgm"' in meta and "loop" in meta and 'preload="none"' in meta
+          and "autoplay" not in meta and meta.index('src="v2/audio/bgm.ogg"') < meta.index('src="v2/audio/bgm.mp3"'))
+    check("手机宽度仍显示音乐开关", "#btn-bgm { display: inline-flex" in mobile and "#btn-bgm { display: none" not in css
+          and "#health-pill { display: none" in mobile)
+    check("背景音乐默认关并记在 sb.bgm.on", 'const BGM_KEY = "sb.bgm.on"' in js and "音乐 开" in js and "音乐 关" in js and "BGM_VOL = 0.35" in js)
+    audio = ROOT / "70-Console/design/prototype/v2/audio"
+    def digest(name):
+        blob = (audio / name).read_bytes()
+        return hashlib.sha256(blob).hexdigest(), len(blob)
+    mp3_sha, mp3_n = digest("bgm.mp3")
+    ogg_sha, ogg_n = digest("bgm.ogg")
+    check("bgm.mp3 与指定曲目一致", mp3_sha == "c54ae4b70704e8477fc360afdd4cfbd052810e2a3cb99df1ae318fdbfcbed46e" and mp3_n == 3768156, (mp3_sha, mp3_n))
+    check("bgm.ogg 与指定曲目一致", ogg_sha == "581c98fab16983376543698f9d164e0190886cd7b463add163b349742a17bf22" and ogg_n == 2125207, (ogg_sha, ogg_n))
     skill = (ROOT / "70-Console/design/prototype/groupchat/skill.md").read_text(encoding="utf-8")
     install = (ROOT / "70-Console/design/prototype/groupchat/install.md").read_text(encoding="utf-8")
     check("技能说明禁止分钟级和自动重试", "分钟" in skill and "不要" in skill and "inbox" in skill)
