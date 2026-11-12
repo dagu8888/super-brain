@@ -88,18 +88,19 @@ a { color: var(--cyan); }
 .wrap { display: grid; gap: var(--gap); padding: var(--gap) 18px 40px; max-width: 1680px; margin: 0 auto;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 380px;
   grid-template-areas:
-    "kpi kpi kpi"
+    "hero hero hero"
     "grp grp grp"
-    "stage stage chat"
+    "galaxy galaxy galaxy"
+    "chat chat chat"
     "proj proj feed"
     "ap ap rc"
     "ag ag srv"
     "kb kb audit"; }
 .chat { grid-area: chat; }
 .grp { grid-area: grp; }
+.hero { grid-area: hero; min-width: 0; }
+.galaxy { grid-area: galaxy; min-width: 0; }
 #sec-projects { grid-area: proj; }
-.kpis { grid-area: kpi; }
-.stage { grid-area: stage; }
 .feed { grid-area: feed; }
 #sec-rollcall { grid-area: rc; }
 #sec-agents { grid-area: ag; }
@@ -148,7 +149,7 @@ button.kpi:hover { border-color: var(--line2); transform: translateY(-2px); }
 /* 3D 舞台 */
 .stage { position: relative; min-height: 560px; height: calc(100vh - 230px); max-height: 820px; border-radius: var(--r); overflow: hidden;
   border: 1px solid var(--line); background: radial-gradient(ellipse at 50% 45%, rgba(26, 38, 64, .55), rgba(5, 8, 14, .9) 70%); }
-.stage-head { position: absolute; z-index: 3; top: 12px; left: 14px; right: 14px; display: flex; justify-content: space-between; align-items: center; pointer-events: none; }
+.stage-head { position: absolute; z-index: 5; top: 12px; left: 14px; right: 14px; display: flex; justify-content: space-between; align-items: center; pointer-events: none; }
 .stage-head > * { pointer-events: auto; }
 .stage-tools { display: flex; gap: 6px; }
 .stage-body { position: absolute; inset: 0; touch-action: none; }
@@ -163,6 +164,18 @@ button.kpi:hover { border-color: var(--line2); transform: translateY(-2px); }
 .legend .lt { grid-column: 1 / -1; color: var(--ink3); font-size: 10.5px; margin-top: 2px; white-space: normal; }
 .legend summary { display: none; }
 .stage-hint { position: absolute; z-index: 3; right: 14px; bottom: 14px; font-size: 11px; color: var(--ink3); }
+.space-labels { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+.space-label { position: absolute; left: 0; top: 0; text-align: center; white-space: nowrap; text-shadow: 0 1px 2px #000, 0 0 10px rgba(0, 0, 0, .75); }
+.space-label b { display: block; font-size: 12.5px; font-weight: 650; letter-spacing: .03em; }
+.space-label small { display: block; color: #a9b6cb; font-size: 11px; }
+.space-label.dim { opacity: .28; }
+.space-label.off b { color: #8b97ab; }
+.space-label.busy small { color: var(--gold2); }
+.space-label i { font-style: normal; font-size: 10px; margin-left: 4px; border-radius: 999px; padding: 0 5px; line-height: 16px; display: inline-block; vertical-align: 1px; }
+.space-label i.tag-ext { color: #041018; background: #7ad7ff; }
+.space-label i.tag-human { color: #2a2108; background: var(--gold); }
+.space-label em { font-style: normal; font-size: 10px; margin-left: 4px; color: #fff; background: var(--red); border-radius: 999px; padding: 0 5px; }
+#btn-stage-fs[aria-pressed="true"], #btn-galaxy-fs[aria-pressed="true"] { color: var(--gold2); border-color: rgba(245, 196, 81, .55); background: rgba(245, 196, 81, .14); }
 .stage-ticker { position: absolute; z-index: 3; right: 12px; top: 52px; width: 260px; padding: 10px 12px; font-size: 11.5px; border-radius: var(--r2); display: grid; gap: 6px; }
 .stage-ticker .tk-row { display: flex; justify-content: space-between; gap: 8px; color: var(--ink3); }
 .stage-ticker .tk-row b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -299,7 +312,7 @@ mark { background: rgba(245, 196, 81, .3); color: var(--gold2); border-radius: 3
 
 /* 中屏 */
 @media (max-width: 1280px) {
-  .wrap { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "kpi kpi" "grp grp" "stage stage" "chat proj" "feed ap" "rc ag" "srv audit" "kb kb"; }
+  .wrap { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "hero hero" "grp grp" "galaxy galaxy" "chat chat" "proj feed" "ap rc" "ag srv" "kb audit"; }
   .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .feed { height: 520px; min-height: 0; }
 }
@@ -327,6 +340,8 @@ mark { background: rgba(245, 196, 81, .3); color: var(--gold2); border-radius: 3
   .kpi { min-height: 104px; padding: 11px 12px 10px; }
   .kpi .k-val { font-size: 24px; }
   .stage { height: 380px; min-height: 0; }
+  .galaxy { height: 68vh; min-height: 420px; }
+  .galaxy-hint { display: none; }
   .stage-hint, .stage-ticker { display: none; }
   .legend { left: 8px; right: 8px; bottom: 8px; max-width: none; grid-template-columns: 1fr 1fr; padding: 8px 10px; font-size: 10.5px; }
   .legend[data-collapsed="true"] .lg, .legend[data-collapsed="true"] .lt { display: none; }
@@ -633,11 +648,20 @@ html.grp-fs #sec-groups {
   html.deck .stage,
   html.deck .chat,
   html.deck .feed,
-  html.deck .grp {
+  html.deck .grp,
+  html.deck .galaxy {
     height: calc(100dvh - var(--deck-top, 58px));
     max-height: none;
     min-height: 0;
   }
+  html.deck .hero {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow: hidden;
+  }
+  html.deck .hero .kpis { flex: 0 0 auto; height: auto; }
+  html.deck .hero .stage { flex: 1 1 auto; height: auto; min-height: 0; max-height: none; }
   html.deck .chat,
   html.deck .feed { overflow: hidden; }
   html.deck .wrap > .sec.panel {
@@ -659,3 +683,32 @@ html.grp-fs #sec-groups {
     overscroll-behavior: contain;
   }
 }
+
+/* 知识图谱：一整屏的旋涡星系 */
+.galaxy { position: relative; min-height: 560px; height: calc(100vh - 180px); overflow: hidden; border-radius: var(--r);
+  border: 1px solid var(--line); background: radial-gradient(ellipse at 50% 48%, #140d18, #05070e 62%); }
+.galaxy-head { position: absolute; z-index: 3; top: 12px; left: 14px; right: 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; pointer-events: none; }
+.galaxy-head > * { pointer-events: auto; }
+.galaxy-tools { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.galaxy-search { margin: 0; }
+.galaxy-search input { height: 28px; width: min(240px, 34vw); border-radius: 999px; border: 1px solid var(--line2); background: rgba(10, 16, 28, .72); color: var(--ink); padding: 0 12px; font-size: 12px; outline: none; }
+.galaxy-search input:focus { border-color: var(--gold); }
+.galaxy-body { position: absolute; inset: 0; touch-action: none; }
+.galaxy-body canvas { display: block; width: 100%; height: 100%; outline: none; }
+.galaxy-hint { position: absolute; z-index: 3; right: 14px; bottom: 14px; margin: 0; font-size: 11px; color: var(--ink3); pointer-events: none; }
+.galaxy-error { position: absolute; z-index: 4; left: 14px; bottom: 14px; max-width: min(420px, 70%); padding: 8px 12px; border-radius: 10px; background: rgba(8, 12, 22, .88); border: 1px solid rgba(255, 77, 94, .35); color: var(--ink2); font-size: 12px; }
+.galaxy-error[hidden] { display: none; }
+
+/* 全屏：画面铺满窗口，顶栏留在上面，方便开关音乐和看时间 */
+html.stage-fs .stage, html.deck.stage-fs .hero .stage {
+  position: fixed; z-index: 28; left: 0; right: 0; bottom: 0; top: 0;
+  width: auto; height: auto; min-height: 0; max-height: none; margin: 0; border-radius: 0;
+}
+html.stage-fs .stage-head { top: calc(var(--deck-top, 58px) + 10px); }
+html.stage-fs .stage-ticker { top: calc(var(--deck-top, 58px) + 52px); }
+html.gal-fs .galaxy-body { position: fixed; z-index: 28; inset: 0; }
+html.gal-fs .galaxy-head, html.gal-fs .galaxy-hint, html.gal-fs .galaxy-error { position: fixed; z-index: 29; }
+html.gal-fs .galaxy-head { top: calc(var(--deck-top, 58px) + 10px); left: 14px; right: 14px; }
+html.gal-fs .galaxy-hint { right: 14px; bottom: 14px; top: auto; left: auto; }
+html.gal-fs .galaxy-error { left: 14px; bottom: 14px; top: auto; }
+html.stage-fs .tabbar, html.gal-fs .tabbar { visibility: hidden; }
