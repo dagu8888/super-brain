@@ -1271,7 +1271,83 @@
     const u = new SpeechSynthesisUtterance(String(text).replace(/https?:\/\/\S+/g, "链接").slice(0, 500));
     u.lang = "zh-CN"; u.rate = 1.05;
     const v = speechSynthesis.getVoices().find((x) => /zh[-_]CN/i.test(x.lang)); if (v) u.voice = v;
+    u.onstart = () => { bgmDuck = true; bgmApplyVolume(); };
+    u.onend = u.onerror = () => { bgmDuck = false; bgmApplyVolume(); };
     speechSynthesis.cancel(); speechSynthesis.speak(u);
+  }
+
+  /* 背景音乐默认关。开关记在 sb.bgm.on。打开靠这一次点击；
+     若浏览器拦住了自动播放，就等页面上任意一次操作再响。切到后台先暂停。 */
+  const BGM_KEY = "sb.bgm.on";
+  const BGM_VOL = 0.35;
+  const BGM_DUCK = 0.12;
+  let bgmDuck = false;
+  let bgmArmed = false;
+  function bgmWanted() {
+    try { return localStorage.getItem(BGM_KEY) === "1"; } catch (e) { return false; }
+  }
+  function bgmSet(on) {
+    try { localStorage.setItem(BGM_KEY, on ? "1" : "0"); } catch (e) { /* 记不住时仍可本次开关 */ }
+  }
+  function bgmAudio() { return $("#bgm"); }
+  function bgmApplyVolume() {
+    const a = bgmAudio();
+    if (a) a.volume = bgmDuck ? BGM_DUCK : BGM_VOL;
+  }
+  function renderBgmBtn() {
+    const b = $("#btn-bgm"); if (!b) return;
+    const on = bgmWanted();
+    b.textContent = on ? "音乐 开" : "音乐 关";
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+    b.classList.toggle("chip-gold", on);
+  }
+  function disarmBgmGesture() {
+    if (!bgmArmed) return;
+    document.removeEventListener("pointerdown", onBgmGesture, true);
+    document.removeEventListener("keydown", onBgmGesture, true);
+    bgmArmed = false;
+  }
+  function onBgmGesture(e) {
+    if (e.target && e.target.closest && e.target.closest("#btn-bgm")) return;
+    disarmBgmGesture();
+    if (bgmWanted() && document.visibilityState !== "hidden") startBgm();
+  }
+  function armBgmGesture() {
+    if (bgmArmed || !bgmWanted()) return;
+    bgmArmed = true;
+    document.addEventListener("pointerdown", onBgmGesture, true);
+    document.addEventListener("keydown", onBgmGesture, true);
+  }
+  function startBgm() {
+    const a = bgmAudio();
+    if (!a || !bgmWanted() || document.visibilityState === "hidden") return;
+    bgmApplyVolume();
+    const p = a.play();
+    if (p && typeof p.then === "function") {
+      p.then(() => disarmBgmGesture()).catch(() => { if (bgmWanted() && document.visibilityState !== "hidden") armBgmGesture(); });
+    }
+  }
+  function stopBgm() {
+    disarmBgmGesture();
+    const a = bgmAudio();
+    if (a) a.pause();
+  }
+  function bindBgm() {
+    const a = bgmAudio();
+    if (a) a.volume = BGM_VOL;
+    renderBgmBtn();
+    const b = $("#btn-bgm");
+    if (b) b.addEventListener("click", () => {
+      const on = !bgmWanted();
+      bgmSet(on);
+      renderBgmBtn();
+      if (on) startBgm(); else stopBgm();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") { const el = bgmAudio(); if (el) el.pause(); }
+      else if (bgmWanted()) startBgm();
+    });
+    if (bgmWanted()) startBgm();
   }
   function renderTtsBtn() {
     const b = $("#btn-tts"); if (!b) return;
@@ -1884,6 +1960,7 @@
     $("#btn-chat-more").addEventListener("click", () => loadChat(S.chat.length ? S.chat[0].created_at : undefined));
     $("#btn-tts").addEventListener("click", () => { setPref("tts", !pref("tts")); if (pref("tts")) say("朗读已打开"); });
     renderTtsBtn();
+    bindBgm();
     const micBtn = $("#btn-mic");
     if (!canRecord()) { micBtn.classList.add("off"); micBtn.title = "这个浏览器不能录音（键盘输入不受影响）"; }
     micBtn.addEventListener("pointerdown", micStart);
