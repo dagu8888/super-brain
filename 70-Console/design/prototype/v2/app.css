@@ -72,7 +72,7 @@ a { color: var(--cyan); }
 .brand-text strong { letter-spacing: .18em; font-size: 13px; }
 .brand-text span { color: var(--ink3); font-size: 11px; }
 .top-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-#btn-bgm { white-space: nowrap; flex: none; }
+#btn-bgm, #btn-voice { white-space: nowrap; flex: none; }
 .pill { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: 999px;
   border: 1px solid var(--line2); background: rgba(255, 255, 255, .03); font-size: 12px; color: var(--ink2); text-decoration: none; white-space: nowrap; }
 .pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--gray); }
@@ -326,6 +326,7 @@ mark { background: rgba(215, 165, 106, .3); color: var(--gold2); border-radius: 
   .top { padding: calc(8px + var(--safe-t)) 12px 8px; }
   .brand-text span, .link-v1, #health-pill { display: none; }
   #btn-bgm { display: inline-flex; align-items: center; }
+  #btn-voice { display: inline-flex; align-items: center; }
   .clock { font-size: 13px; } .clock small { display: none; }
   .wrap { display: block; padding: 10px 10px 20px; }
   .wrap > .sec { margin-bottom: 10px; }
@@ -417,9 +418,9 @@ button.pill { cursor: pointer; }
 }
 
 /* ---------- 指挥官对话 ---------- */
-.chat { display: flex; flex-direction: column; min-height: 0; height: 100%; max-height: 640px; }
+.chat { display: flex; flex-direction: column; min-height: 0; height: 100%; max-height: none; }
 .chat-tools { display: flex; gap: 6px; }
-.chat-list { list-style: none; margin: 0; padding: 4px 2px; flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 10px; min-height: 160px; overscroll-behavior: contain; }
+.chat-list { list-style: none; margin: 0; padding: 4px 2px; flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 10px; min-height: 180px; max-height: 420px; overscroll-behavior: contain; }
 .chat-list .empty { margin: auto; text-align: center; color: var(--ink3); font-size: 12.5px; }
 .bub { max-width: 86%; align-self: flex-start; padding: 9px 12px; border-radius: 14px 14px 14px 4px; background: rgba(179, 164, 224, .09); border: 1px solid rgba(179, 164, 224, .28); font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; position: relative; }
 .bub.me { align-self: flex-end; border-radius: 14px 14px 4px 14px; background: rgba(215, 165, 106, .1); border-color: rgba(215, 165, 106, .35); }
@@ -467,8 +468,15 @@ button.pill { cursor: pointer; }
 .ms i.blk { background: var(--red); }
 .pj-sub { font-size: 12px; color: var(--ink2); }
 .pj-sub b { color: var(--ink); }
-.pj .ppl { display: flex; gap: 4px; flex-wrap: wrap; }
-.pj .ppl span { font-size: 11px; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--line2); color: var(--ink2); }
+.pj .ppl { display: grid; justify-items: center; align-items: start; gap: 10px 12px; }
+.pj .ppl span {
+  box-sizing: border-box; width: 68px; height: 68px; min-width: 68px; min-height: 68px;
+  aspect-ratio: 1 / 1; border-radius: 50%; border: 1px solid var(--line2);
+  background: rgba(255, 255, 255, .03); color: var(--ink2);
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  font-size: 10.5px; line-height: 1.15; padding: 6px; white-space: nowrap; overflow: visible;
+  transform: none;
+}
 .pj .blk { font-size: 11.5px; color: #ff9aa4; }
 .rdot { position: absolute; top: -6px; right: -6px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--red); color: #fff; font-size: 11px; font-weight: 700; line-height: 20px; text-align: center; box-shadow: 0 0 10px rgba(255, 77, 94, .7); border: 0; }
 .tl { display: grid; gap: 0; }
@@ -733,6 +741,32 @@ html.stage-fs .tabbar, html.gal-fs .tabbar { visibility: hidden; }
 .galaxy-card .viz-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 html.gal-fs .galaxy-card { position: fixed; z-index: 29; }
 .stage-head h2, .galaxy-head h2 { text-shadow: 0 1px 8px rgba(0, 0, 0, .45); }
+.galaxy-depth { display: inline-flex; align-items: center; gap: 3px; padding: 2px; border-radius: 999px; border: 1px solid var(--line2); background: rgba(10, 16, 28, .72); }
+.galaxy-depth span { color: var(--ink3); font-size: 11px; padding: 0 4px 0 8px; }
+.galaxy-depth button { width: 26px; height: 26px; border-radius: 50%; border: 1px solid transparent; background: transparent; color: var(--ink2); font-size: 12px; }
+.galaxy-depth button.on { color: var(--hub2); border-color: rgba(142, 172, 232, .55); background: rgba(142, 172, 232, .16); }
+.voice-panel { display: grid; gap: 8px; margin: 0 0 10px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: rgba(8, 12, 20, .35); }
+.voice-panel-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.voice-panel-head h3 { margin: 0; font-size: 13px; letter-spacing: .04em; }
+.voice-panel-head p { margin: 0; color: var(--ink3); font-size: 12px; }
+.voice-modes { display: grid; gap: 6px; }
+.voice-mode { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: rgba(255, 255, 255, .02); }
+.voice-mode input { margin-top: 3px; }
+.voice-mode b { display: block; font-size: 13px; }
+.voice-mode small { display: block; color: var(--ink3); font-size: 11px; line-height: 1.45; }
+.voice-slots { display: grid; gap: 6px; }
+.voice-slot { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 8px; align-items: center; padding: 8px; border-radius: 10px; border: 1px solid var(--line); }
+.voice-slot b { font-size: 12.5px; }
+.voice-slot small, .voice-slot em { color: var(--ink3); font-style: normal; font-size: 11px; }
+.voice-slot em[data-on="1"] { color: var(--gold2); }
+.voice-slot input { grid-column: 1 / -1; height: 32px; border-radius: 8px; border: 1px solid var(--line2); background: rgba(0, 0, 0, .28); padding: 0 10px; }
+.voice-slot button { justify-self: end; }
+@media (max-width: 760px) {
+  .chat-list { max-height: none; }
+  .galaxy-depth { order: 3; }
+  .voice-slot { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 760px) {
   .galaxy .legend { display: none; }
   .galaxy-card { left: 8px; right: 8px; width: auto; bottom: 8px; max-height: 42%; }

@@ -16,7 +16,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="v2/icons/favicon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="v2/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="v2/app.css?v=2.7.0">
+<link rel="stylesheet" href="v2/app.css?v=2.8.0">
 <script>
 try {
   var root = document.documentElement;
@@ -43,9 +43,14 @@ try {
     <span class="pill pill-ghost" id="health-pill" data-s="idle"><i></i><b>服务器检查中</b></span>
     <span class="clock" id="clock" title="北京时间">--:--:--<small>北京时间</small></span>
     <button class="pill pill-ghost" id="owner-pill" type="button" data-s="idle" title="查看免口令；今天第一次写操作需输入口令"><i></i><b>只读</b></button>
-    <button class="chip" id="btn-bgm" type="button" aria-pressed="false" title="背景音乐，拉夫劳伦超长版" aria-label="背景音乐，拉夫劳伦超长版">音乐 关</button>
+    <button class="chip" id="btn-voice" type="button" title="语音设置">语音</button>
+    <button class="chip" id="btn-bgm" type="button" aria-pressed="true" title="背景音乐，拉夫劳伦超长版" aria-label="背景音乐，拉夫劳伦超长版">音乐 开</button>
     <a class="pill pill-ghost link-v1" href="v1.html" title="打开旧版 v1 操作台">旧版 v1</a>
   </div>
+  <audio id="welcome" preload="auto">
+    <source src="v2/audio/welcome-dagu-wenjing.ogg?v=2.8.0" type="audio/ogg">
+    <source src="v2/audio/welcome-dagu-wenjing.mp3?v=2.8.0" type="audio/mpeg">
+  </audio>
   <audio id="bgm" loop preload="none">
     <source src="v2/audio/bgm.ogg" type="audio/ogg">
     <source src="v2/audio/bgm.mp3" type="audio/mpeg">
@@ -136,7 +141,17 @@ try {
         <label class="sr" for="galaxy-type">按类型筛选</label>
         <select id="galaxy-type" title="按正文类型筛选" hidden><option value="">全部类型</option></select>
         <button class="chip" id="btn-galaxy-reset" type="button" title="回到全局图">全局</button>
-        <button class="chip" id="btn-galaxy-expand" type="button" title="沿真实邻域再扩一跳" disabled>再扩一跳</button>
+        <div class="galaxy-depth" id="galaxy-depth" role="radiogroup" aria-label="展开深度，1 到 8 级">
+          <span>深度</span>
+          <button type="button" data-depth="1" aria-pressed="false">1</button>
+          <button type="button" data-depth="2" aria-pressed="false">2</button>
+          <button type="button" data-depth="3" aria-pressed="false">3</button>
+          <button type="button" data-depth="4" aria-pressed="false">4</button>
+          <button type="button" data-depth="5" aria-pressed="false">5</button>
+          <button type="button" data-depth="6" aria-pressed="false">6</button>
+          <button type="button" data-depth="7" aria-pressed="false">7</button>
+          <button type="button" data-depth="8" class="on" aria-pressed="true">8</button>
+        </div>
         <button class="chip" id="btn-galaxy-open" type="button" title="打开当前文档" disabled>打开文档</button>
         <button class="chip" id="btn-galaxy-fly" type="button" title="把镜头移到焦点或搜索命中">靠近</button>
         <button class="chip" id="btn-galaxy-fs" type="button" aria-pressed="false" title="让知识宇宙占满屏幕">全屏</button>
@@ -162,6 +177,46 @@ try {
         <button class="chip" id="btn-chat-more" type="button" title="加载更早的消息">更早</button>
       </div>
     </div>
+    <section class="voice-panel" id="voice-panel" aria-label="语音设置">
+      <div class="voice-panel-head">
+        <h3>语音</h3>
+        <p id="voice-voice-label">音色 文静 · flux-wenjing-zh</p>
+      </div>
+      <div class="voice-modes" role="radiogroup" aria-label="语音模式">
+        <label class="voice-mode"><input type="radio" name="voice-mode" value="hold" checked><span><b>按住说话</b><small>松手转文字，不自动发送。Deepgram 已配置时，幕僚长回复可用文静朗读。</small></span></label>
+        <label class="voice-mode"><input type="radio" name="voice-mode" value="stream"><span><b>流式（本地小模型）</b><small>香港 Moonshine 边听边出字，可随时打断。本机没有现成 TTS，流式朗读用 Deepgram 文静；没配密钥时改用浏览器语音。</small></span></label>
+        <label class="voice-mode"><input type="radio" name="voice-mode" value="live"><span><b>实时语音 API</b><small>对着讲，文静用 Deepgram 开口。转写 Nova-3 简体中文。对话仍是幕僚长，不另开语音大模型。</small></span></label>
+      </div>
+      <label class="toggle-row" for="voice-bgm"><span>背景音乐<small>默认开。先播完「大古，欢迎回来」，再放音乐，两段不重叠。</small></span><input id="voice-bgm" type="checkbox" checked></label>
+      <div class="voice-slots" id="voice-slots">
+        <form class="voice-slot" data-provider="deepgram" autocomplete="off">
+          <div><b>Deepgram</b><small>本次接入 · Nova-3 + 文静</small></div>
+          <em data-slot-state>未配置</em>
+          <input type="password" name="api_key" autocomplete="new-password" placeholder="密钥只存服务器" aria-label="Deepgram 密钥">
+          <button class="chip" type="submit">保存</button>
+        </form>
+        <form class="voice-slot" data-provider="gemini_live" autocomplete="off">
+          <div><b>Gemini Live</b><small>预留，尚未接入通话</small></div>
+          <em data-slot-state>未配置</em>
+          <input type="password" name="api_key" autocomplete="new-password" placeholder="密钥只存服务器" aria-label="Gemini Live 密钥">
+          <button class="chip" type="submit">保存</button>
+        </form>
+        <form class="voice-slot" data-provider="elevenlabs" autocomplete="off">
+          <div><b>ElevenLabs</b><small>预留，尚未接入通话</small></div>
+          <em data-slot-state>未配置</em>
+          <input type="password" name="api_key" autocomplete="new-password" placeholder="密钥只存服务器" aria-label="ElevenLabs 密钥">
+          <button class="chip" type="submit">保存</button>
+        </form>
+        <form class="voice-slot" data-provider="bailian" autocomplete="off">
+          <div><b>阿里云百炼</b><small>预留，尚未接入通话</small></div>
+          <em data-slot-state>未配置</em>
+          <input type="password" name="api_key" autocomplete="new-password" placeholder="密钥只存服务器" aria-label="阿里云百炼密钥">
+          <button class="chip" type="submit">保存</button>
+        </form>
+      </div>
+      <p class="note" id="voice-entry-note">进入页面先由文静说「大古，欢迎回来」（本地音频，不现场调用）。说完再放背景音乐。文件还没放进目录、或浏览器拦住自动播放时，点一下页面任意处会按同样顺序补播；欢迎语播不了就只放音乐。</p>
+      <p class="note">查看不用口令。切换模式和保存密钥需要今日口令。页面上看不到已保存的密钥。</p>
+    </section>
     <ol class="chat-list" id="chat" aria-live="polite" aria-relevant="additions"><li class="empty">读取中…</li></ol>
     <div class="chat-reply" id="chat-reply" hidden></div>
     <form class="chat-form" id="chat-form" autocomplete="off">
@@ -264,6 +319,8 @@ try {
   </form>
 </dialog>
 
-<script src="v2/app.js?v=2.7.0" defer></script>
+<script src="v2/voice-entry.js?v=2.8.0" defer></script>
+<script src="v2/roster.js?v=2.8.0" defer></script>
+<script src="v2/app.js?v=2.8.0" defer></script>
 </body>
 </html>

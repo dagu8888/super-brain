@@ -914,11 +914,18 @@
     const blob = [doc.path, doc.title, doc.snippet, (doc.tags || []).join(" "), (doc.links || []).join(" "), doc.category || ""].join("\n").toLowerCase();
     return Object.keys(S.agentById).filter((id) => id && id.length > 3 && blob.indexOf(String(id).toLowerCase()) >= 0);
   }
+  function syncDepthButtons(depth) {
+    const n = Number(depth) || 8;
+    $$("#galaxy-depth button").forEach((b) => {
+      const on = Number(b.dataset.depth) === n;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+  }
   function syncGalaxyActs(info) {
     const open = $("#btn-galaxy-open");
-    const exp = $("#btn-galaxy-expand");
     if (open) open.disabled = !(info && info.doc);
-    if (exp) exp.disabled = !(info && info.canExpand);
+    if (info && info.hop) syncDepthButtons(info.hop);
   }
   function renderGalaxyCard(info) {
     const el = $("#galaxy-card");
@@ -933,7 +940,7 @@
     h.textContent = doc.title || doc.path || "未命名";
     const sub = document.createElement("p");
     sub.className = "note";
-    sub.textContent = [doc.category, doc.type, "展开 " + (info.hop || 1) + " 跳", "可见 " + (info.visibleCount || 0)].filter(Boolean).join(" · ");
+    sub.textContent = [doc.category, doc.type, "展开 " + (info.hop || 8) + " 级", "可见 " + (info.visibleCount || 0)].filter(Boolean).join(" · ");
     el.append(h, sub);
     function listBlock(title, rows) {
       if (!rows || !rows.length) return;
@@ -1053,13 +1060,14 @@
         reduced: reduced.matches,
         mobile: mobile.matches,
         onFocus: (info) => renderGalaxyCard(info),
-        onOpen: (path) => openDoc(path)
+        onOpen: (path) => openDoc(path),
+        onDepth: (depth) => syncDepthButtons(depth)
       });
       if (S.galaxyDocs) { galaxyView.setDocs(S.galaxyDocs); renderGalaxyFilters(); }
       if (S.kbQ) galaxyView.setQuery(S.kbQ);
     };
     const three = window.THREE ? Promise.resolve() : loadScript("../vendor/three.min.js?v=r150");
-    three.catch(() => null).then(() => (window.SBGALAXY ? null : loadScript("v2/galaxy.js?v=2.0.0"))).then(boot).catch((e) => showGalaxyError((e && e.message) || "星图加载失败"));
+    three.catch(() => null).then(() => (window.SBGALAXY ? null : loadScript("v2/galaxy.js?v=2.8.0"))).then(boot).catch((e) => showGalaxyError((e && e.message) || "星图加载失败"));
   }
   function galaxyFsOn() {
     return document.documentElement.classList.contains("gal-fs");
@@ -1309,7 +1317,7 @@
   }
 
   /* 审计 */
-  const ACT_CN = { msg: "发消息", rollcall: "发起点名", submit: "下指令", pause: "暂停", resume: "恢复", task_approve: "通过任务", task_reject: "打回任务", task_retry: "重跑任务", task_reassign: "转交任务", approval_decide: "审批裁决", kb_save: "编辑知识库", unlock: "今日授权", pair: "设备配对", pair_code_create: "生成配对链接", device_revoke: "吊销设备", logout: "退出设备", vault_put: "存入口令", vault_disable: "停用口令", vault_enable: "启用口令", vault_list: "查看口令清单", project_upsert: "编辑项目", phase_upsert: "编辑阶段", phase_accept: "阶段验收", group_create: "建群", group_add: "拉人进群", group_send: "群聊发言", group_pair: "生成群配对码", group_recall: "撤回群消息", group_webhook: "登记群唤醒", group_checkin: "设置群打卡间隔" };
+  const ACT_CN = { msg: "发消息", rollcall: "发起点名", submit: "下指令", pause: "暂停", resume: "恢复", task_approve: "通过任务", task_reject: "打回任务", task_retry: "重跑任务", task_reassign: "转交任务", approval_decide: "审批裁决", kb_save: "编辑知识库", unlock: "今日授权", pair: "设备配对", pair_code_create: "生成配对链接", device_revoke: "吊销设备", logout: "退出设备", vault_put: "存入口令", vault_disable: "停用口令", vault_enable: "启用口令", vault_list: "查看口令清单", project_upsert: "编辑项目", phase_upsert: "编辑阶段", phase_accept: "阶段验收", group_create: "建群", group_add: "拉人进群", group_send: "群聊发言", group_pair: "生成群配对码", group_recall: "撤回群消息", group_webhook: "登记群唤醒", group_checkin: "设置群打卡间隔", voice_mode: "切换语音模式", voice_secret: "保存语音密钥" };
   async function loadAudit() {
     try {
       const rows = (await api("/api/audit?limit=50")).data || [];
@@ -1461,7 +1469,7 @@
     const onChat = document.documentElement.dataset.tab === "chat" || !mobile.matches;
     if (!onChat || document.visibilityState !== "visible") { S.chatUnread += 1; renderChatBadge(); }
     if (pref("sound")) beep(880);
-    if (pref("tts")) say(m.text);
+    if (shouldSpeakReply()) say(m.text);
     localNotify("幕僚长回复", m.text, "chat");
   }
 
@@ -1502,7 +1510,7 @@
     const p = prefs();
     const row = (k, t, sub, dis) => `<label class="toggle-row"><span>${t}<small>${sub}</small></span><input type="checkbox" data-pref="${k}" ${p[k] ? "checked" : ""} ${dis ? "disabled" : ""}></label>`;
     return row("sound", "提示音", "新回复 / 新审批时响一声")
-      + row("tts", "朗读幕僚长回复", "speechSynthesis（浏览器原生，免费）", !("speechSynthesis" in window))
+      + row("tts", "朗读幕僚长回复", "按住说话时：Deepgram 已配置用文静，否则用浏览器语音", !("speechSynthesis" in window) && !voiceStatus.deepgram)
       + row("notify", "系统通知", "页面在后台但未关闭时弹通知；关掉页面后的推送（Web Push）尚未上线", !("Notification" in window));
   }
   function bindPrefs(dr) {
@@ -1537,6 +1545,7 @@
   }
   async function micStart(e) {
     if (e) { e.preventDefault(); if (e.pointerId != null && e.currentTarget.setPointerCapture) { try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) { /* noop */ } } }
+    if (voiceMode() !== "hold") { startConversation(e, voiceMode()); return; }
     if (mic || $("#btn-mic").classList.contains("busy")) return;
     if (!canRecord()) { toast(location.protocol === "https:" || location.hostname === "localhost" ? "这个浏览器不能录音，请用键盘输入" : "录音需要 https 地址打开，请用键盘输入"); return; }
     if (!own()) { toast("语音识别要先完成今日授权（键盘随时可用）"); askUnlock(); return; }
@@ -1622,7 +1631,27 @@
     }
     return new Blob([buf], { type: "audio/wav" });
   }
-  function say(text) {
+  let voiceStatus = { deepgram: false, local_tts: false };
+  let fluxAudio = null;
+  let fluxAbort = null;
+  let talking = null;
+  let lastCommitted = "";
+  function voiceMode() {
+    return window.SBVoiceEntry ? SBVoiceEntry.readMode(localStorage) : "hold";
+  }
+  function shouldSpeakReply() {
+    const mode = voiceMode();
+    if (mode === "stream" || mode === "live") return true;
+    return pref("tts");
+  }
+  function stopSpeaking() {
+    if (fluxAbort) { try { fluxAbort.abort(); } catch (e) { /* 已结束 */ } fluxAbort = null; }
+    if (fluxAudio) { try { fluxAudio.pause(); } catch (e) { /* 已停 */ } fluxAudio = null; }
+    if ("speechSynthesis" in window) { try { speechSynthesis.cancel(); } catch (e) { /* 忽略 */ } }
+    bgmDuck = false;
+    bgmApplyVolume();
+  }
+  function sayBrowser(text) {
     if (!("speechSynthesis" in window) || !text) return;
     const u = new SpeechSynthesisUtterance(String(text).replace(/https?:\/\/\S+/g, "链接").slice(0, 500));
     u.lang = "zh-CN"; u.rate = 1.05;
@@ -1631,21 +1660,183 @@
     u.onend = u.onerror = () => { bgmDuck = false; bgmApplyVolume(); };
     speechSynthesis.cancel(); speechSynthesis.speak(u);
   }
+  async function playFlux(text) {
+    const o = own();
+    if (!o) return false;
+    stopSpeaking();
+    const ctl = new AbortController();
+    fluxAbort = ctl;
+    bgmDuck = true; bgmApplyVolume();
+    let r;
+    try {
+      r = await fetch(API + "/api/owner/voice/speak", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + o.token },
+        body: JSON.stringify({ text: String(text).slice(0, 500) }),
+        signal: ctl.signal, cache: "no-store", credentials: "same-origin"
+      });
+    } catch (e) {
+      bgmDuck = false; bgmApplyVolume();
+      return false;
+    }
+    const ct = (r.headers.get("content-type") || "").toLowerCase();
+    if (!r.ok || ct.indexOf("audio/") !== 0) {
+      bgmDuck = false; bgmApplyVolume();
+      return false;
+    }
+    try {
+      const buf = await r.arrayBuffer();
+      if (ctl.signal.aborted || !buf.byteLength) { bgmDuck = false; bgmApplyVolume(); return false; }
+      const url = URL.createObjectURL(new Blob([buf], { type: ct.split(";")[0] }));
+      const audio = new Audio(url);
+      fluxAudio = audio;
+      audio.onended = audio.onerror = () => { URL.revokeObjectURL(url); if (fluxAudio === audio) fluxAudio = null; bgmDuck = false; bgmApplyVolume(); };
+      await audio.play();
+      return true;
+    } catch (e) {
+      bgmDuck = false; bgmApplyVolume();
+      return false;
+    }
+  }
+  async function say(text) {
+    const raw = String(text || "").trim();
+    if (!raw) return;
+    if (voiceStatus.deepgram && own()) {
+      const ok = await playFlux(raw);
+      if (ok) return;
+    }
+    sayBrowser(raw);
+  }
+  async function commitUtterance(text) {
+    const t = String(text || "").trim();
+    if (!t || t === lastCommitted) return;
+    lastCommitted = t;
+    const ta = $("#chat-input");
+    if (ta) { ta.value = t; autoGrow(ta); }
+    await sendChat();
+  }
+  function pcm16(chunks, rate) {
+    let n = 0; for (const c of chunks) n += c.length;
+    const ratio = rate / 16000;
+    const outN = Math.max(1, Math.floor(n / ratio));
+    const buf = new Int16Array(outN);
+    let ci = 0, cj = 0, pos = 0;
+    const next = () => { while (ci < chunks.length && cj >= chunks[ci].length) { ci++; cj = 0; } return ci < chunks.length ? chunks[ci][cj++] : 0; };
+    for (let i = 0; i < outN; i++) {
+      const end = Math.floor((i + 1) * ratio); let sum = 0, k = 0;
+      while (pos < end) { sum += next(); pos++; k++; }
+      const x = Math.max(-1, Math.min(1, k ? sum / k : 0));
+      buf[i] = x < 0 ? x * 0x8000 : x * 0x7fff;
+    }
+    return buf;
+  }
+  function stopConversation() {
+    const t = talking;
+    talking = null;
+    if (!t) return;
+    t.stop = true;
+    clearTimeout(t.timer);
+    try { if (t.node) { t.node.onaudioprocess = null; t.node.disconnect(); } if (t.src) t.src.disconnect(); if (t.sink) t.sink.disconnect(); } catch (e) { /* noop */ }
+    try { if (t.stream) t.stream.getTracks().forEach((tr) => tr.stop()); } catch (e) { /* noop */ }
+    try { if (t.ctx && t.ctx.state !== "closed") t.ctx.close(); } catch (e) { /* noop */ }
+    if (t.session) fetch(API + "/api/owner/voice/live/close", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + ((own() || {}).token || "") }, body: JSON.stringify({ session: t.session }), cache: "no-store", credentials: "same-origin" }).catch(() => {});
+    micStatus("");
+    const b = $("#btn-mic"); if (b) { b.classList.remove("rec"); b.setAttribute("aria-pressed", "false"); }
+  }
+  function startConversation(e, mode) {
+    if (talking) { stopConversation(); return; }
+    stopSpeaking();
+    if (!canRecord()) { toast("这个浏览器不能录音，请用键盘输入"); return; }
+    if (!own()) { toast("语音要先完成今日授权（键盘随时可用）"); askUnlock(); return; }
+    const ctx = new AC();
+    try { ctx.resume(); } catch (x) { /* iOS 要在这次手势里恢复 */ }
+    const t = talking = { mode: mode, ctx: ctx, chunks: [], pending: [], rate: ctx.sampleRate, stop: false, text: "", quiet: 0, session: "" };
+    micStatus(mode === "live" ? "正在听，说完会发给幕僚长" : "流式听写中，说完一句就发给幕僚长", "rec");
+    navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } }).then(async (stream) => {
+      if (t.stop || talking !== t) { stream.getTracks().forEach((tr) => tr.stop()); return; }
+      t.stream = stream;
+      const src = ctx.createMediaStreamSource(stream);
+      const node = ctx.createScriptProcessor(4096, 1, 1);
+      const sink = ctx.createGain(); sink.gain.value = 0;
+      node.onaudioprocess = (ev) => {
+        if (t.stop) return;
+        const data = new Float32Array(ev.inputBuffer.getChannelData(0));
+        t.chunks.push(data);
+        t.pending.push(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+        const rms = Math.sqrt(sum / data.length);
+        if (rms > 0.02) { t.quiet = 0; stopSpeaking(); }
+        else t.quiet += data.length / ctx.sampleRate;
+      };
+      src.connect(node); node.connect(sink); sink.connect(ctx.destination);
+      Object.assign(t, { src: src, node: node, sink: sink });
+      if (mode === "live" && voiceStatus.deepgram) {
+        const opened = await postJSON("/api/owner/voice/live/open", {}, (own() || {}).token);
+        if (opened && opened.ok && opened.session) t.session = opened.session;
+        else micStatus("Deepgram 还没配好，这段先走键盘", "busy");
+      }
+      const tick = async () => {
+        if (talking !== t || t.stop) return;
+        if (mode === "live" && t.session && t.pending.length) {
+          const pcm = pcm16(t.pending, t.rate);
+          t.pending = [];
+          const o = own();
+          fetch(API + "/api/owner/voice/live/audio?session=" + encodeURIComponent(t.session), {
+            method: "POST", headers: { "Content-Type": "application/octet-stream", Authorization: "Bearer " + (o && o.token) },
+            body: pcm, cache: "no-store", credentials: "same-origin"
+          }).catch(() => {});
+          const polled = await fetch(API + "/api/owner/voice/live/poll?session=" + encodeURIComponent(t.session) + "&cursor=" + (t.cursor || 0), {
+            headers: { Authorization: "Bearer " + ((own() || {}).token || "") }, cache: "no-store", credentials: "same-origin"
+          }).then((r) => r.json()).catch(() => null);
+          if (polled && polled.ok) {
+            t.cursor = polled.cursor || t.cursor || 0;
+            (polled.events || []).forEach((ev) => {
+              if (ev.text) micStatus(ev.text, "rec");
+              if (ev.kind === "final" && ev.speech_final) commitUtterance(ev.text);
+            });
+          }
+        } else if (mode === "stream" && t.chunks.length) {
+          const wav = encodeWav16k(t.chunks.slice(-24), t.rate);
+          const o = own();
+          try {
+            const r = await fetch(API + "/api/owner/voice/partial", {
+              method: "POST", headers: { "Content-Type": "audio/wav", Authorization: "Bearer " + (o && o.token) },
+              body: wav, cache: "no-store", credentials: "same-origin"
+            });
+            const j = await r.json();
+            if (j && j.text) { t.text = j.text; micStatus(j.text, "rec"); }
+          } catch (err) { /* 下一次再试 */ }
+          if (t.quiet > 0.8 && t.text) {
+            const said = t.text;
+            t.text = ""; t.chunks = []; t.quiet = 0;
+            commitUtterance(said);
+          }
+        }
+        t.timer = setTimeout(tick, mode === "live" ? 320 : 1100);
+      };
+      tick();
+    }).catch((err) => { if (talking === t) talking = null; micStatus(""); toast(micErrorText(err)); });
+  }
 
-  /* 背景音乐默认关。开关记在 sb.bgm.on。打开靠这一次点击；
-     若浏览器拦住了自动播放，就等页面上任意一次操作再响。切到后台先暂停。 */
+  /* 背景音乐默认开。开关记在 sb.bgm.on，显式写成 0 才关。
+     进页先播本地欢迎语「大古，欢迎回来」，说完再放背景音乐。缺文件就跳过欢迎语。 */
   const BGM_KEY = "sb.bgm.on";
   const BGM_VOL = 0.35;
   const BGM_DUCK = 0.12;
   let bgmDuck = false;
   let bgmArmed = false;
+  let entryBusy = false;
+  let entryDone = false;
+  let welcomeState = "pending";
   function bgmWanted() {
-    try { return localStorage.getItem(BGM_KEY) === "1"; } catch (e) { return false; }
+    return window.SBVoiceEntry ? SBVoiceEntry.bgmWanted(localStorage) : true;
   }
   function bgmSet(on) {
     try { localStorage.setItem(BGM_KEY, on ? "1" : "0"); } catch (e) { /* 记不住时仍可本次开关 */ }
   }
   function bgmAudio() { return $("#bgm"); }
+  function welcomeAudio() { return $("#welcome"); }
   function bgmApplyVolume() {
     const a = bgmAudio();
     if (a) a.volume = bgmDuck ? BGM_DUCK : BGM_VOL;
@@ -1656,37 +1847,98 @@
     b.textContent = on ? "音乐 开" : "音乐 关";
     b.setAttribute("aria-pressed", on ? "true" : "false");
     b.classList.toggle("chip-gold", on);
+    const box = $("#voice-bgm");
+    if (box) box.checked = on;
   }
   function disarmBgmGesture() {
     if (!bgmArmed) return;
-    document.removeEventListener("pointerdown", onBgmGesture, true);
-    document.removeEventListener("keydown", onBgmGesture, true);
+    document.removeEventListener("pointerdown", onEntryGesture, true);
+    document.removeEventListener("keydown", onEntryGesture, true);
     bgmArmed = false;
   }
-  function onBgmGesture(e) {
-    if (e.target && e.target.closest && e.target.closest("#btn-bgm")) return;
+  function onEntryGesture(e) {
+    if (e.target && e.target.closest && e.target.closest("#btn-bgm, #voice-bgm")) return;
     disarmBgmGesture();
-    if (bgmWanted() && document.visibilityState !== "hidden") startBgm();
+    const w = welcomeAudio();
+    if ((welcomeState === "ready" || welcomeState === "playing") && w && w.paused) {
+      welcomeState = "playing";
+      const p = w.play();
+      const after = () => { welcomeState = "played"; entryDone = true; if (bgmWanted()) startBgm(); };
+      if (p && typeof p.then === "function") p.then(() => { w.onended = after; }).catch(() => { welcomeState = "ready"; armEntryGesture(); });
+      else w.onended = after;
+      return;
+    }
+    if (!entryDone) beginEntry();
+    else if (bgmWanted()) startBgm();
   }
-  function armBgmGesture() {
-    if (bgmArmed || !bgmWanted()) return;
+  function armEntryGesture() {
+    if (bgmArmed) return;
     bgmArmed = true;
-    document.addEventListener("pointerdown", onBgmGesture, true);
-    document.addEventListener("keydown", onBgmGesture, true);
+    document.addEventListener("pointerdown", onEntryGesture, true);
+    document.addEventListener("keydown", onEntryGesture, true);
   }
   function startBgm() {
     const a = bgmAudio();
     if (!a || !bgmWanted() || document.visibilityState === "hidden") return;
+    if (welcomeState === "playing") return;
     bgmApplyVolume();
     const p = a.play();
     if (p && typeof p.then === "function") {
-      p.then(() => disarmBgmGesture()).catch(() => { if (bgmWanted() && document.visibilityState !== "hidden") armBgmGesture(); });
+      p.then(() => disarmBgmGesture()).catch(() => { if (bgmWanted() && document.visibilityState !== "hidden") armEntryGesture(); });
     }
   }
   function stopBgm() {
-    disarmBgmGesture();
     const a = bgmAudio();
     if (a) a.pause();
+  }
+  function prepareWelcome() {
+    const a = welcomeAudio();
+    if (!a || welcomeState === "skip" || welcomeState === "ready" || welcomeState === "played") {
+      return Promise.resolve(welcomeState === "pending" ? "skip" : welcomeState);
+    }
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (state) => { if (settled) return; settled = true; welcomeState = state; resolve(state); };
+      const onOk = () => finish("ready");
+      const onErr = () => finish("skip");
+      a.addEventListener("canplay", onOk, { once: true });
+      a.addEventListener("error", onErr, { once: true });
+      if (a.readyState >= 2) finish("ready");
+      else {
+        try { a.load(); } catch (e) { finish("skip"); }
+        setTimeout(() => finish("skip"), 1800);
+      }
+    });
+  }
+  function playWelcomeEl() {
+    const a = welcomeAudio();
+    if (!a) return Promise.resolve("skip");
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (state) => { if (settled) return; settled = true; resolve(state); };
+      a.onended = () => finish("played");
+      a.onerror = () => finish("skip");
+      welcomeState = "playing";
+      const p = a.play();
+      if (p && typeof p.then === "function") p.then(() => {}).catch(() => { welcomeState = "ready"; finish("blocked"); });
+    });
+  }
+  async function beginEntry() {
+    if (entryBusy || entryDone) return;
+    entryBusy = true;
+    stopBgm();
+    let welcome = "skip";
+    try { welcome = await prepareWelcome(); } catch (e) { welcome = "skip"; }
+    const plan = window.SBVoiceEntry ? SBVoiceEntry.entrySteps({ welcome: welcome === "ready" ? "ready" : "skip", bgm: bgmWanted() }) : { steps: bgmWanted() ? ["bgm"] : [] };
+    for (const step of plan.steps) {
+      if (step === "welcome") {
+        const played = await playWelcomeEl();
+        if (played === "blocked") { entryBusy = false; welcomeState = "ready"; armEntryGesture(); return; }
+        welcomeState = "played";
+      } else if (step === "bgm") startBgm();
+    }
+    entryDone = true;
+    entryBusy = false;
   }
   function bindBgm() {
     const a = bgmAudio();
@@ -1697,13 +1949,27 @@
       const on = !bgmWanted();
       bgmSet(on);
       renderBgmBtn();
-      if (on) startBgm(); else stopBgm();
+      if (!on) { stopBgm(); return; }
+      if (!entryDone) { beginEntry(); return; }
+      startBgm();
+    });
+    const box = $("#voice-bgm");
+    if (box) box.addEventListener("change", () => {
+      bgmSet(box.checked);
+      renderBgmBtn();
+      if (!box.checked) { stopBgm(); return; }
+      if (!entryDone) { beginEntry(); return; }
+      startBgm();
     });
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "hidden") { const el = bgmAudio(); if (el) el.pause(); }
-      else if (bgmWanted()) startBgm();
+      if (document.visibilityState === "hidden") {
+        const w = welcomeAudio(); if (w) w.pause();
+        const el = bgmAudio(); if (el) el.pause();
+      } else if (welcomeState === "playing" && welcomeAudio()) {
+        welcomeAudio().play().catch(() => {});
+      } else if (entryDone && bgmWanted()) startBgm();
     });
-    if (bgmWanted()) startBgm();
+    beginEntry();
   }
   function renderTtsBtn() {
     const b = $("#btn-tts"); if (!b) return;
@@ -1727,10 +1993,20 @@
       <div class="pj-top"><b>${esc(p.name)}</b><span class="pj-pct">${p.completion}<small>%</small></span></div>
       ${msBar(p)}
       <div class="pj-sub">已验收 <b>${p.accepted_verified}/${p.phase_total}</b>${p.accepted_unverified ? ` · <span style="color:#ffd38a">另 ${p.accepted_unverified} 项未核实</span>` : ""} · 当前：<b>${esc(p.current_phase ? p.current_phase.name : "全部完成")}</b></div>
-      <div class="ppl">${(p.agents || []).map((a) => `<span>${esc(agentName(a))}</span>`).join("")}</div>
+      <div class="ppl" data-n="${(p.agents || []).length}">${(p.agents || []).map((a) => `<span title="${esc(agentName(a))}">${esc(agentName(a))}</span>`).join("")}</div>
       ${p.blocked.length ? `<div class="blk">阻塞：${p.blocked.map((b) => esc(b.name + (b.blocker ? "（" + b.blocker + "）" : ""))).join("；")}</div>` : ""}
       ${p.constraints ? `<div class="pj-sub" style="color:var(--ink3)">约束：${esc(p.constraints)}</div>` : ""}</button>`).join("")
       : '<div class="empty"><b>还没有项目</b>点「新建项目」开始</div>';
+    layoutRosters();
+  }
+  function layoutRosters() {
+    if (!window.SBRoster) return;
+    $$(".ppl").forEach((row) => {
+      const n = row.children.length;
+      const width = row.clientWidth || (row.parentElement && row.parentElement.clientWidth) || 360;
+      const cols = SBRoster.columns(n, width, SBRoster.CIRCLE, SBRoster.GAP);
+      row.style.gridTemplateColumns = "repeat(" + cols + ", minmax(0, 1fr))";
+    });
   }
   function openProject(id) {
     const p = (S.projects || []).find((x) => x.id === id); if (!p) return;
@@ -2304,6 +2580,75 @@
     });
   }
 
+  function applyVoiceMode(mode) {
+    const m = window.SBVoiceEntry ? SBVoiceEntry.normalizeMode(mode) : "hold";
+    $$("input[name=voice-mode]").forEach((el) => { el.checked = el.value === m; });
+    const micBtn = $("#btn-mic");
+    if (!micBtn) return;
+    if (m === "hold") micBtn.title = "按住说话，松手识别。不自动发送";
+    else if (m === "stream") micBtn.title = "点一下开始流式听写，再说一次结束。可随时打断";
+    else micBtn.title = "点一下开始和幕僚长实时说话，再说一次结束";
+  }
+  async function loadVoiceStatus() {
+    try {
+      const j = await api("/api/voice/status");
+      voiceStatus = j || voiceStatus;
+      if (j.mode && window.SBVoiceEntry) {
+        SBVoiceEntry.writeMode(localStorage, j.mode);
+        applyVoiceMode(j.mode);
+      } else applyVoiceMode(voiceMode());
+      $$("[data-provider]").forEach((form) => {
+        const id = form.dataset.provider;
+        const slot = (j.providers || []).find((p) => p.id === id);
+        const badge = form.querySelector("[data-slot-state]");
+        if (!badge) return;
+        const on = !!(slot && slot.configured);
+        badge.textContent = on ? "已配置" : "未配置";
+        badge.dataset.on = on ? "1" : "0";
+      });
+      const label = $("#voice-voice-label");
+      if (label && j.voice) label.textContent = "音色 " + (j.voice.name || "文静") + " · " + (j.voice.model || "flux-wenjing-zh");
+    } catch (e) {
+      applyVoiceMode(voiceMode());
+    }
+  }
+  async function onVoiceMode(mode) {
+    const prev = voiceMode();
+    if (mode === prev) return;
+    if (!own() && !(await askUnlock())) { applyVoiceMode(prev); return; }
+    if (window.SBVoiceEntry) SBVoiceEntry.writeMode(localStorage, mode);
+    applyVoiceMode(mode);
+    stopConversation();
+    const j = await postJSON("/api/owner/voice/settings", { mode: mode }, (own() || {}).token);
+    if (!j.ok) toast("这台设备已记住，服务器没同步：" + (j.error || ""));
+  }
+  function bindVoice() {
+    applyVoiceMode(voiceMode());
+    $$("input[name=voice-mode]").forEach((el) => {
+      el.addEventListener("change", () => { if (el.checked) onVoiceMode(el.value); });
+    });
+    $$("[data-provider]").forEach((form) => {
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const input = form.querySelector("input");
+        const value = input ? input.value.trim() : "";
+        if (!value) { toast("先填密钥"); return; }
+        if (!own() && !(await askUnlock())) return;
+        const j = await postJSON("/api/owner/voice/secret", { provider: form.dataset.provider, api_key: value }, (own() || {}).token);
+        if (input) input.value = "";
+        if (!j.ok) { toast(j.error || "没保存"); return; }
+        toast("密钥已存到服务器");
+        loadVoiceStatus();
+      });
+    });
+    const jump = $("#btn-voice");
+    if (jump) jump.addEventListener("click", () => {
+      if (mobile.matches) setTab("chat");
+      const panel = $("#voice-panel");
+      if (panel && panel.scrollIntoView) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    loadVoiceStatus();
+  }
   function bindExtras() {
     $("#chat-form").addEventListener("submit", (e) => { e.preventDefault(); sendChat(); });
     const ta = $("#chat-input");
@@ -2314,15 +2659,16 @@
       const s2 = e.target.closest("[data-chat-say]"); if (s2) { const m = S.chat.find((x) => x.msg_id === s2.dataset.chatSay); if (m) say(m.text); }
     });
     $("#btn-chat-more").addEventListener("click", () => loadChat(S.chat.length ? S.chat[0].created_at : undefined));
-    $("#btn-tts").addEventListener("click", () => { setPref("tts", !pref("tts")); if (pref("tts")) say("朗读已打开"); });
+    $("#btn-tts").addEventListener("click", () => { setPref("tts", !pref("tts")); if (pref("tts")) sayBrowser("朗读已打开"); });
     renderTtsBtn();
     bindBgm();
+    bindVoice();
     const micBtn = $("#btn-mic");
     if (!canRecord()) { micBtn.classList.add("off"); micBtn.title = "这个浏览器不能录音（键盘输入不受影响）"; }
-    micBtn.addEventListener("pointerdown", micStart);
-    ["pointerup", "pointercancel"].forEach((ev) => micBtn.addEventListener(ev, micStop));
+    micBtn.addEventListener("pointerdown", (e) => { if (voiceMode() === "hold") micStart(e); else startConversation(e, voiceMode()); });
+    ["pointerup", "pointercancel"].forEach((ev) => micBtn.addEventListener(ev, () => { if (voiceMode() === "hold") micStop(); }));
     micBtn.addEventListener("contextmenu", (e) => e.preventDefault());
-    micBtn.addEventListener("keydown", (e) => { if ((e.key === " " || e.key === "Enter") && !e.repeat) { e.preventDefault(); if (mic) micStop(); else micStart(); } });
+    micBtn.addEventListener("keydown", (e) => { if ((e.key === " " || e.key === "Enter") && !e.repeat) { e.preventDefault(); if (voiceMode() === "hold") { if (mic) micStop(); else micStart(); } else startConversation(e, voiceMode()); } });
     $("#projects").addEventListener("click", (e) => { const b = e.target.closest("[data-pj]"); if (b) openProject(b.dataset.pj); });
     $("#btn-new-project").addEventListener("click", newProject);
     $("#agents").addEventListener("click", (e) => {
@@ -2337,6 +2683,7 @@
     $$("#tabbar button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
     window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
     if (tab === "overview" && S.view) setTimeout(() => S.graph && S.view.setData(S.graph), 30);
+    if (tab === "projects") setTimeout(layoutRosters, 30);
     if (tab === "chat") { S.chatUnread = 0; renderChatBadge(); setTimeout(scrollChat, 30); }
     if (tab === "groups") { loadGroupHome(); if (G.current) refreshOpen(); }
   }
@@ -2576,7 +2923,7 @@
     document.addEventListener("keydown", onDeckKey);
     document.addEventListener("keyup", onDeckKeyUp);
     window.addEventListener("scroll", onDeckScroll, { passive: true });
-    window.addEventListener("resize", deckSync);
+    window.addEventListener("resize", () => { deckSync(); layoutRosters(); });
     mobile.addEventListener && mobile.addEventListener("change", deckSync);
     let sawFs = groupFsOn();
     new MutationObserver(() => {
@@ -2633,7 +2980,12 @@
     syncGalaxyFsBtn();
     $("#btn-galaxy-fs").addEventListener("click", () => setGalaxyFullscreen(!galaxyFsOn()));
     $("#btn-galaxy-reset").addEventListener("click", () => { if (galaxyView) galaxyView.reset(); });
-    $("#btn-galaxy-expand").addEventListener("click", () => { if (galaxyView && galaxyView.expand) galaxyView.expand(); });
+    const depthBar = $("#galaxy-depth");
+    if (depthBar) depthBar.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-depth]");
+      if (!b || !galaxyView || !galaxyView.setDepth) return;
+      galaxyView.setDepth(Number(b.dataset.depth));
+    });
     $("#btn-galaxy-open").addEventListener("click", () => { if (galaxyFocusPath) openDoc(galaxyFocusPath); });
     $("#btn-galaxy-fly").addEventListener("click", () => { if (galaxyView) galaxyView.flyIn(); });
     ["#galaxy-cat", "#galaxy-tag", "#galaxy-type"].forEach((sel) => {

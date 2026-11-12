@@ -21,6 +21,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import console_api
 import message_bus
 import owner_ops
+import voice_http
 
 HERE = Path(__file__).parent
 CONF = HERE / "api_tokens.json"
@@ -504,6 +505,8 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
             return self._send(code, obj)
 
         def do_GET(self):
+            if voice_http.try_handle(self, "GET", db_fn, log_event):
+                return
             if self.path.startswith("/healthz"):        # 免鉴权探活
                 return self._send(200, {"ok": True, "service": "super-brain-api"})
             gpath = urlparse(self.path).path.rstrip("/")
@@ -539,6 +542,8 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
             self._send(404, {"ok": False, "error": "not found"})
 
         def do_POST(self):
+            if voice_http.try_handle(self, "POST", db_fn, log_event):
+                return
             if urlparse(self.path).path == "/api/owner/stt":
                 return self._owner_stt()
             if self.path.startswith("/api/owner/"):
