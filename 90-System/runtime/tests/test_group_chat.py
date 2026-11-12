@@ -441,7 +441,7 @@ def test_pages_exist():
     check("操作台有群聊板块", 'data-tab="groups"' in html and "以你自己的身份说点什么" in html)
     check("前端走现有口令解锁和群接口", "group_send" in js and "/api/groupchat/roster" in js and "askUnlock" in js)
     check("前端不写死令牌", "token=" not in js and "?token" not in js)
-    check("静态资源版本已抬到 2.6.0", "v2/app.js?v=2.6.0" in html and "v2/app.css?v=2.6.0" in html)
+    check("静态资源版本已抬到 2.7.0", "v2/app.js?v=2.7.0" in html and "v2/app.css?v=2.7.0" in html)
     css = (ROOT / "70-Console/design/prototype/v2/app.css").read_text(encoding="utf-8")
     meta = html.split('<div class="top-meta">', 1)[1].split("</header>", 1)[0]
     mobile = css.split("@media (max-width: 760px)", 1)[1].split("@media", 1)[0]
@@ -523,7 +523,7 @@ def test_console_260_deck_and_scenes():
     check("第一屏包住 KPI 和协作网", i_hero < i_kpi < i_stage < i_grp and "sec-hero" in html[i_hero:i_grp])
     check("群聊是后续整页", i_grp < i_gal and '"grp grp grp"' in css)
     check("知识图谱在群聊之后、指挥官对话之前", i_grp < i_gal < i_chat < i_kb)
-    check("知识图谱有画布钩子", 'id="galaxy-stage"' in html and "SBGALAXY" in js and "v2/galaxy.js?v=1.0.0" in js)
+    check("知识宇宙有画布钩子", 'id="galaxy-stage"' in html and "SBGALAXY" in js and "v2/galaxy.js?v=2.0.0" in js)
     check("星图读取知识库且不靠编造", "/api/knowledge?limit=200" in js and "openDoc" in js)
     check("协作网和星图都能全屏", 'id="btn-stage-fs"' in html and 'id="btn-galaxy-fs"' in html
           and "stage-fs" in js and "gal-fs" in js and "sb.stage.fullscreen" in js and "sb.gal.fullscreen" in js)
@@ -531,11 +531,38 @@ def test_console_260_deck_and_scenes():
     check("桌面第一行是总览", css.split("grid-template-areas:", 1)[1].split(";", 1)[0].strip().startswith('"hero hero hero"'))
     check("KPI 在第一屏里保持自然高度", "html.deck .hero .kpis { flex: 0 0 auto; height: auto; }" in css)
     check("协作网场景改用着色器", "ShaderMaterial" in scene and "photosphere" in scene and "new T.MeshBasicMaterial" not in scene and "TorusGeometry" not in scene)
-    check("协作网脚本版本 3.0.0", "v2/scene3d.js?v=3.0.0" in js and 'version: "3.0.0"' in scene)
+    check("协作网脚本版本 4.0.0", "v2/scene3d.js?v=4.0.0" in js and 'version: "4.0.0"' in scene)
     check("星图不是纯色小球", "ShaderMaterial" in galaxy and "new T.MeshBasicMaterial" not in galaxy)
     check("群聊全屏和气泡还在", 'data-grp-fs' in html and "grp-bub" in css and "sb.grp.fullscreen" in js)
     check("背景音乐开关还在", 'id="btn-bgm"' in html and 'const BGM_KEY = "sb.bgm.on"' in js)
     check("知识库检索还在", 'id="sec-kb"' in html and 'id="kb-q"' in html and "searchKb" in js)
+
+
+def test_console_270_visual_invariants():
+    """2.7.0：指挥中心与知识宇宙共用克制调色，数据仍来自现有接口。"""
+    html = (ROOT / "70-Console/design/prototype/index.html").read_text(encoding="utf-8")
+    css = (ROOT / "70-Console/design/prototype/v2/app.css").read_text(encoding="utf-8")
+    js = (ROOT / "70-Console/design/prototype/v2/app.js").read_text(encoding="utf-8")
+    scene = (ROOT / "70-Console/design/prototype/v2/scene3d.js").read_text(encoding="utf-8")
+    galaxy = (ROOT / "70-Console/design/prototype/v2/galaxy.js").read_text(encoding="utf-8")
+    api = (ROOT / "90-System/runtime/console_api.py").read_text(encoding="utf-8")
+    check("版本号是 2.7.0", "v=2.7.0" in html and 'version: "2.0.0"' in galaxy and 'version: "4.0.0"' in scene)
+    check("不写死火节点", "火" not in scene and "火" not in galaxy and "__fire__" not in js and "Fire" not in scene)
+    check("中台仍是编排中心", "中台" in scene and "中台" in js and "photosphere" in scene)
+    check("关系来自接口并可点开证据", "/api/relations" in js and "evidence" in js and "openRelation" in js and "onEdge" in scene)
+    check("通信光点只从真实消息入口触发", "S.view.pulse" in js and "function onLiveMsg" in js)
+    check("知识仍只读知识接口", "/api/knowledge?limit=200" in js and "openDoc" in js and "/api/knowledge/file" in js)
+    check("星图区分真实双链和推断分组", "wikilink" in galaxy and "inferred" in galaxy and "同分类" in galaxy)
+    check("单击探索、双击打开", "onFocus" in galaxy and "onOpen" in galaxy and "再扩一跳" in html and 'id="btn-galaxy-open"' in html)
+    check("全屏类名还在", "stage-fs" in css and "gal-fs" in css and "grp-fs" in css and "sb.stage.fullscreen" in js and "sb.gal.fullscreen" in js and "sb.grp.fullscreen" in js)
+    check("三屏顺序还在", html.index('id="sec-hero"') < html.index('id="sec-groups"') < html.index('id="sec-galaxy"') < html.index('id="sec-chat"'))
+    check("桌面第一行仍是总览", css.split("grid-template-areas:", 1)[1].split(";", 1)[0].strip().startswith('"hero hero hero"'))
+    check("知识列表暴露正文类型", '"type": fm.get("type", "")' in api)
+    note = ROOT / "10-Knowledge/Playbooks/幕僚长工作沉淀与团队速览.md"
+    links = console_api._wikilinks(note)
+    check("真实双链能解析到笔记名", any("幕僚长接入登记与工作流" in x for x in links), links)
+    check("场景不用纯色小球", "new T.MeshBasicMaterial" not in scene and "new T.MeshBasicMaterial" not in galaxy and "TorusGeometry" not in scene)
+    check("调色板收进蓝青紫琥珀", "--hub:" in css and "--violet:" in css and "#ff5fa2" not in css and "#3ee6c1" not in css)
 
 
 if __name__ == "__main__":
@@ -545,6 +572,7 @@ if __name__ == "__main__":
     test_http_pair_speak_and_real_wake()
     test_pages_exist()
     test_console_260_deck_and_scenes()
+    test_console_270_visual_invariants()
     print("----")
     if FAILS:
         print("FAILED %d: %s" % (len(FAILS), ", ".join(FAILS)))

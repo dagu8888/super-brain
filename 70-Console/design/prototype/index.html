@@ -16,7 +16,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="v2/icons/favicon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="v2/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="v2/app.css?v=2.6.0">
+<link rel="stylesheet" href="v2/app.css?v=2.7.0">
 <script>
 try {
   var root = document.documentElement;
@@ -61,7 +61,7 @@ try {
 
   <section class="stage" aria-label="协作网拓扑">
     <div class="stage-head">
-      <h2>协作网拓扑 <small id="stage-mode">加载中</small></h2>
+      <h2>指挥中心 <small id="stage-mode">加载中</small></h2>
       <div class="stage-tools">
         <button class="chip chip-gold" id="btn-rollcall" type="button" title="向全体广播点名（今日授权后可操作）">发起点名</button>
         <button class="chip" id="btn-reset" type="button" title="回到全景">全景</button>
@@ -73,7 +73,7 @@ try {
       <div class="stage-loading" id="stage-loading"><span class="spinner"></span>正在载入协作网…</div>
     </div>
     <div class="legend glass" id="legend" aria-label="图例"></div>
-    <div class="stage-hint" id="stage-hint">拖拽旋转 · 滚轮/双指缩放 · 点节点看详情</div>
+    <div class="stage-hint" id="stage-hint">拖拽环绕 · 滚轮缩放 · 点节点看详情 · 点连线看证据</div>
     <div class="stage-ticker glass" id="ticker" aria-live="off"></div>
   </section>
 
@@ -121,21 +121,36 @@ try {
     <div class="grp-overlay" id="grp-overlay" hidden></div>
   </section>
 
-  <section class="galaxy sec" id="sec-galaxy" data-t="kb more" aria-label="知识图谱">
+  <section class="galaxy sec" id="sec-galaxy" data-t="kb more" aria-label="知识宇宙">
     <div class="galaxy-head">
-      <h2>知识图谱 <small id="galaxy-sub">读取中</small></h2>
+      <h2>知识宇宙 <small id="galaxy-sub">读取中</small></h2>
       <div class="galaxy-tools">
         <form id="galaxy-form" class="galaxy-search" role="search">
-          <label class="sr" for="galaxy-q">在星图里搜索文档</label>
+          <label class="sr" for="galaxy-q">在知识宇宙里搜索文档</label>
           <input id="galaxy-q" type="search" placeholder="搜标题、标签、分类…" autocomplete="off" enterkeyhint="search">
         </form>
-        <button class="chip" id="btn-galaxy-reset" type="button" title="回到全景">全景</button>
-        <button class="chip" id="btn-galaxy-fly" type="button" title="飞进旋臂">飞入</button>
-        <button class="chip" id="btn-galaxy-fs" type="button" aria-pressed="false" title="让知识图谱占满屏幕">全屏</button>
+        <label class="sr" for="galaxy-cat">按分类筛选</label>
+        <select id="galaxy-cat" title="按真实分类筛选"><option value="">全部分类</option></select>
+        <label class="sr" for="galaxy-tag">按标签筛选</label>
+        <select id="galaxy-tag" title="按真实标签筛选"><option value="">全部标签</option></select>
+        <label class="sr" for="galaxy-type">按类型筛选</label>
+        <select id="galaxy-type" title="按正文类型筛选" hidden><option value="">全部类型</option></select>
+        <button class="chip" id="btn-galaxy-reset" type="button" title="回到全局图">全局</button>
+        <button class="chip" id="btn-galaxy-expand" type="button" title="沿真实邻域再扩一跳" disabled>再扩一跳</button>
+        <button class="chip" id="btn-galaxy-open" type="button" title="打开当前文档" disabled>打开文档</button>
+        <button class="chip" id="btn-galaxy-fly" type="button" title="把镜头移到焦点或搜索命中">靠近</button>
+        <button class="chip" id="btn-galaxy-fs" type="button" aria-pressed="false" title="让知识宇宙占满屏幕">全屏</button>
       </div>
     </div>
     <div class="galaxy-body" id="galaxy-stage"></div>
-    <p class="galaxy-hint" id="galaxy-hint">拖拽环绕 · 滚轮缩放 · 飞入旋臂 · 点文档星打开</p>
+    <div class="galaxy-card glass" id="galaxy-card" hidden></div>
+    <div class="legend glass" id="galaxy-legend" aria-label="知识图例">
+      <div class="lg"><span class="ln" style="background:var(--hub)"></span>实线 · 真实双链</div>
+      <div class="lg"><span class="ln" style="background:var(--amber);height:1px"></span>虚线 · 推断分组</div>
+      <div class="lg"><span class="dot" style="background:var(--chief)"></span>分类团块</div>
+      <div class="lt">单击沿邻域走，双击或「打开文档」读原文。未解析双链只记在卡片里。</div>
+    </div>
+    <p class="galaxy-hint" id="galaxy-hint">拖拽环绕 · 滚轮缩放 · 单击探索邻域 · 双击打开文档</p>
     <div class="galaxy-error" id="galaxy-error" hidden></div>
   </section>
 
@@ -249,6 +264,6 @@ try {
   </form>
 </dialog>
 
-<script src="v2/app.js?v=2.6.0" defer></script>
+<script src="v2/app.js?v=2.7.0" defer></script>
 </body>
 </html>

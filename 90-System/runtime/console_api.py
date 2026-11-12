@@ -411,12 +411,11 @@ def _plain_body(path):
 
 
 def _wikilinks(path):
-    """解析正文 [[wikilink]]（kepano 规范：允许未解析链接，留作面包屑）。返回去重链接名。"""
+    """解析正文和 frontmatter 里的 [[wikilink]]（kepano：未解析链接留作面包屑）。返回去重链接名。"""
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except Exception:
         return []
-    text = re.sub(r"^---\n.*?\n---\n", "", text, flags=re.S)
     seen, out = set(), []
     for m in re.findall(r"\[\[([^\[\]|#]+)(?:[#|][^\[\]]*)?\]\]", text):
         name = m.strip()
@@ -765,6 +764,8 @@ def handle_get(conn, raw_path):
                 "title": title,
                 "category": category,
                 "tags": tags,
+                "type": fm.get("type", ""),
+                "layer": fm.get("layer", ""),
                 "quality": fm.get("quality", ""),
                 "rating": fm.get("rating", ""),
                 "created": fm.get("created", ""),

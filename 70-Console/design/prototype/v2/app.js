@@ -350,7 +350,7 @@
         <div class="k-val"><span data-k="an">${big(an.total)}</span></div>
         <div class="bars3"><div class="r">未认领<b>${an.unclaimed || 0}</b></div><div class="r">最近失败<b>${an.recent_failed || an.dead || 0}</b></div><div class="a">心跳过期<b>${an.stale || 0}</b></div></div>
         <div class="k-sub" title="${esc(stale)}">历史归档死信 <b>${big((an.archive && an.archive.dead) || 0)}</b> 条，不计入角标${stale ? " · 过期：" + esc(stale) : ""}</div></button>
-      <button class="kpi" style="--accent:#9b8cff" data-go="approvals" type="button">
+      <button class="kpi" style="--accent:var(--violet)" data-go="approvals" type="button">
         <div class="k-label">待大古批示</div>
         <div class="k-val"><span data-k="ap">${(k.approvals_pending || 0) + (k.decision_tasks || 0)}</span><small>项</small></div>
         <div class="k-sub">审批 <b>${k.approvals_pending || 0}</b> · 待拍板任务 <b>${k.decision_tasks || 0}</b><br>中台事件 近1h <b>${k.events_1h}</b> · 24h <b>${k.events_24h}</b> · 队列待办 <b>${k.queue.pending || 0}</b></div></button>
@@ -446,6 +446,18 @@
   }
 
   /* ---------- 拓扑图数据 ---------- */
+  function workText(w) {
+    if (!w) return "";
+    if (typeof w === "string") return w;
+    return w.title || w.text || w.summary || "";
+  }
+  function statusKeyOf(a, so) {
+    so = so || stateOf(a);
+    if (so.k === "busy" || a.live_status === "working") return "working";
+    if (so.k === "degraded" || a.live_status === "degraded") return "error";
+    if (so.k === "idle" || a.live_status === "idle") return "idle";
+    return "offline";
+  }
   function buildGraph() {
     const d = S.dash; if (!d) return;
     const vol = {};
@@ -453,17 +465,39 @@
       vol[l.from] = (vol[l.from] || 0) + l.count_24h;
       const t = toAgent(l.to); if (t) vol[t] = (vol[t] || 0) + l.count_24h;
     });
-    const rel = {};
-    (S.relations || []).forEach((r) => { rel[r.target] = (rel[r.target] || 0) + (r.task_count || 0); });
-    const nodes = [{ id: HUB, label: "中台", kind: "hub", live: "idle", weight: 1, anomalies: { total: 0 }, sub: "在线 · 消息总线" }];
-    d.agents.filter((a) => a.status === "active" || a.status === "disabled").forEach((a) => {
-      nodes.push({ id: a.agent_id, label: a._label, kind: a.kind, live: a.status === "active" ? a.live_status : "disabled", working: a.live_status === "working" || stateOf(a).k === "busy",
-        weight: (vol[a.agent_id] || 0) + (rel[a.agent_id] || 0), msgs: vol[a.agent_id] || 0, tasks: rel[a.agent_id] || 0,
-        anomalies: a.anomalies, presence_at: a.presence_at, instances: a.instances,
-        sub: stateLine(a).slice(0, 48), pending: (a.pending_approvals || 0) + (a.pending_assists || 0),
-        badge: a.kind === "external" ? "外部" : (a.agent_id === OWNER ? "人" : "") });
+    const relCount = {};
+    (S.relations || []).forEach((r) => {
+      relCount[r.source] = (relCount[r.source] || 0) + (r.task_count || 0);
+      relCount[r.target] = (relCount[r.target] || 0) + (r.task_count || 0);
     });
-    S.graph = { nodes, hub: HUB };
+    const nodes = [{ id: HUB, label: "中台", kind: "hub", live: "idle", statusKey: "idle", statusText: "在线", role: "编排", weight: 1, anomalies: { total: 0 }, sub: "在线 · 消息总线" }];
+    const ids = new Set([HUB]);
+    d.agents.filter((a) => a.status === "active" || a.status === "disabled").forEach((a) => {
+      const so = stateOf(a);
+      const key = statusKeyOf(a, so);
+      const work = so.work || workText(a.current_work);
+      const activity = a.presence_at ? "最近在场 " + ago(a.presence_at) : (so.since ? "自 " + ago(so.since) : "");
+      nodes.push({
+        id: a.agent_id, label: a._label, kind: a.kind,
+        live: a.status === "active" ? a.live_status : "disabled",
+        statusKey: key, statusText: stateLine(a),
+        role: a.kind === "chief" ? "指挥入口" : a.kind === "worker" ? "执行者" : (a.kind || ""),
+        working: key === "working",
+        weight: (vol[a.agent_id] || 0) + (relCount[a.agent_id] || 0),
+        msgs: vol[a.agent_id] || 0, tasks: relCount[a.agent_id] || 0,
+        anomalies: a.anomalies, presence_at: a.presence_at, instances: a.instances,
+        sub: stateLine(a).slice(0, 48), work: work || "", activity: activity,
+        load: (a.doing_task_ids && a.doing_task_ids.length) ? a.doing_task_ids.length : null,
+        pending: (a.pending_approvals || 0) + (a.pending_assists || 0),
+        badge: a.kind === "external" ? "外部" : (a.agent_id === OWNER ? "人" : "")
+      });
+      ids.add(a.agent_id);
+    });
+    const edges = (S.relations || []).filter((r) => ids.has(r.source) && ids.has(r.target) && r.source !== r.target).map((r) => ({
+      source: r.source, target: r.target, task_count: r.task_count, last_at: r.last_at,
+      type: r.type, evidence: r.evidence, state: r.state
+    }));
+    S.graph = { nodes, edges, hub: HUB };
     ensureView();
     if (S.view) S.view.setData(S.graph);
     renderLegend();
@@ -474,18 +508,15 @@
     const collapsed = mobile.matches ? (lg.dataset.collapsed ?? "true") : "false";
     lg.dataset.collapsed = collapsed;
     lg.innerHTML = `<summary role="button" tabindex="0">图例 ${collapsed === "true" ? "▸" : "▾"}</summary>
-      <div class="lg"><span class="dot" style="background:var(--gold);box-shadow:0 0 8px var(--gold)"></span>中台 / 选中</div>
-      <div class="lg"><span class="dot" style="background:var(--chief)"></span>指挥入口（chief）</div>
-      <div class="lg"><span class="dot" style="background:var(--worker)"></span>执行者（worker）</div>
-      <div class="lg"><span class="dot" style="background:var(--amber);box-shadow:0 0 8px var(--amber)"></span>在场但回执失败（心跳在，回执没到）</div>
-      <div class="lg"><span class="dot" style="background:var(--gray)"></span>离线 / 未接入（暗、无光晕）</div>
-      <div class="lg"><span class="ln" style="background:var(--gold)"></span>粗金线：24h 消息往来</div>
-      <div class="lg"><span class="ln" style="background:var(--cyan);height:1px"></span>细青线：任务委派 / 无消息</div>
-      <div class="lg"><span class="dot" style="background:#fff;box-shadow:0 0 8px var(--cyan)"></span>光点：真实消息/事件到达</div>
-      <div class="lg"><span class="dot" style="background:var(--red)"></span>右上红角标：异常数</div>
-      <div class="lg"><span class="dot" style="background:var(--red);box-shadow:0 0 0 2px #fff inset"></span>左上红点+数字：待审批/等协助</div>
-      <div class="lg"><span class="dot" style="background:transparent;border:1px dashed var(--gold)"></span>金色虚环：忙碌（自报/租约）</div>
-      <div class="lt">中台是恒星，Agent 是各自不同的星体。离线会变冷并标明离线多久；在线会区分空闲多久和忙碌，忙碌时标明正在做什么。光点只在真实消息或事件到达时沿引力索飞行。</div>`;
+      <div class="lg"><span class="dot" style="background:var(--hub)"></span>中台 · 编排</div>
+      <div class="lg"><span class="dot" style="background:var(--chief)"></span>指挥入口</div>
+      <div class="lg"><span class="dot" style="background:var(--worker)"></span>执行者</div>
+      <div class="lg"><span class="dot" style="background:var(--amber)"></span>在场但回执失败</div>
+      <div class="lg"><span class="dot" style="background:var(--gray)"></span>离线 / 未接入 / 已暂停</div>
+      <div class="lg"><span class="ln" style="background:var(--hub)"></span>实线：历史派发（可点开证据）</div>
+      <div class="lg"><span class="ln" style="background:var(--worker);height:1px"></span>虚线：默认路由，尚无派发</div>
+      <div class="lg"><span class="dot" style="background:var(--hub2)"></span>光点：仅真实消息或事件</div>
+      <div class="lt">位置按真实协作关系和角色散开，中台留在中央。执行中有一圈淡光晕。没有消息经过时，连线上不跑光点。</div>`;
   }
 
   /* ---------- 视图：3D（桌面）/ 平面（手机、低端、减少动效） ---------- */
@@ -519,7 +550,7 @@
     if (kind === "3d") {
       if (S.viewKind === "3d-loading") return;
       S.viewKind = "3d-loading";
-      loading3D = loading3D || (window.THREE ? Promise.resolve() : loadScript("../vendor/three.min.js?v=r150")).then(() => (window.SB3D ? null : loadScript("v2/scene3d.js?v=3.0.0")));
+      loading3D = loading3D || (window.THREE ? Promise.resolve() : loadScript("../vendor/three.min.js?v=r150")).then(() => (window.SB3D ? null : loadScript("v2/scene3d.js?v=4.0.0")));
       loading3D.then(() => { mountView("3d"); }).catch(() => { localStorage.setItem("sb.view", "lite"); mountView("lite"); toast("3D 场景加载失败，已切到平面模式"); });
       return;
     }
@@ -529,7 +560,7 @@
     if (S.view) { S.view.dispose(); S.view = null; }
     const box = $("#stage");
     box.innerHTML = "";
-    const opts = { reduced: reduced.matches, mobile: mobile.matches, onSelect: (id) => openNode(id), onHover: () => {} };
+    const opts = { reduced: reduced.matches, mobile: mobile.matches, onSelect: (id) => openNode(id), onEdge: (edge) => openRelation(edge), onHover: () => {} };
     try {
       S.view = kind === "3d" ? window.SB3D.create(box, opts) : Lite.create(box, opts);
       S.viewKind = kind;
@@ -537,79 +568,133 @@
       S.view = Lite.create(box, opts); S.viewKind = "lite"; kind = "lite";
     }
     $(".stage").dataset.mode = kind;
-    $("#stage-mode").textContent = kind === "3d" ? "3D · WebGL" : "平面 · 轻量";
+    $("#stage-mode").textContent = kind === "3d" ? "空间网 · WebGL" : "平面 · 轻量";
     $("#btn-mode").textContent = kind === "3d" ? "切到平面" : "切到 3D";
-    $("#stage-hint").textContent = kind === "3d" ? "拖拽旋转 · 滚轮/双指缩放 · 点节点看详情" : "点节点看详情";
+    $("#stage-hint").textContent = kind === "3d" ? "拖拽环绕 · 滚轮/双指缩放 · 点节点看详情 · 点连线看证据" : "点节点看详情 · 点连线看证据";
     if (S.graph) S.view.setData(S.graph);
   }
 
-  /* 平面轻量版：Canvas 2D 放射图（中台居中，指挥入口内环，执行者外环），同一套颜色语义 */
+  /* 平面轻量版：同一套海军蓝调色，按真实关系散开，不是彩虹圆点。 */
   const Lite = {
     create(box, opts) {
       const cv = document.createElement("canvas");
-      cv.setAttribute("role", "img"); cv.setAttribute("aria-label", "协作网平面拓扑");
+      cv.setAttribute("role", "img"); cv.setAttribute("aria-label", "指挥中心平面");
       box.appendChild(cv);
       const ctx = cv.getContext("2d");
-      let W = 0, H = 0, dpr = 1, nodes = [], pos = {}, sel = null, parts = [], raf = 0, flash = {}, dust = [];
-      const COL = { hub: "#f5c451", chief: "#ff5fa2", worker: "#3ee6c1", off: "#6b7a90", degraded: "#ffb547" };
+      let W = 0, H = 0, dpr = 1, nodes = [], edges = [], pos = {}, sel = null, parts = [], raf = 0, flash = {};
+      const COL = { hub: "#8eace8", chief: "#b3a4e0", worker: "#7ec4d8", off: "#6e7c90", error: "#d7a56a" };
+      function hash(s) {
+        let h = 2166136261;
+        const str = String(s || "");
+        for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+        return (h >>> 0) / 4294967295;
+      }
       function layout() {
         const r = box.getBoundingClientRect();
-        dpr = Math.min(2, window.devicePixelRatio || 1); W = r.width; H = r.height;
-        cv.width = W * dpr; cv.height = H * dpr; cv.style.width = W + "px"; cv.style.height = H + "px";
-        const cx = W / 2, cy = H * 0.46, R1 = Math.min(W, H) * 0.24, R2 = Math.min(W, H) * 0.4;
+        dpr = Math.min(1.25, window.devicePixelRatio || 1); W = r.width; H = r.height;
+        cv.width = Math.max(1, W * dpr); cv.height = Math.max(1, H * dpr); cv.style.width = W + "px"; cv.style.height = H + "px";
+        const cx = W / 2, cy = H * 0.48;
+        const scale = Math.min(W, H) * 0.026;
+        const agents = nodes.filter((n) => n.id !== HUB);
+        const abs = {};
+        agents.forEach((n) => {
+          const h = hash(n.id), h2 = hash(n.id + ":b");
+          const chief = n.kind === "chief";
+          const offline = n.statusKey === "offline";
+          const rad = (chief ? 6.4 : 10.2) + (offline ? 4.2 : n.statusKey === "error" ? 1.6 : 0) + h2 * (chief ? 2.2 : 3.2);
+          const ang = h * Math.PI * 2;
+          abs[n.id] = { x: Math.cos(ang) * rad, y: Math.sin(ang) * rad * (0.66 + h2 * 0.4) + (hash(n.id + ":y") - 0.5) * (chief ? 2.2 : 3.4) };
+        });
+        const ids = agents.map((n) => n.id);
+        const pairs = edges.filter((e) => abs[e.source] && abs[e.target]);
+        for (let iter = 0; iter < 48; iter++) {
+          const force = {};
+          ids.forEach((id) => { force[id] = { x: 0, y: 0 }; });
+          for (let a = 0; a < ids.length; a++) for (let b = a + 1; b < ids.length; b++) {
+            let dx = abs[ids[a]].x - abs[ids[b]].x, dy = abs[ids[a]].y - abs[ids[b]].y;
+            const len = Math.max(0.4, Math.hypot(dx, dy));
+            const push = 6.2 / (len * len) / len;
+            dx *= push; dy *= push;
+            force[ids[a]].x += dx; force[ids[a]].y += dy;
+            force[ids[b]].x -= dx; force[ids[b]].y -= dy;
+          }
+          pairs.forEach((e) => {
+            let dx = abs[e.target].x - abs[e.source].x, dy = abs[e.target].y - abs[e.source].y;
+            const len = Math.max(0.2, Math.hypot(dx, dy));
+            const pull = (len - 6.2) * 0.05 / len;
+            dx *= pull; dy *= pull;
+            force[e.source].x += dx; force[e.source].y += dy;
+            force[e.target].x -= dx; force[e.target].y -= dy;
+          });
+          ids.forEach((id) => {
+            const n = agents.find((x) => x.id === id);
+            const p = abs[id];
+            const target = n.statusKey === "offline" ? 15 : n.kind === "chief" ? 8 : 12;
+            const len = Math.max(0.3, Math.hypot(p.x, p.y));
+            force[id].x += p.x / len * (target - len) * 0.02;
+            force[id].y += p.y / len * (target - len) * 0.02;
+            p.x += force[id].x * 0.5; p.y += force[id].y * 0.5;
+            const nl = Math.hypot(p.x, p.y);
+            if (nl < 3.1) { p.x *= 3.1 / nl; p.y *= 3.1 / nl; }
+          });
+        }
         pos = {}; pos[HUB] = { x: cx, y: cy };
-        const chiefs = nodes.filter((n) => n.kind === "chief"), workers = nodes.filter((n) => n.kind === "worker");
-        chiefs.forEach((n, i) => { const a = -Math.PI / 2 + (i / chiefs.length) * Math.PI * 2; pos[n.id] = { x: cx + R1 * Math.cos(a), y: cy + R1 * 0.82 * Math.sin(a) }; });
-        workers.forEach((n, i) => { const a = -Math.PI / 2 + ((i + 0.5) / workers.length) * Math.PI * 2; pos[n.id] = { x: cx + R2 * Math.cos(a), y: cy + R2 * 0.8 * Math.sin(a) }; });
-        if (!dust.length) { for (let i = 0; i < 80; i++) dust.push({ x: Math.random(), y: Math.random(), r: Math.random() * 1.3 + 0.3, a: 0.25 + Math.random() * 0.55 }); }
+        ids.forEach((id) => { pos[id] = { x: cx + abs[id].x * scale, y: cy + abs[id].y * scale }; });
         draw();
       }
-      const isOn = (n) => n.kind === "hub" || n.live === "idle" || n.live === "working" || n.live === "degraded";
-      const rad = (n) => (n.kind === "hub" ? 18 : (n.kind === "chief" ? 8 : 6) + Math.min(6, Math.log2(1 + (n.weight || 0))));
+      const isOn = (n) => n.kind === "hub" || n.statusKey === "idle" || n.statusKey === "working" || n.statusKey === "error" || n.live === "idle" || n.live === "working" || n.live === "degraded";
+      const rad = (n) => (n.kind === "hub" ? 16 : (n.kind === "chief" ? 8 : 6.5) + Math.min(5, Math.log2(1 + (n.weight || 0))));
+      const tone = (n) => n.kind === "hub" ? COL.hub : n.statusKey === "error" || n.live === "degraded" ? COL.error : n.statusKey === "offline" ? COL.off : COL[n.kind] || COL.worker;
       function draw(t) {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, W, H);
-        const sky = ctx.createRadialGradient(W * 0.5, H * 0.46, 30, W * 0.5, H * 0.5, Math.max(W, H) * 0.72);
-        sky.addColorStop(0, "rgba(42, 28, 16, .45)");
-        sky.addColorStop(0.45, "rgba(18, 16, 36, .25)");
-        sky.addColorStop(1, "rgba(5, 7, 14, 0)");
+        const sky = ctx.createRadialGradient(W * 0.5, H * 0.46, 24, W * 0.5, H * 0.5, Math.max(W, H) * 0.72);
+        sky.addColorStop(0, "rgba(28, 42, 68, .55)");
+        sky.addColorStop(1, "rgba(12, 18, 28, 0)");
         ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
-        dust.forEach((s) => { ctx.globalAlpha = s.a; ctx.fillStyle = s.r > 1.2 ? "#ffe2b0" : "#d5e4ff"; ctx.beginPath(); ctx.arc(s.x * W, s.y * H, s.r, 0, 7); ctx.fill(); });
         ctx.globalAlpha = 1;
-        const hub = pos[HUB]; if (!hub) return;
-        nodes.forEach((n) => {
-          if (n.id === HUB) return; const p = pos[n.id]; if (!p) return;
-          const strong = (n.msgs || 0) > 0;
-          ctx.strokeStyle = strong ? "rgba(245,196,81,.28)" : "rgba(76,201,255,.16)";
-          ctx.lineWidth = strong ? 1.4 : 0.7;
-          ctx.globalAlpha = isOn(n) ? 1 : 0.35;
-          ctx.beginPath(); ctx.moveTo(hub.x, hub.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+        edges.forEach((e) => {
+          const a = pos[e.source], b = pos[e.target]; if (!a || !b) return;
+          const hist = e.evidence === "history";
+          ctx.strokeStyle = hist ? "rgba(142,172,232,.72)" : "rgba(126,196,216,.55)";
+          ctx.lineWidth = hist ? 1.4 : 1;
+          ctx.setLineDash(hist ? [] : [4, 4]);
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+          ctx.setLineDash([]);
         });
-        ctx.globalAlpha = 1;
+        const usedLabs = [];
         nodes.forEach((n) => {
           const p = pos[n.id]; if (!p) return;
-          const c = n.kind === "hub" ? COL.hub : n.live === "degraded" ? (COL.degraded || COL.amber || "#e6a23c") : isOn(n) ? COL[n.kind] : COL.off;
+          const c = tone(n);
           const r = rad(n);
-          if (isOn(n)) { const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * (n.kind === "hub" ? 5 : 3.2)); g.addColorStop(0, c + "88"); g.addColorStop(1, c + "00"); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, r * (n.kind === "hub" ? 5 : 3.2), 0, 7); ctx.fill(); }
-          const fl = flash[n.id]; if (fl && t && t - fl < 900) { ctx.strokeStyle = "rgba(255,255,255," + (1 - (t - fl) / 900) + ")"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x, p.y, r + 4 + (t - fl) / 60, 0, 7); ctx.stroke(); }
-          const body = ctx.createRadialGradient(p.x - r * 0.35, p.y - r * 0.35, r * 0.1, p.x, p.y, r);
-          body.addColorStop(0, "#fff6e4"); body.addColorStop(0.45, c); body.addColorStop(1, "rgba(0,0,0,.55)");
-          ctx.fillStyle = body; ctx.globalAlpha = isOn(n) ? 1 : 0.45; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
-          if (n.kind === "hub") { ctx.strokeStyle = "rgba(245,196,81,.55)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(p.x, p.y, r * 1.7, r * 0.42, -0.4, 0, 7); ctx.stroke(); }
-          if (sel === n.id) { ctx.strokeStyle = COL.hub; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x, p.y, r + 5, 0, 7); ctx.stroke(); }
-          if (n.working) { ctx.strokeStyle = COL.hub; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(p.x, p.y, r + 8, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
-          ctx.fillStyle = isOn(n) ? "#e8eef8" : "#7d8aa0"; ctx.font = `${n.kind === "hub" ? 600 : 500} ${n.kind === "hub" ? 12 : 11}px ${getComputedStyle(document.body).fontFamily}`;
-          ctx.textAlign = "center"; ctx.fillText(n.label, p.x, p.y + r + 14);
-          if (n.sub && n.kind !== "hub") { ctx.font = `400 9.5px ${getComputedStyle(document.body).fontFamily}`; ctx.fillStyle = /^忙碌/.test(n.sub) ? "#ffdf8a" : "#7d8aa0"; ctx.fillText(n.sub.slice(0, 12), p.x, p.y + r + 26); }
-          if (n.pending) { ctx.fillStyle = "#ff4d5e"; ctx.beginPath(); ctx.arc(p.x - r - 2, p.y - r - 3, 7, 0, 7); ctx.fill(); ctx.fillStyle = "#fff"; ctx.font = "700 9px sans-serif"; ctx.textAlign = "center"; ctx.fillText(String(n.pending), p.x - r - 2, p.y - r);  }
+          const on = isOn(n);
+          if (n.statusKey === "working" || n.working) {
+            ctx.strokeStyle = "rgba(142,172,232,.65)"; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(p.x, p.y, r + 7, 0, 7); ctx.stroke();
+          }
+          const fl = flash[n.id]; if (fl && t && t - fl < 900) { ctx.strokeStyle = "rgba(213,228,255," + (1 - (t - fl) / 900) + ")"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(p.x, p.y, r + 4 + (t - fl) / 80, 0, 7); ctx.stroke(); }
+          const body = ctx.createRadialGradient(p.x - r * 0.32, p.y - r * 0.34, r * 0.15, p.x, p.y, r);
+          body.addColorStop(0, "#e7eef8"); body.addColorStop(0.55, c); body.addColorStop(1, "rgba(8,12,20,.9)");
+          ctx.fillStyle = body; ctx.globalAlpha = on ? 1 : 0.45; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+          if (sel === n.id) { ctx.strokeStyle = "#d5e4ff"; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(p.x, p.y, r + 4, 0, 7); ctx.stroke(); }
+          const labY = p.y + r + 14;
+          const crowded = n.kind !== "hub" && usedLabs.some((u) => Math.abs(u.x - p.x) < 74 && Math.abs(u.y - labY) < 36);
+          if (!crowded) {
+            usedLabs.push({ x: p.x, y: labY });
+            ctx.fillStyle = on ? "#e6edf6" : "#8b97ab"; ctx.font = (n.kind === "hub" ? "600 12px " : "500 11px ") + getComputedStyle(document.body).fontFamily;
+            ctx.textAlign = "center"; ctx.fillText(n.label || "", p.x, labY);
+            const sub = [n.role, n.statusText].filter(Boolean).join(" · ");
+            if (sub && n.kind !== "hub") { ctx.font = "400 10px " + getComputedStyle(document.body).fontFamily; ctx.fillStyle = n.statusKey === "working" ? "#f0d7b4" : "#8b97ab"; ctx.fillText(sub.slice(0, 16), p.x, labY + 12); }
+          }
+          if (n.pending) { ctx.fillStyle = "#e07a72"; ctx.beginPath(); ctx.arc(p.x - r - 2, p.y - r - 3, 7, 0, 7); ctx.fill(); ctx.fillStyle = "#fff"; ctx.font = "700 9px sans-serif"; ctx.textAlign = "center"; ctx.fillText(String(n.pending), p.x - r - 2, p.y - r); }
           const an = n.anomalies && n.anomalies.total;
-          if (an) { const s = big(an); ctx.font = "600 9.5px sans-serif"; const w = ctx.measureText(s).width + 8; ctx.fillStyle = "#ff4d5e"; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(p.x + r - 2, p.y - r - 10, w, 14, 7) : ctx.rect(p.x + r - 2, p.y - r - 10, w, 14); ctx.fill(); ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.fillText(s, p.x + r + 2, p.y - r + 1); }
+          if (an) { const s = big(an); ctx.font = "600 9.5px sans-serif"; const w = ctx.measureText(s).width + 8; ctx.fillStyle = "#e07a72"; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(p.x + r - 2, p.y - r - 10, w, 14, 7); else ctx.rect(p.x + r - 2, p.y - r - 10, w, 14); ctx.fill(); ctx.fillStyle = "#fff"; ctx.textAlign = "left"; ctx.fillText(s, p.x + r + 2, p.y - r + 1); }
         });
         parts.forEach((pt) => {
           const k = Math.min(1, (t - pt.t0) / pt.d); const a = pos[pt.a], b = pos[pt.b]; if (!a || !b) return;
           const x = a.x + (b.x - a.x) * k, y = a.y + (b.y - a.y) * k;
-          const g = ctx.createRadialGradient(x, y, 0, x, y, 9); g.addColorStop(0, pt.c); g.addColorStop(1, "rgba(0,0,0,0)");
-          ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 9, 0, 7); ctx.fill();
+          const g = ctx.createRadialGradient(x, y, 0, x, y, 8); g.addColorStop(0, pt.c); g.addColorStop(1, "rgba(0,0,0,0)");
+          ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 8, 0, 7); ctx.fill();
         });
       }
       function loop(t) {
@@ -618,26 +703,46 @@
         draw(t);
         const busy = parts.length || Object.values(flash).some((f) => t - f < 900);
         raf = busy ? requestAnimationFrame(loop) : 0;
-        if (!busy) draw();
       }
       function kick() { if (!raf) raf = requestAnimationFrame(loop); }
-      function hit(ev) {
-        const r = cv.getBoundingClientRect(); const x = ev.clientX - r.left, y = ev.clientY - r.top;
+      function hitNode(x, y) {
         let best = null, bd = 1e9;
-        nodes.forEach((n) => { const p = pos[n.id]; if (!p) return; const d = Math.hypot(p.x - x, p.y - y); if (d < Math.max(22, rad(n) + 10) && d < bd) { bd = d; best = n.id; } });
+        nodes.forEach((n) => { const p = pos[n.id]; if (!p) return; const d = Math.hypot(p.x - x, p.y - y); if (d < Math.max(20, rad(n) + 8) && d < bd) { bd = d; best = n.id; } });
         return best;
       }
-      cv.addEventListener("click", (ev) => { const id = hit(ev); if (id) { sel = id; draw(); opts.onSelect(id); } });
-      cv.addEventListener("mousemove", (ev) => { cv.style.cursor = hit(ev) ? "pointer" : "default"; });
+      function hitEdge(x, y) {
+        let best = null, bd = 10;
+        edges.forEach((e) => {
+          const a = pos[e.source], b = pos[e.target]; if (!a || !b) return;
+          const dx = b.x - a.x, dy = b.y - a.y;
+          const len2 = dx * dx + dy * dy || 1;
+          let t = ((x - a.x) * dx + (y - a.y) * dy) / len2;
+          t = Math.max(0, Math.min(1, t));
+          const d = Math.hypot(a.x + dx * t - x, a.y + dy * t - y);
+          if (d < bd) { bd = d; best = e; }
+        });
+        return best;
+      }
+      cv.addEventListener("click", (ev) => {
+        const r = cv.getBoundingClientRect(); const x = ev.clientX - r.left, y = ev.clientY - r.top;
+        const id = hitNode(x, y);
+        if (id) { sel = id; draw(); if (opts.onSelect) opts.onSelect(id); return; }
+        const edge = hitEdge(x, y);
+        if (edge && opts.onEdge) opts.onEdge(edge);
+      });
+      cv.addEventListener("mousemove", (ev) => {
+        const r = cv.getBoundingClientRect();
+        cv.style.cursor = hitNode(ev.clientX - r.left, ev.clientY - r.top) || hitEdge(ev.clientX - r.left, ev.clientY - r.top) ? "pointer" : "default";
+      });
       const ro = new ResizeObserver(() => layout()); ro.observe(box);
       return {
-        setData(g) { nodes = g.nodes; layout(); },
+        setData(g) { nodes = g.nodes || []; edges = g.edges || []; layout(); },
         pulse(from, targets, kind) {
           if (opts.reduced || reduced.matches) { const t = performance.now(); flash[from] = t; (targets || []).forEach((x) => { flash[x] = t; }); flash[HUB] = t; kick(); return; }
-          const c = kind === "ping" ? "rgba(255,223,138,1)" : kind === "alert" ? "rgba(255,77,94,1)" : kind === "event" ? "rgba(200,210,255,.9)" : "rgba(130,220,255,1)";
+          const c = kind === "alert" ? "rgba(224,122,114,1)" : "rgba(142,172,232,1)";
           const t0 = performance.now();
-          const leg2 = (t) => (targets || []).forEach((b) => parts.push({ a: HUB, b, t0: t, d: 650, c }));
-          if (from && from !== HUB && pos[from]) parts.push({ a: from, b: HUB, t0, d: 650, c, next: leg2 }); else { flash[HUB] = t0; leg2(t0); }
+          const leg2 = (t) => (targets || []).forEach((b) => parts.push({ a: HUB, b: b, t0: t, d: 650, c: c }));
+          if (from && from !== HUB && pos[from]) parts.push({ a: from, b: HUB, t0: t0, d: 650, c: c, next: leg2 }); else { flash[HUB] = t0; leg2(t0); }
           kick();
         },
         select(id) { sel = id; draw(); },
@@ -669,9 +774,18 @@
     if (id === HUB) return openHub();
     openAgent(id);
   }
+  function openRelation(edge) {
+    if (!edge) return;
+    const ev = edge.evidence === "history" ? "历史派发记录" : edge.evidence === "default_route" ? "默认路由，尚无派发记录" : (edge.evidence || "—");
+    const when = edge.last_at ? dtm(edge.last_at) + "（" + ago(edge.last_at) + "）" : "无记录时间";
+    openDrawer(head("协作关系", esc(agentName(edge.source)) + " → " + esc(agentName(edge.target)), "var(--hub)") + `<div class="dr-body">
+      <dl class="kv"><dt>类型</dt><dd>${esc(edge.type || "—")}</dd><dt>任务次数</dt><dd>${edge.task_count == null ? "—" : edge.task_count}</dd><dt>最近一次</dt><dd>${esc(when)}</dd><dt>证据</dt><dd>${esc(ev)}</dd><dt>状态</dt><dd>${esc(edge.state || "—")}</dd></dl>
+      <div class="note">这条线来自 /api/relations。历史派发对应 events.source 到 tasks.lease_owner。task_count 为 0 且证据是默认路由时，表示规则层兜底，库里还没有这条派发。</div>
+    </div>`);
+  }
   function openHub() {
     const d = S.dash, k = d.kpi;
-    openDrawer(head("中台 · 消息总线", "所有 Agent 经中台收发；香港服务器 super-brain.service", "var(--gold)") + `<div class="dr-body">
+    openDrawer(head("中台 · 消息总线", "所有 Agent 经中台收发；香港服务器 super-brain.service", "var(--hub)") + `<div class="dr-body">
       <div class="stats4"><div><b>${k.msgs_1h}</b><span>近 1 小时消息</span></div><div><b>${k.msgs_24h}</b><span>近 24 小时消息</span></div><div><b>${k.events_1h}</b><span>近 1 小时事件</span></div><div><b>${k.agents_online}/${k.agents_total}</b><span>在线 Agent</span></div>${k.agents_degraded ? `<div><b style="color:var(--amber)">${k.agents_degraded}</b><span>在场但回执失败</span></div>` : ""}</div>
       <div><h4>任务队列</h4><div class="an">${Object.entries(k.queue).map(([s, n]) => `<span class="${s === "failed" ? "hot" : ""}">${s === "dead" ? "历史死信" : (TASK[s] || s)} ${big(n)}</span>`).join("")}</div></div>
       <div><h4>24 小时消息连线</h4><div class="list">${(d.messages.links_24h || []).map((l) => `<div class="li"><div class="li-top"><span class="who ${whoCls(l.from)}">${esc(agentName(l.from))}</span><span class="arrow">→</span><span class="who">${esc(agentName(toAgent(l.to) || l.to))}</span><span style="margin-left:auto">${l.count_24h} 条 · 最近 ${ago(l.last_at)}</span></div></div>`).join("") || '<div class="note">24 小时内无消息</div>'}</div></div>
@@ -759,13 +873,132 @@
     }
   }
 
-  /* 知识星图。文档来自 /api/knowledge，不编造条目。背景星不能点开。 */
+  /* 知识宇宙。文档来自 /api/knowledge，不编造条目。背景星不能点开。单击探索，双击打开。 */
   let galaxyView = null;
+  let galaxyFocusPath = "";
+  function fillGalaxySelect(sel, values, allLabel) {
+    if (!sel) return;
+    const prev = sel.value;
+    sel.replaceChildren();
+    const all = document.createElement("option");
+    all.value = "";
+    all.textContent = allLabel;
+    sel.appendChild(all);
+    (values || []).forEach((v) => {
+      const o = document.createElement("option");
+      o.value = v;
+      o.textContent = v;
+      sel.appendChild(o);
+    });
+    if ((values || []).indexOf(prev) >= 0) sel.value = prev;
+  }
+  function renderGalaxyFilters() {
+    if (!galaxyView || !galaxyView.facets) return;
+    const f = galaxyView.facets();
+    fillGalaxySelect($("#galaxy-cat"), f.categories, "全部分类");
+    fillGalaxySelect($("#galaxy-tag"), f.tags, "全部标签");
+    const typeSel = $("#galaxy-type");
+    fillGalaxySelect(typeSel, f.types, "全部类型");
+    if (typeSel) typeSel.hidden = !(f.types && f.types.length);
+  }
+  function applyGalaxyFilter() {
+    if (!galaxyView || !galaxyView.setFilter) return;
+    galaxyView.setFilter({
+      category: ($("#galaxy-cat") || {}).value || "",
+      tag: ($("#galaxy-tag") || {}).value || "",
+      type: ($("#galaxy-type") || {}).value || ""
+    });
+  }
+  function mentionedAgents(doc) {
+    if (!doc) return [];
+    const blob = [doc.path, doc.title, doc.snippet, (doc.tags || []).join(" "), (doc.links || []).join(" "), doc.category || ""].join("\n").toLowerCase();
+    return Object.keys(S.agentById).filter((id) => id && id.length > 3 && blob.indexOf(String(id).toLowerCase()) >= 0);
+  }
+  function syncGalaxyActs(info) {
+    const open = $("#btn-galaxy-open");
+    const exp = $("#btn-galaxy-expand");
+    if (open) open.disabled = !(info && info.doc);
+    if (exp) exp.disabled = !(info && info.canExpand);
+  }
+  function renderGalaxyCard(info) {
+    const el = $("#galaxy-card");
+    galaxyFocusPath = info && info.doc && info.doc.path ? info.doc.path : "";
+    syncGalaxyActs(info);
+    if (!el) return;
+    if (!info || !info.doc) { el.hidden = true; el.replaceChildren(); return; }
+    el.hidden = false;
+    el.replaceChildren();
+    const doc = info.doc;
+    const h = document.createElement("b");
+    h.textContent = doc.title || doc.path || "未命名";
+    const sub = document.createElement("p");
+    sub.className = "note";
+    sub.textContent = [doc.category, doc.type, "展开 " + (info.hop || 1) + " 跳", "可见 " + (info.visibleCount || 0)].filter(Boolean).join(" · ");
+    el.append(h, sub);
+    function listBlock(title, rows) {
+      if (!rows || !rows.length) return;
+      const h4 = document.createElement("h4");
+      h4.textContent = title;
+      const ul = document.createElement("ul");
+      rows.forEach((row) => {
+        const docRow = row.doc || row;
+        const li = document.createElement("li");
+        const btn = document.createElement("button");
+        btn.type = "button";
+        const folder = String(docRow.path || "").split("/");
+        const where = folder.length >= 2 ? folder[folder.length - 2] : "";
+        btn.textContent = (docRow.title || docRow.path || "未命名") + (where ? " · " + where : "") + (row.reason ? " · " + row.reason : "");
+        btn.addEventListener("click", () => { if (galaxyView && galaxyView.focusPath && docRow.path) galaxyView.focusPath(docRow.path); });
+        li.appendChild(btn);
+        ul.appendChild(li);
+      });
+      el.append(h4, ul);
+    }
+    listBlock("真实双链", info.wiki || []);
+    listBlock("推断相邻", info.inferred || []);
+    if (info.unresolved && info.unresolved.length) {
+      const h4 = document.createElement("h4");
+      h4.textContent = "未解析双链";
+      const p = document.createElement("p");
+      p.className = "unresolved";
+      p.textContent = info.unresolved.slice(0, 8).join("、");
+      el.append(h4, p);
+    }
+    const agents = mentionedAgents(doc);
+    if (agents.length) {
+      const h4 = document.createElement("h4");
+      h4.textContent = "文中出现的 Agent";
+      const row = document.createElement("div");
+      row.className = "viz-acts";
+      agents.forEach((id) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "chip";
+        b.textContent = agentName(id);
+        b.addEventListener("click", () => openNode(id));
+        row.appendChild(b);
+      });
+      el.append(h4, row);
+    }
+    const acts = document.createElement("div");
+    acts.className = "viz-acts";
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "chip";
+    open.textContent = "打开文档";
+    open.addEventListener("click", () => openDoc(doc.path));
+    acts.appendChild(open);
+    const hint = document.createElement("span");
+    hint.className = "note";
+    hint.textContent = "双击节点也会打开原文";
+    acts.appendChild(hint);
+    el.append(acts);
+  }
   function galaxyHitCount(q) {
     const items = S.galaxyDocs || [];
     const needle = String(q || "").trim().toLowerCase();
     if (!needle) return items.length;
-    return items.filter((d) => [d.title, d.path, d.category, d.snippet, (d.tags || []).join(" ")].join(" ").toLowerCase().indexOf(needle) >= 0).length;
+    return items.filter((d) => [d.title, d.path, d.category, d.type, d.snippet, (d.tags || []).join(" ")].join(" ").toLowerCase().indexOf(needle) >= 0).length;
   }
   function renderGalaxyNote(q) {
     const note = $("#galaxy-sub");
@@ -801,7 +1034,7 @@
       S.galaxyDocs = items;
       S.galaxyTotal = typeof j.total === "number" ? j.total : items.length;
       hideGalaxyError();
-      if (galaxyView) galaxyView.setDocs(items);
+      if (galaxyView) { galaxyView.setDocs(items); renderGalaxyFilters(); }
       renderGalaxyNote(S.kbQ || "");
     } catch (e) {
       S.galaxyDocs = [];
@@ -819,13 +1052,14 @@
       galaxyView = window.SBGALAXY.create(box, {
         reduced: reduced.matches,
         mobile: mobile.matches,
-        onSelect: (path) => openDoc(path)
+        onFocus: (info) => renderGalaxyCard(info),
+        onOpen: (path) => openDoc(path)
       });
-      if (S.galaxyDocs) galaxyView.setDocs(S.galaxyDocs);
+      if (S.galaxyDocs) { galaxyView.setDocs(S.galaxyDocs); renderGalaxyFilters(); }
       if (S.kbQ) galaxyView.setQuery(S.kbQ);
     };
     const three = window.THREE ? Promise.resolve() : loadScript("../vendor/three.min.js?v=r150");
-    three.catch(() => null).then(() => (window.SBGALAXY ? null : loadScript("v2/galaxy.js?v=1.0.0"))).then(boot).catch((e) => showGalaxyError((e && e.message) || "星图加载失败"));
+    three.catch(() => null).then(() => (window.SBGALAXY ? null : loadScript("v2/galaxy.js?v=2.0.0"))).then(boot).catch((e) => showGalaxyError((e && e.message) || "星图加载失败"));
   }
   function galaxyFsOn() {
     return document.documentElement.classList.contains("gal-fs");
@@ -2399,7 +2633,13 @@
     syncGalaxyFsBtn();
     $("#btn-galaxy-fs").addEventListener("click", () => setGalaxyFullscreen(!galaxyFsOn()));
     $("#btn-galaxy-reset").addEventListener("click", () => { if (galaxyView) galaxyView.reset(); });
+    $("#btn-galaxy-expand").addEventListener("click", () => { if (galaxyView && galaxyView.expand) galaxyView.expand(); });
+    $("#btn-galaxy-open").addEventListener("click", () => { if (galaxyFocusPath) openDoc(galaxyFocusPath); });
     $("#btn-galaxy-fly").addEventListener("click", () => { if (galaxyView) galaxyView.flyIn(); });
+    ["#galaxy-cat", "#galaxy-tag", "#galaxy-type"].forEach((sel) => {
+      const el = $(sel);
+      if (el) el.addEventListener("change", applyGalaxyFilter);
+    });
     $("#galaxy-form").addEventListener("submit", (e) => { e.preventDefault(); searchKb($("#galaxy-q").value.trim()); });
     $("#galaxy-q").addEventListener("input", () => { S.kbQ = $("#galaxy-q").value.trim(); renderGalaxyNote(S.kbQ); });
     $("#btn-mode").addEventListener("click", () => {
