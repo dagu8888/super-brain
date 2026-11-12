@@ -1603,17 +1603,6 @@
       box.innerHTML = `<span>回复 ${badge ? esc(badge) + " " : ""}${esc((m.text || "").slice(0, 48))}</span><button type="button" data-grp-reply-x aria-label="取消回复">×</button>`;
     }
   }
-  function wakeLine(m) {
-    const ws = m.wakes || [];
-    if (!ws.length || m.sender_role === "system") return "";
-    const bits = ws.map((w) => {
-      const n = w.name || w.member_id;
-      if (w.status === "delivered") return n + " 已叫醒";
-      if (w.status === "missed") return n + " 叫醒未达（不自动重试）";
-      return n + " 未登记唤醒";
-    });
-    return `<div class="grp-wake">${esc(bits.join(" · "))}</div>`;
-  }
   function renderStream() {
     const box = $("#grp-stream");
     if (!box) return;
@@ -1642,11 +1631,10 @@
       return `<li class="grp-bub${me ? " me" : ""}${ext ? " ext" : ""}">
         <div class="who"><b>${esc(name)}</b>${badgeEl}<time>${dtm(m.created_at)}</time></div>
         <div class="grp-text">
-          ${q ? `<span class="quote">${esc((q.text || "").slice(0, 80))}</span>` : ""}
+          ${q ? `<span class="quote">${esc(q.text || "")}</span>` : ""}
           ${richText(m.text || "")}
-          ${wakeLine(m)}
         </div>
-        <div class="ops"><button type="button" data-grp-reply="${esc(m.msg_id)}">回复</button>${me ? `<button type="button" data-grp-recall="${esc(m.msg_id)}">撤回</button>` : ""}</div>
+        <div class="grp-menu" role="menu"><button type="button" data-grp-reply="${esc(m.msg_id)}">回复</button>${me ? `<button type="button" data-grp-recall="${esc(m.msg_id)}">撤回</button>` : ""}</div>
       </li>`;
     }).join("");
     if (G.pending > 0) box.scrollTop = top;
@@ -1795,7 +1783,31 @@
     });
     $("#grp-jump").addEventListener("click", () => { G.pending = 0; renderJump(); scrollGroup(); });
     $("#grp-stream").addEventListener("scroll", () => { if (streamNear()) { G.pending = 0; renderJump(); } });
+    let hold = null;
+    let holdOpened = false;
+    const clearHold = () => { if (hold) { clearTimeout(hold.timer); hold = null; } };
+    $("#grp-stream").addEventListener("pointerdown", (e) => {
+      if (e.pointerType === "mouse" || e.button || e.target.closest(".grp-menu")) return;
+      const bub = e.target.closest(".grp-bub");
+      if (!bub) return;
+      const x = e.clientX, y = e.clientY;
+      const timer = setTimeout(() => {
+        $$(".grp-bub.menu-on").forEach((n) => n.classList.remove("menu-on"));
+        bub.classList.add("menu-on");
+        hold = null;
+        holdOpened = true;
+      }, 480);
+      hold = { timer, x, y };
+    });
+    $("#grp-stream").addEventListener("pointermove", (e) => {
+      if (!hold) return;
+      if (Math.abs(e.clientX - hold.x) > 8 || Math.abs(e.clientY - hold.y) > 8) clearHold();
+    });
+    $("#grp-stream").addEventListener("pointerup", clearHold);
+    $("#grp-stream").addEventListener("pointercancel", clearHold);
     root.addEventListener("click", async (e) => {
+      if (holdOpened) { holdOpened = false; return; }
+      if (!e.target.closest(".grp-menu")) $$(".grp-bub.menu-on").forEach((n) => n.classList.remove("menu-on"));
       if (e.target.closest("[data-grp-fs]")) { setGroupFullscreen(!groupFsOn()); return; }
       const tab = e.target.closest("[data-grp-tab]");
       if (tab) { G.tab = tab.dataset.grpTab; renderMid(); return; }
@@ -1811,10 +1823,16 @@
       const withBtn = e.target.closest("[data-grp-with]");
       if (withBtn) { await createGroup(withBtn.dataset.grpWithName + " 的群", [withBtn.dataset.grpWith]); return; }
       const reply = e.target.closest("[data-grp-reply]");
-      if (reply) { G.reply = reply.dataset.grpReply; renderReply(); $("#grp-input").focus(); return; }
+      if (reply) {
+        const host = reply.closest(".grp-bub");
+        if (host) host.classList.remove("menu-on");
+        G.reply = reply.dataset.grpReply; renderReply(); $("#grp-input").focus(); return;
+      }
       if (e.target.closest("[data-grp-reply-x]")) { G.reply = null; renderReply(); return; }
       const rec = e.target.closest("[data-grp-recall]");
       if (rec) {
+        const host = rec.closest(".grp-bub");
+        if (host) host.classList.remove("menu-on");
         const j = await act("group_recall", { group_id: G.current, msg_id: rec.dataset.grpRecall }, "已撤回");
         if (j && j.ok) refreshOpen();
         return;
