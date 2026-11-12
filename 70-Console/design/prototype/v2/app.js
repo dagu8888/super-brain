@@ -1536,12 +1536,52 @@
       <small>${g.last_at ? esc(dtm(g.last_at)) : ""}</small>
     </button>`).join("") : '<div class="empty">还没有群<br>点下面「+ 建群」</div>';
   }
+  const GRP_FS_KEY = "sb.grp.fullscreen";
+  function groupFsOn() {
+    const cl = document.documentElement && document.documentElement.classList;
+    return !!(cl && cl.contains("grp-fs"));
+  }
+  function syncGroupFsButtons() {
+    const on = groupFsOn();
+    $$("[data-grp-fs]").forEach((b) => {
+      if (!b) return;
+      b.textContent = on ? "退出全屏" : "全屏";
+      if (b.setAttribute) {
+        b.setAttribute("aria-pressed", on ? "true" : "false");
+        b.setAttribute("title", on ? "退出全屏" : "让群聊占满屏幕");
+      }
+    });
+  }
+  function setGroupFullscreen(on) {
+    const root = document.documentElement;
+    if (root.classList) root.classList.toggle("grp-fs", !!on);
+    try { localStorage.setItem(GRP_FS_KEY, on ? "1" : "0"); } catch (err) { /* 本地记忆失败时仍可本次使用 */ }
+    ["header.top", "#tabbar"].forEach((sel) => {
+      const el = $(sel);
+      if (!el || !el.toggleAttribute) return;
+      if (on) el.setAttribute("inert", "");
+      else el.removeAttribute("inert");
+    });
+    const main = $("#main");
+    if (main && main.children) {
+      Array.from(main.children).forEach((el) => {
+        if (!el || !el.setAttribute || el.id === "sec-groups") return;
+        if (on) el.setAttribute("inert", "");
+        else el.removeAttribute("inert");
+      });
+    }
+    syncGroupFsButtons();
+  }
+  function fsButtonHtml() {
+    const on = groupFsOn();
+    return `<button class="chip grp-fs" type="button" data-grp-fs aria-pressed="${on ? "true" : "false"}" title="${on ? "退出全屏" : "让群聊占满屏幕"}">${on ? "退出全屏" : "全屏"}</button>`;
+  }
   function renderHead() {
     const head = $("#grp-head");
     if (!head) return;
     const g = curGroup();
     if (!g) {
-      head.innerHTML = `<button class="grp-back" type="button" data-grp-back>返回</button><div class="grp-head-text"><h2>群聊</h2><p>选一个群，或点「+ 建群」</p></div>`;
+      head.innerHTML = `<button class="grp-back" type="button" data-grp-back>返回</button><div class="grp-head-text"><h2>群聊</h2><p>选一个群，或点「+ 建群」</p></div>${fsButtonHtml()}`;
       return;
     }
     const members = (g.members || []).map((m) => {
@@ -1551,7 +1591,7 @@
     head.innerHTML = `<button class="grp-back" type="button" data-grp-back>返回</button>
       <div class="grp-head-text"><h2>${esc(g.name)}</h2><p>${esc(g.join_label || "仅限邀请加入")} · ${g.agent_count || 0} 个 agent · ${g.human_count || 0} 人</p>
       <ul class="grp-members" aria-label="群成员">${members}</ul></div>
-      <button class="act gold" type="button" data-grp-invite>邀请</button>`;
+      <div class="grp-head-actions"><button class="act gold" type="button" data-grp-invite>邀请</button>${fsButtonHtml()}</div>`;
   }
   function renderReply() {
     const box = $("#grp-reply");
@@ -1601,14 +1641,26 @@
       const q = m.reply_to && byId.get(m.reply_to);
       return `<li class="grp-bub${me ? " me" : ""}${ext ? " ext" : ""}">
         <div class="who"><b>${esc(name)}</b>${badgeEl}<time>${dtm(m.created_at)}</time></div>
-        ${q ? `<span class="quote">${esc((q.text || "").slice(0, 80))}</span>` : ""}
-        ${richText(m.text || "")}
-        ${wakeLine(m)}
+        <div class="grp-text">
+          ${q ? `<span class="quote">${esc((q.text || "").slice(0, 80))}</span>` : ""}
+          ${richText(m.text || "")}
+          ${wakeLine(m)}
+        </div>
         <div class="ops"><button type="button" data-grp-reply="${esc(m.msg_id)}">回复</button>${me ? `<button type="button" data-grp-recall="${esc(m.msg_id)}">撤回</button>` : ""}</div>
       </li>`;
     }).join("");
     if (G.pending > 0) box.scrollTop = top;
+    markLongTexts(box);
     renderJump();
+  }
+  function markLongTexts(box) {
+    if (!box || !box.querySelectorAll) return;
+    Array.from(box.querySelectorAll(".grp-text")).forEach((el) => {
+      if (!el || !el.classList) return;
+      const long = el.scrollHeight > el.clientHeight + 2;
+      el.classList.toggle("is-long", long);
+      if ("tabIndex" in el) el.tabIndex = long ? 0 : -1;
+    });
   }
   function renderAtBox() {
     const box = $("#grp-at-box");
@@ -1715,6 +1767,11 @@
   function bindGroup() {
     const root = $("#sec-groups");
     if (!root) return;
+    let storedFs = false;
+    try { storedFs = localStorage.getItem(GRP_FS_KEY) === "1"; } catch (err) { storedFs = false; }
+    if (storedFs) setGroupFullscreen(true);
+    else syncGroupFsButtons();
+    window.addEventListener("resize", () => markLongTexts($("#grp-stream")));
     $("#grp-create").addEventListener("click", async () => {
       const v = await dlg({ title: "新建群", desc: "建好后用「邀请」拉已接入的 Agent，或生成外部配对码。", placeholder: "群名称", field: "text", rows: 1, required: true, okText: "建群" });
       if (!v || !v.value) return;
@@ -1739,6 +1796,7 @@
     $("#grp-jump").addEventListener("click", () => { G.pending = 0; renderJump(); scrollGroup(); });
     $("#grp-stream").addEventListener("scroll", () => { if (streamNear()) { G.pending = 0; renderJump(); } });
     root.addEventListener("click", async (e) => {
+      if (e.target.closest("[data-grp-fs]")) { setGroupFullscreen(!groupFsOn()); return; }
       const tab = e.target.closest("[data-grp-tab]");
       if (tab) { G.tab = tab.dataset.grpTab; renderMid(); return; }
       const open = e.target.closest("[data-grp-open]");
@@ -1867,7 +1925,15 @@
       await act("rollcall", { text: v.value || "在的回复 1" }, (j) => "点名已广播：" + j.msg_id);
     });
     $("#scrim").addEventListener("click", closeDrawer);
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("#drawer").getAttribute("aria-hidden") === "false") closeDrawer(); });
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      const dialog = $("#dlg");
+      if (dialog && dialog.open) return;
+      if ($("#drawer").getAttribute("aria-hidden") === "false") { closeDrawer(); return; }
+      const ov = $("#grp-overlay");
+      if (ov && !ov.hidden) { hideOverlay(); return; }
+      if (groupFsOn()) setGroupFullscreen(false);
+    });
     $("#tabbar").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setTab(b.dataset.tab); });
     $("#btn-reset").addEventListener("click", () => { if (S.view) S.view.reset(); });
     $("#btn-mode").addEventListener("click", () => {

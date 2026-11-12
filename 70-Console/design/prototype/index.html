@@ -16,7 +16,10 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="v2/icons/favicon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="v2/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="v2/app.css?v=2.5.2">
+<link rel="stylesheet" href="v2/app.css?v=2.5.3">
+<script>
+try { if (localStorage.getItem("sb.grp.fullscreen") === "1") document.documentElement.classList.add("grp-fs"); } catch (e) {}
+</script>
 </head>
 <body>
 <a class="skip" href="#main">跳到主要内容</a>
@@ -152,14 +155,16 @@
             <button type="button" data-grp-tab="chats" class="on">聊天</button>
             <button type="button" data-grp-tab="contacts">通讯录</button>
           </div>
+          <button class="chip grp-fs grp-fs-list" type="button" data-grp-fs aria-pressed="false" title="让群聊占满屏幕">全屏</button>
         </div>
         <div class="grp-mid-body" id="grp-mid"></div>
         <button class="grp-create" id="grp-create" type="button">+ 建群</button>
       </div>
       <section class="grp-col grp-main" id="grp-main" aria-label="当前群聊">
         <header class="grp-head" id="grp-head">
-          <button class="grp-back" id="grp-back" type="button">返回</button>
+          <button class="grp-back" id="grp-back" type="button" data-grp-back>返回</button>
           <div class="grp-head-text"><h2>群聊</h2><p>选择一个群，或新建一个</p></div>
+          <button class="chip grp-fs" type="button" data-grp-fs aria-pressed="false" title="让群聊占满屏幕">全屏</button>
         </header>
         <div class="grp-stream-wrap">
           <ol class="grp-stream" id="grp-stream" aria-live="polite"></ol>
@@ -211,6 +216,6 @@
   </form>
 </dialog>
 
-<script src="v2/app.js?v=2.5.2" defer></script>
+<script src="v2/app.js?v=2.5.3" defer></script>
 </body>
 </html>
