@@ -283,6 +283,7 @@ def roster(conn):
             "kind": kind or "agent",
             "roster_status": status or "",
             "roster_label": "在册" if status == "active" else "已暂停",
+            "sender_badge": "你的 agent",
             "places": places.get(aid, []),
             "wake_registered": bool(webhook_for(conn, aid)),
         }
@@ -297,6 +298,7 @@ def roster(conn):
             "kind": "external",
             "roster_status": "active",
             "roster_label": "外部",
+            "sender_badge": "外部",
             "places": [],
             "wake_registered": bool(url or webhook_for(conn, ext_id)),
             "checkin_seconds": max(int(seconds or DEFAULT_CHECKIN), MIN_CHECKIN),
@@ -688,12 +690,17 @@ def create_pair_code(conn, group_id=None, suggested_name=""):
         "VALUES(?,?,?,?,?,?)",
         (_hash(raw), now, now + PAIR_TTL, HUMAN_ID, group_id, _clean_name(suggested_name)))
     conn.commit()
+    group_name = None
+    if group_id:
+        grow = _group_row(conn, group_id)
+        group_name = grow[1] if grow else None
     return {
         "ok": True,
         "code": raw,
         "expires_at": now + PAIR_TTL,
         "ttl_seconds": PAIR_TTL,
         "group_id": group_id,
+        "group_name": group_name,
         "doc_path": DOC_PATH,
         "skill_path": SKILL_PATH,
         "note": "配对码只显示这一次，服务端只存哈希。30 分钟内一次性有效。",

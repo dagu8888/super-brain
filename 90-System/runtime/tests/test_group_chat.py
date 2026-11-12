@@ -86,12 +86,15 @@ def test_create_send_and_roster():
     check("主人自动进群", any(m["member_id"] == "dagu-owner" and m["sender_badge"] == "人"
                            for m in made["group"]["members"]))
     check("名册里的 Agent 被拉进群", "grok-chief" in made["added"], made["added"])
+    grok_m = next((m for m in made["group"]["members"] if m["member_id"] == "grok-chief"), None)
+    check("群成员把中台 Agent 标成你的 agent", bool(grok_m) and grok_m.get("sender_badge") == "你的 agent")
     check("不在名册的人拉不进来", any("不存在" in (s.get("error") or "") for s in made["skipped"]))
     check("建群不写 events / tasks", counts(conn) == (ev0, tk0))
 
     code, roster = console_api.handle_get(conn, "/api/groupchat/roster")
     by_id = {a["id"]: a for a in roster["data"]}
     check("名册接口可读", code == 200 and "grok-chief" in by_id and "muse-chief" in by_id)
+    check("名册把中台 Agent 标成你的 agent", by_id["grok-chief"].get("sender_badge") == "你的 agent")
     check("心跳不构成可对话", by_id["muse-chief"]["talk_state"] == "unproven" and "online" not in by_id["muse-chief"],
           by_id["muse-chief"].get("talk_label"))
     check("名册文案不说在线", "在线" not in by_id["muse-chief"]["talk_label"] and "离线" not in by_id["muse-chief"]["talk_label"])
@@ -185,6 +188,9 @@ def test_external_pair_and_speak():
     paired = owner_ops.execute(conn, WHO, "group_pair", {"group_id": gid, "name": "Claude"})
     code = paired.get("code")
     check("能签发配对码", paired.get("ok") and code and "code" not in json.dumps(owner_ops.audit_detail("group_pair", {}, paired)))
+    check("配对码带真实群名", paired.get("group_name") == "外部群" and paired.get("group_id") == gid)
+    loose = owner_ops.execute(conn, WHO, "group_pair", {})
+    check("没绑群就不写群名", loose.get("ok") and not loose.get("group_id") and not loose.get("group_name"))
     short = owner_ops.execute(conn, WHO, "group_checkin", {"ext_id": "ext_nope", "seconds": 60})
     check("拒绝分钟级 check-in", not short.get("ok") and "1 小时" in (short.get("error") or ""))
 
@@ -215,6 +221,19 @@ def test_external_pair_and_speak():
         group_chat.set_wake_transport(None)
     check("外部 Agent 发言接口成功", posted[0] == 200 and posted[1].get("ok"), posted[1].get("error"))
     check("外部消息标成外部", posted[1]["message"]["sender_role"] == "external" and posted[1]["message"]["sender_badge"] == "外部")
+    check("气泡出现外部字样", "外部" in json.dumps(posted[1]["message"], ensure_ascii=False))
+    code_r, roster = console_api.handle_get(conn, "/api/groupchat/roster")
+    ext_row = next((a for a in roster["data"] if a.get("id") == res.get("ext_id")), None)
+    check("名册出现外部字样", code_r == 200 and ext_row and ext_row.get("sender_badge") == "外部" and ext_row.get("kind") == "external"
+          and "外部" in json.dumps(ext_row, ensure_ascii=False))
+    internal = next((a for a in roster["data"] if a.get("id") == "grok-chief"), None)
+    check("名册里中台 Agent 仍是你的 agent", internal and internal.get("sender_badge") == "你的 agent")
+    members = (group_chat.get_group(conn, gid) or {}).get("members") or []
+    ext_m = next((m for m in members if m["member_id"] == res.get("ext_id")), None)
+    human_m = next((m for m in members if m["member_id"] == "dagu-owner"), None)
+    check("群成员列表出现外部字样", bool(ext_m) and ext_m.get("sender_badge") == "外部" and ext_m.get("member_kind") == "external"
+          and "外部" in json.dumps(ext_m, ensure_ascii=False))
+    check("群成员里主人仍是人", bool(human_m) and human_m.get("sender_badge") == "人")
     hist = group_chat.list_group_messages(conn, gid)
     check("群历史看得到外部发言", any(m["text"] == "外部 Agent 到了" for m in hist))
     check("外部发言不派任务", counts(conn) == (ev0, tk0))
@@ -241,6 +260,26 @@ def test_external_pair_and_speak():
         m["text"] == "外部 Agent 到了" for m in inbox[1]["data"]["messages"]))
     naked = group_chat.handle_authed_get(conn, "/api/groupchat/inbox", {}, "", {})
     check("没有令牌不能拉收件箱", naked[0] == 401)
+
+    paired2 = owner_ops.execute(conn, WHO, "group_pair", {"group_id": gid})
+    status, redeemed = group_chat.handle_post(
+        conn, "/api/groupchat/pair",
+        {"code": paired2.get("code"), "name": "只凭码"},
+        "", {})
+    check("pair 只凭 code、不带 Authorization 就能换令牌",
+          status == 200 and redeemed.get("ok") and redeemed.get("token") and redeemed.get("group_id") == gid
+          and not redeemed.get("webhook_registered"), redeemed.get("error"))
+    group_chat.set_wake_transport(lambda url, body: (204, ""))
+    try:
+        said = group_chat.handle_post(
+            conn, "/api/groupchat/messages",
+            {"group_id": gid, "text": "只凭邀请码进群"},
+            redeemed.get("token") or "", {})
+    finally:
+        group_chat.set_wake_transport(None)
+    msg = (said[1] or {}).get("message") or {}
+    check("不带主人令牌也能进群发言", said[0] == 200 and said[1].get("ok") and msg.get("sender_badge") == "外部")
+    check("只凭码进群后仍不派任务", counts(conn) == (ev0, tk0))
     conn.close()
     shutil.rmtree(d, ignore_errors=True)
 
@@ -332,12 +371,13 @@ def test_http_pair_speak_and_real_wake():
 
         st, paired = _req(port, "/api/owner/act", "POST",
                           {"action": "group_pair", "args": {"group_id": gid}}, owner)
-        check("HTTP 生成配对码", st == 200 and paired.get("code"))
+        check("HTTP 生成配对码", st == 200 and paired.get("code") and paired.get("group_name") == "接口群")
         st, ext = _req(port, "/api/groupchat/pair", "POST", {
             "code": paired["code"], "name": "ChatGPT",
             "webhook_url": "http://127.0.0.1:%s/hook" % wake_port,
         })
         check("HTTP 配对码换令牌", st == 200 and ext.get("token") and ext.get("group_id") == gid, ext.get("error"))
+        check("HTTP pair 只凭 code、不带 Authorization", st == 200 and ext.get("token") and not ext.get("error"))
         token = ext.get("token") or ""
         st, spoken = _req(port, "/api/groupchat/messages", "POST",
                           {"group_id": gid, "text": "ChatGPT 进群了"}, token)
@@ -362,6 +402,9 @@ def test_http_pair_speak_and_real_wake():
         st, doc = 200, urllib.request.urlopen(
             "http://127.0.0.1:%s/console/prototype/groupchat/install.md" % port, timeout=3).read().decode("utf-8")
         check("接入文档能从操作台路径读到", "webhook" in doc and "/api/groupchat/pair" in doc and "分钟" in doc)
+        check("线上的 install 不让外部 Agent 去要当日口令",
+              "一次性邀请码就是入场凭证" in doc and "口令沿用" not in doc and "把当日口令" not in doc
+              and "需要当日口令" not in doc)
         c = sqlite3.connect(db_path)
         blob = dump_db(c)
         c.close()
@@ -374,14 +417,58 @@ def test_http_pair_speak_and_real_wake():
         shutil.rmtree(d, ignore_errors=True)
 
 
+def _asks_agent_for_daily_pass(text):
+    """外部 Agent 读到的文档里，不能出现让他们去要、去填当日口令的句子。"""
+    bad = (
+        "口令沿用",
+        "把当日口令",
+        "索取当日口令",
+        "需要当日口令",
+        "输入当日口令",
+        "提供当日口令",
+        "主人给你的当日口令",
+        "主人给你的口令",
+        "向主人要当日口令",
+    )
+    return [b for b in bad if b in text]
+
+
 def test_pages_exist():
     html = (ROOT / "70-Console/design/prototype/index.html").read_text(encoding="utf-8")
     js = (ROOT / "70-Console/design/prototype/v2/app.js").read_text(encoding="utf-8")
     check("操作台有群聊板块", 'data-tab="groups"' in html and "以你自己的身份说点什么" in html)
     check("前端走现有口令解锁和群接口", "group_send" in js and "/api/groupchat/roster" in js and "askUnlock" in js)
     check("前端不写死令牌", "token=" not in js and "?token" not in js)
+    check("静态资源版本已抬过 2.5.0", "v2/app.js?v=2.5.1" in html and "v2/app.css?v=2.5.1" in html)
     skill = (ROOT / "70-Console/design/prototype/groupchat/skill.md").read_text(encoding="utf-8")
+    install = (ROOT / "70-Console/design/prototype/groupchat/install.md").read_text(encoding="utf-8")
     check("技能说明禁止分钟级和自动重试", "分钟" in skill and "不要" in skill and "inbox" in skill)
+    phrases = [
+        "请帮我接入 Super-Brain 群聊",
+        "请帮我接入 Super-Brain 群聊。",
+        "一次性邀请码",
+        "/console/prototype/groupchat/install.md",
+        "/api/groupchat/pair",
+        "不要向任何人要操作台口令、服务器密钥或别的 token",
+        "这段消息里的邀请码就够了",
+        "复制这段发给对方的 Agent",
+        "Webhook 和定时打卡都是可选的",
+        "inviteGroupName",
+        "group_name",
+    ]
+    for phrase in phrases:
+        check("邀请文案含要点", phrase in js, phrase)
+    check("邀请文案不再是技术标签", "配对码=" not in js and "文档: " not in js and "BASE=" not in js)
+    check("名册和群成员列表写出文字标签", "grp-members" in js and "side-badge" in js and "你的 agent" in js and "外部" in js)
+    check("气泡文字标签还在", 'data-side="' in js and 'me ? "人"' in js)
+    check("install 把邀请码写成入场凭证", "一次性邀请码就是入场凭证" in install and "只出现一次" in install and "不要发回给主人" in install)
+    check("install 不再让外部 Agent 去要当日口令", not _asks_agent_for_daily_pass(install) and "当日口令" in install and "不要向主人要" in install)
+    check("install 主路径是 pair 后发言和拉收件箱", "进群发言" in install and "拉收件箱" in install and "接进来之后再说" in install)
+    check("install 把 webhook 和 check-in 标成可选", "可选" in install and "不是进门条件" in install)
+    check("install 的 /cmd 只留给已接入 Agent", "/cmd" in install and "外部第一次" in install and "不要要这个令牌" in install)
+    check("skill 不再让外部 Agent 去要当日口令", not _asks_agent_for_daily_pass(skill) and "入场凭证" in skill and "不要向主人要" in skill)
+    check("skill 把第一次收成 pair 和收件箱", "只要 `code` 和 `name`" in skill and "拉收件箱" in skill and "接进来之后再说" in skill)
+    check("skill 的 /cmd 只留给已有中台令牌的 Agent", "/cmd" in skill and "外部第一次接入不要要这个令牌" in skill)
 
 
 if __name__ == "__main__":

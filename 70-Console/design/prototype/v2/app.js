@@ -1407,6 +1407,31 @@
     if (a.talk_state === "proven" && a.last_tx_at) return "已证实收发 · " + dtm(a.last_tx_at);
     return a.talk_label || "名册在册，尚未证实收发";
   }
+  function sideOf(label) {
+    if (label === "外部") return "external";
+    if (label === "人") return "human";
+    return "agent";
+  }
+  function badgeHtml(label) {
+    return `<span class="side-badge" data-side="${sideOf(label)}">${esc(label)}</span>`;
+  }
+  function rosterBadge(a) {
+    if (a && a.sender_badge) return a.sender_badge;
+    return a && a.kind === "external" ? "外部" : "你的 agent";
+  }
+  function memberBadge(m) {
+    if (m && m.sender_badge) return m.sender_badge;
+    if (m && m.member_kind === "human") return "人";
+    if (m && m.member_kind === "external") return "外部";
+    return "你的 agent";
+  }
+  function personButton(a) {
+    const label = rosterBadge(a);
+    return `<button type="button" class="grp-person" data-grp-who="${esc(a.id)}">
+      <i class="grp-av" data-k="${esc(a.kind)}">${esc(initial(a.name))}</i>
+      <span><b>${esc(a.name)} ${badgeHtml(label)}</b><small class="grp-tx">${esc(txLine(a))}${a.wake_registered ? " · 可唤醒" : ""}</small></span>
+    </button>`;
+  }
   function initial(name) { const s = String(name || "?").trim(); return s ? s.slice(0, 1) : "?"; }
   function richText(text) { return esc(text).replace(/@([^\s@&<]+)/g, '<span class="at">@$1</span>'); }
   function streamNear() {
@@ -1467,11 +1492,11 @@
   function renderRoster() {
     const box = $("#grp-roster");
     if (!box) return;
-    const people = G.roster.map((a) => `<button type="button" class="grp-person" data-grp-who="${esc(a.id)}">
-      <i class="grp-av" data-k="${esc(a.kind)}">${esc(initial(a.name))}</i>
-      <span><b>${esc(a.name)}</b><small class="grp-tx">${esc(txLine(a))}${a.wake_registered ? " · 可唤醒" : ""}</small></span>
-    </button>`).join("");
-    box.innerHTML = `<h3>已接入</h3><div class="grp-people">${people || '<div class="empty">名册是空的</div>'}</div>
+    const yours = G.roster.filter((a) => rosterBadge(a) !== "外部");
+    const outs = G.roster.filter((a) => rosterBadge(a) === "外部");
+    const yoursHtml = yours.length ? yours.map(personButton).join("") : '<div class="empty">还没有你的 agent</div>';
+    const outsHtml = outs.length ? `<h3>外部</h3><div class="grp-people">${outs.map(personButton).join("")}</div>` : "";
+    box.innerHTML = `<h3>你的 agent</h3><div class="grp-people">${yoursHtml}</div>${outsHtml}
       <button class="grp-pair" type="button" data-grp-pair>接入 agent</button>`;
   }
   function renderMid() {
@@ -1479,11 +1504,19 @@
     if (!box) return;
     $$("#grp-switch button").forEach((b) => b.classList.toggle("on", b.dataset.grpTab === G.tab));
     if (G.tab === "contacts") {
-      box.innerHTML = G.roster.length ? G.roster.map((a) => `<div class="grp-citem">
+      const row = (a) => {
+        const label = rosterBadge(a);
+        const status = a.roster_label && a.roster_label !== label ? esc(a.roster_label) + " · " : "";
+        return `<div class="grp-citem">
         <i class="grp-av" data-k="${esc(a.kind)}">${esc(initial(a.name))}</i>
-        <span class="grow"><b>${esc(a.name)}</b><small class="grp-tx">${esc(a.roster_label || "")} · ${esc(txLine(a))}</small></span>
+        <span class="grow"><b>${esc(a.name)} ${badgeHtml(label)}</b><small class="grp-tx">${status}${esc(txLine(a))}</small></span>
         <button class="act" type="button" data-grp-with="${esc(a.id)}" data-grp-with-name="${esc(a.name)}">建群</button>
-      </div>`).join("") : '<div class="empty">还没有可联络的 Agent</div>';
+      </div>`;
+      };
+      const yours = G.roster.filter((a) => rosterBadge(a) !== "外部");
+      const outs = G.roster.filter((a) => rosterBadge(a) === "外部");
+      const block = (title, list) => list.length ? `<h3 class="grp-block-title">${esc(title)}</h3>${list.map(row).join("")}` : "";
+      box.innerHTML = (block("你的 agent", yours) + block("外部", outs)) || '<div class="empty">还没有可联络的 Agent</div>';
       return;
     }
     box.innerHTML = G.groups.length ? G.groups.map((g) => `<button type="button" class="grp-gitem${g.group_id === G.current ? " on" : ""}" data-grp-open="${esc(g.group_id)}">
@@ -1501,8 +1534,10 @@
       head.innerHTML = `<button class="grp-back" type="button" data-grp-back>返回</button><div class="grp-head-text"><h2>群聊</h2><p>选一个群，或点「+ 建群」</p></div>`;
       return;
     }
+    const members = (g.members || []).map((m) => `<li>${esc(m.display_name)} ${badgeHtml(memberBadge(m))}</li>`).join("");
     head.innerHTML = `<button class="grp-back" type="button" data-grp-back>返回</button>
-      <div class="grp-head-text"><h2>${esc(g.name)}</h2><p>${esc(g.join_label || "仅限邀请加入")} · ${g.agent_count || 0} 个 agent · ${g.human_count || 0} 人</p></div>
+      <div class="grp-head-text"><h2>${esc(g.name)}</h2><p>${esc(g.join_label || "仅限邀请加入")} · ${g.agent_count || 0} 个 agent · ${g.human_count || 0} 人</p>
+      <ul class="grp-members" aria-label="群成员">${members}</ul></div>
       <button class="act gold" type="button" data-grp-invite>邀请</button>`;
   }
   function renderReply() {
@@ -1548,7 +1583,7 @@
       const name = me ? "大古" : (m.sender_name || m.from_agent);
       const q = m.reply_to && byId.get(m.reply_to);
       return `<li class="grp-bub${me ? " me" : ""}${ext ? " ext" : ""}">
-        <div class="who"><b>${esc(name)}</b><span class="badge">${esc(badge)}</span><time>${dtm(m.created_at)}</time></div>
+        <div class="who"><b>${esc(name)}</b><span class="badge side-badge" data-side="${sideOf(badge)}">${esc(badge)}</span><time>${dtm(m.created_at)}</time></div>
         ${q ? `<span class="quote">${esc((q.text || "").slice(0, 80))}</span>` : ""}
         ${richText(m.text || "")}
         ${wakeLine(m)}
@@ -1565,7 +1600,7 @@
     box.hidden = !G.at || !g;
     if (!g) { box.innerHTML = ""; return; }
     const members = (g.members || []).filter((m) => m.member_kind !== "human");
-    box.innerHTML = members.map((m) => `<button type="button" data-grp-at-name="${esc(m.display_name)}">@${esc(m.display_name)}</button>`).join("") || '<span class="note">这个群还没有其他成员</span>';
+    box.innerHTML = members.map((m) => `<button type="button" data-grp-at-name="${esc(m.display_name)}">@${esc(m.display_name)} ${badgeHtml(memberBadge(m))}</button>`).join("") || '<span class="note">这个群还没有其他成员</span>';
   }
   function showOverlay(html) {
     const ov = $("#grp-overlay");
@@ -1573,23 +1608,38 @@
     ov.hidden = false;
   }
   function hideOverlay() { const ov = $("#grp-overlay"); if (ov) { ov.hidden = true; ov.innerHTML = ""; } }
-  function showPair(j) {
-    const origin = (location.protocol || "").startsWith("http") ? location.origin : "https://console.8.218.106.225.nip.io";
-    const doc = origin + (j.doc_path || "/console/prototype/groupchat/install.md");
-    const skill = origin + (j.skill_path || "/console/prototype/groupchat/skill.md");
-    const block = [
-      "按文档执行。不要每分钟轮询，不要用心跳判断能不能说话。",
-      "文档: " + doc,
-      "技能: " + skill,
-      "BASE=" + origin,
-      "配对码=" + (j.code || ""),
-      j.group_id ? "进群=" + j.group_id : "进群=换到令牌后，由主人邀请",
-      "用配对码 POST /api/groupchat/pair 换令牌。令牌只出现这一次。",
-      "登记 webhook 后，有消息时服务端只 POST {event,group_id,msg_id,pull}，没有正文、没有令牌。",
-      "被叫醒后自己 GET /api/groupchat/inbox 。叫醒失败只查 /api/groupchat/wakes，不要重试，不要派新任务。"
+  function consoleOrigin() {
+    return (location.protocol || "").startsWith("http") ? location.origin : "https://console.8.218.106.225.nip.io";
+  }
+  function inviteGroupName(j) {
+    const fromApi = String((j && j.group_name) || "").trim();
+    if (fromApi) return fromApi;
+    if (!j || !j.group_id) return "";
+    const open = curGroup();
+    if (open && open.group_id === j.group_id && String(open.name || "").trim()) return String(open.name).trim();
+    const known = G.groups.find((g) => g.group_id === j.group_id);
+    return known && String(known.name || "").trim() ? String(known.name).trim() : "";
+  }
+  function inviteText(j) {
+    const origin = consoleOrigin();
+    const doc = origin + ((j && j.doc_path) || "/console/prototype/groupchat/install.md");
+    const name = inviteGroupName(j || {});
+    const lead = name ? ("请帮我接入 Super-Brain 群聊「" + name + "」。") : "请帮我接入 Super-Brain 群聊。";
+    return [
+      lead,
+      "请阅读 " + doc + " 并按里面的步骤执行，用这个一次性邀请码连接：",
+      "",
+      (j && j.code) || "",
+      "",
+      "BASE 是 " + origin + "。",
+      "这个邀请码只能用一次。用它向 " + origin + "/api/groupchat/pair 换你自己的令牌，就能进群说话。",
+      "不要向任何人要操作台口令、服务器密钥或别的 token——这段消息里的邀请码就够了。",
+      "Webhook 和定时打卡都是可选的，第一次先进来开用；有消息时如果登记了 webhook，服务端只 POST {event,group_id,msg_id,pull}，没有正文、没有令牌，被叫醒后自己拉收件箱。不要每分钟轮询，不要用心跳判断能不能说话。"
     ].join("\n");
-    showOverlay(`<h3>一次性配对码</h3><p class="note">只显示这一次。服务端不留明文。把下面整段交给外部 Agent。</p>
-      <textarea readonly id="grp-pair-text">${esc(block)}</textarea>
+  }
+  function showPair(j) {
+    showOverlay(`<h3>复制这段发给对方的 Agent</h3><p class="note">只显示这一次。服务端不留明文。把下面整段粘进对方 Agent 的对话，对方照着做就能进群。不要再另外发口令、服务器密钥或别的 token。</p>
+      <textarea readonly id="grp-pair-text">${esc(inviteText(j))}</textarea>
       <div class="dlg-actions"><button class="btn" type="button" data-grp-copy>复制</button><button class="chip" type="button" data-grp-close>关闭</button></div>`);
   }
   function showInvite() {
@@ -1597,7 +1647,7 @@
     if (!g) { toast("先打开一个群"); return; }
     const inside = new Set((g.members || []).map((m) => m.member_id));
     const cands = G.roster.filter((a) => !inside.has(a.id));
-    const checks = cands.map((a) => `<label><input type="checkbox" value="${esc(a.id)}"> ${esc(a.name)} · ${esc(txLine(a))}</label>`).join("");
+    const checks = cands.map((a) => `<label><input type="checkbox" value="${esc(a.id)}"> ${esc(a.name)} ${badgeHtml(rosterBadge(a))} · ${esc(txLine(a))}</label>`).join("");
     showOverlay(`<h3>邀请到「${esc(g.name)}」</h3><p class="note">${esc(g.join_label || "仅限邀请加入")}。拉的是名册里的 Agent，或生成一次性配对码给外部 Agent。</p>
       <div class="grp-checks">${checks || '<div class="note">名册里的 Agent 都已经在群里</div>'}</div>
       <div class="dlg-actions"><button class="btn" type="button" data-grp-do-add>拉进群</button><button class="act gold" type="button" data-grp-do-pair>生成外部配对码</button><button class="chip" type="button" data-grp-close>关闭</button></div>`);
