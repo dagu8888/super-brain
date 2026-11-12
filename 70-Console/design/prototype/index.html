@@ -16,9 +16,14 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="v2/icons/favicon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="v2/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="v2/app.css?v=2.5.5">
+<link rel="stylesheet" href="v2/app.css?v=2.6.0">
 <script>
-try { if (localStorage.getItem("sb.grp.fullscreen") === "1") document.documentElement.classList.add("grp-fs"); } catch (e) {}
+try {
+  var root = document.documentElement;
+  if (localStorage.getItem("sb.grp.fullscreen") === "1") root.classList.add("grp-fs");
+  if (localStorage.getItem("sb.stage.fullscreen") === "1") root.classList.add("stage-fs");
+  if (localStorage.getItem("sb.gal.fullscreen") === "1") root.classList.add("gal-fs");
+} catch (e) {}
 </script>
 </head>
 <body>
@@ -48,18 +53,20 @@ try { if (localStorage.getItem("sb.grp.fullscreen") === "1") document.documentEl
 </header>
 
 <main id="main" class="wrap">
-  <section class="kpis sec" data-t="overview" aria-label="关键指标" id="kpis">
+  <section class="hero sec" id="sec-hero" data-t="overview" aria-label="总览">
+  <section class="kpis" aria-label="关键指标" id="kpis">
     <div class="kpi skeleton"></div><div class="kpi skeleton"></div><div class="kpi skeleton"></div>
     <div class="kpi skeleton"></div><div class="kpi skeleton"></div><div class="kpi skeleton"></div>
   </section>
 
-  <section class="stage sec" data-t="overview" aria-label="协作网拓扑">
+  <section class="stage" aria-label="协作网拓扑">
     <div class="stage-head">
       <h2>协作网拓扑 <small id="stage-mode">加载中</small></h2>
       <div class="stage-tools">
         <button class="chip chip-gold" id="btn-rollcall" type="button" title="向全体广播点名（今日授权后可操作）">发起点名</button>
         <button class="chip" id="btn-reset" type="button" title="回到全景">全景</button>
         <button class="chip" id="btn-mode" type="button" title="切换 3D / 平面">切到平面</button>
+        <button class="chip" id="btn-stage-fs" type="button" aria-pressed="false" title="让协作网占满屏幕">全屏</button>
       </div>
     </div>
     <div class="stage-body" id="stage">
@@ -68,6 +75,68 @@ try { if (localStorage.getItem("sb.grp.fullscreen") === "1") document.documentEl
     <div class="legend glass" id="legend" aria-label="图例"></div>
     <div class="stage-hint" id="stage-hint">拖拽旋转 · 滚轮/双指缩放 · 点节点看详情</div>
     <div class="stage-ticker glass" id="ticker" aria-live="off"></div>
+  </section>
+
+  </section>
+
+  <section class="grp sec glass" data-t="groups" id="sec-groups" aria-label="群聊">
+    <div class="grp-app" id="grp-app" data-pane="list">
+      <aside class="grp-col grp-roster" id="grp-roster" aria-label="已接入的 Agent"></aside>
+      <div class="grp-col grp-mid">
+        <div class="grp-mid-top">
+          <div class="seg" id="grp-switch" role="tablist" aria-label="聊天或通讯录">
+            <button type="button" data-grp-tab="chats" class="on">聊天</button>
+            <button type="button" data-grp-tab="contacts">通讯录</button>
+          </div>
+          <button class="chip grp-fs grp-fs-list" type="button" data-grp-fs aria-pressed="false" title="让群聊占满屏幕">全屏</button>
+        </div>
+        <div class="grp-mid-body" id="grp-mid"></div>
+        <button class="grp-create" id="grp-create" type="button">+ 建群</button>
+      </div>
+      <section class="grp-col grp-main" id="grp-main" aria-label="当前群聊">
+        <header class="grp-head" id="grp-head">
+          <button class="grp-back" id="grp-back" type="button" data-grp-back>返回</button>
+          <div class="grp-head-text"><h2>群聊</h2><p>选择一个群，或新建一个</p></div>
+          <button class="chip grp-fs" type="button" data-grp-fs aria-pressed="false" title="让群聊占满屏幕">全屏</button>
+        </header>
+        <div class="grp-stream-wrap">
+          <ol class="grp-stream" id="grp-stream" aria-live="polite"></ol>
+          <button type="button" class="grp-jump" id="grp-jump" hidden>1 条新消息</button>
+        </div>
+        <div class="grp-reply" id="grp-reply" hidden></div>
+        <form class="grp-form" id="grp-form" autocomplete="off">
+          <div class="grp-form-label">以主人身份发言</div>
+          <div class="grp-at-box" id="grp-at-box" hidden></div>
+          <div class="grp-form-row">
+            <button class="grp-tool" id="grp-at" type="button" aria-label="提到成员">@</button>
+            <button class="grp-tool" id="grp-file-btn" type="button" aria-label="附件">附件</button>
+            <input id="grp-file" type="file" hidden>
+            <label class="sr" for="grp-input">以你自己的身份发言</label>
+            <textarea id="grp-input" rows="1" placeholder="以你自己的身份说点什么" enterkeyhint="send"></textarea>
+            <button class="btn" id="grp-send" type="submit">发送</button>
+          </div>
+        </form>
+      </section>
+    </div>
+    <div class="grp-overlay" id="grp-overlay" hidden></div>
+  </section>
+
+  <section class="galaxy sec" id="sec-galaxy" data-t="kb more" aria-label="知识图谱">
+    <div class="galaxy-head">
+      <h2>知识图谱 <small id="galaxy-sub">读取中</small></h2>
+      <div class="galaxy-tools">
+        <form id="galaxy-form" class="galaxy-search" role="search">
+          <label class="sr" for="galaxy-q">在星图里搜索文档</label>
+          <input id="galaxy-q" type="search" placeholder="搜标题、标签、分类…" autocomplete="off" enterkeyhint="search">
+        </form>
+        <button class="chip" id="btn-galaxy-reset" type="button" title="回到全景">全景</button>
+        <button class="chip" id="btn-galaxy-fly" type="button" title="飞进旋臂">飞入</button>
+        <button class="chip" id="btn-galaxy-fs" type="button" aria-pressed="false" title="让知识图谱占满屏幕">全屏</button>
+      </div>
+    </div>
+    <div class="galaxy-body" id="galaxy-stage"></div>
+    <p class="galaxy-hint" id="galaxy-hint">拖拽环绕 · 滚轮缩放 · 飞入旋臂 · 点文档星打开</p>
+    <div class="galaxy-error" id="galaxy-error" hidden></div>
   </section>
 
   <section class="chat sec glass" data-t="chat" aria-label="指挥官对话" id="sec-chat">
@@ -151,47 +220,6 @@ try { if (localStorage.getItem("sb.grp.fullscreen") === "1") document.documentEl
     <div id="kb" class="kb-list"></div>
   </section>
 
-  <section class="grp sec glass" data-t="groups" id="sec-groups" aria-label="群聊">
-    <div class="grp-app" id="grp-app" data-pane="list">
-      <aside class="grp-col grp-roster" id="grp-roster" aria-label="已接入的 Agent"></aside>
-      <div class="grp-col grp-mid">
-        <div class="grp-mid-top">
-          <div class="seg" id="grp-switch" role="tablist" aria-label="聊天或通讯录">
-            <button type="button" data-grp-tab="chats" class="on">聊天</button>
-            <button type="button" data-grp-tab="contacts">通讯录</button>
-          </div>
-          <button class="chip grp-fs grp-fs-list" type="button" data-grp-fs aria-pressed="false" title="让群聊占满屏幕">全屏</button>
-        </div>
-        <div class="grp-mid-body" id="grp-mid"></div>
-        <button class="grp-create" id="grp-create" type="button">+ 建群</button>
-      </div>
-      <section class="grp-col grp-main" id="grp-main" aria-label="当前群聊">
-        <header class="grp-head" id="grp-head">
-          <button class="grp-back" id="grp-back" type="button" data-grp-back>返回</button>
-          <div class="grp-head-text"><h2>群聊</h2><p>选择一个群，或新建一个</p></div>
-          <button class="chip grp-fs" type="button" data-grp-fs aria-pressed="false" title="让群聊占满屏幕">全屏</button>
-        </header>
-        <div class="grp-stream-wrap">
-          <ol class="grp-stream" id="grp-stream" aria-live="polite"></ol>
-          <button type="button" class="grp-jump" id="grp-jump" hidden>1 条新消息</button>
-        </div>
-        <div class="grp-reply" id="grp-reply" hidden></div>
-        <form class="grp-form" id="grp-form" autocomplete="off">
-          <div class="grp-form-label">以主人身份发言</div>
-          <div class="grp-at-box" id="grp-at-box" hidden></div>
-          <div class="grp-form-row">
-            <button class="grp-tool" id="grp-at" type="button" aria-label="提到成员">@</button>
-            <button class="grp-tool" id="grp-file-btn" type="button" aria-label="附件">附件</button>
-            <input id="grp-file" type="file" hidden>
-            <label class="sr" for="grp-input">以你自己的身份发言</label>
-            <textarea id="grp-input" rows="1" placeholder="以你自己的身份说点什么" enterkeyhint="send"></textarea>
-            <button class="btn" id="grp-send" type="submit">发送</button>
-          </div>
-        </form>
-      </section>
-    </div>
-    <div class="grp-overlay" id="grp-overlay" hidden></div>
-  </section>
 </main>
 
 <nav class="tabbar glass" id="tabbar" aria-label="底部导航">
@@ -221,6 +249,6 @@ try { if (localStorage.getItem("sb.grp.fullscreen") === "1") document.documentEl
   </form>
 </dialog>
 
-<script src="v2/app.js?v=2.5.5" defer></script>
+<script src="v2/app.js?v=2.6.0" defer></script>
 </body>
 </html>

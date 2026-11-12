@@ -33,7 +33,7 @@
     graph: null, view: null, viewKind: null, prevKpi: {}, selected: null,
     instMap: {}, agentById: {}, lastActivity: 0, kbQ: "",
     chat: [], chatIds: new Set(), chatNames: new Set([CHAT_PEER]), chatReply: null, chatUnread: 0, chatHook: null,
-    projects: [], apPrev: null,
+    projects: [], apPrev: null, galaxyDocs: null, galaxyTotal: 0,
   };
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -455,12 +455,13 @@
     });
     const rel = {};
     (S.relations || []).forEach((r) => { rel[r.target] = (rel[r.target] || 0) + (r.task_count || 0); });
-    const nodes = [{ id: HUB, label: "中台", kind: "hub", live: "idle", weight: 1, anomalies: { total: 0 } }];
+    const nodes = [{ id: HUB, label: "中台", kind: "hub", live: "idle", weight: 1, anomalies: { total: 0 }, sub: "在线 · 消息总线" }];
     d.agents.filter((a) => a.status === "active" || a.status === "disabled").forEach((a) => {
       nodes.push({ id: a.agent_id, label: a._label, kind: a.kind, live: a.status === "active" ? a.live_status : "disabled", working: a.live_status === "working" || stateOf(a).k === "busy",
         weight: (vol[a.agent_id] || 0) + (rel[a.agent_id] || 0), msgs: vol[a.agent_id] || 0, tasks: rel[a.agent_id] || 0,
         anomalies: a.anomalies, presence_at: a.presence_at, instances: a.instances,
-        sub: stateLine(a).slice(0, 22), pending: (a.pending_approvals || 0) + (a.pending_assists || 0) });
+        sub: stateLine(a).slice(0, 48), pending: (a.pending_approvals || 0) + (a.pending_assists || 0),
+        badge: a.kind === "external" ? "外部" : (a.agent_id === OWNER ? "人" : "") });
     });
     S.graph = { nodes, hub: HUB };
     ensureView();
@@ -484,7 +485,7 @@
       <div class="lg"><span class="dot" style="background:var(--red)"></span>右上红角标：异常数</div>
       <div class="lg"><span class="dot" style="background:var(--red);box-shadow:0 0 0 2px #fff inset"></span>左上红点+数字：待审批/等协助</div>
       <div class="lg"><span class="dot" style="background:transparent;border:1px dashed var(--gold)"></span>金色虚环：忙碌（自报/租约）</div>
-      <div class="lt">中台是恒星，Agent 是行星。节点大小 = 24h 消息 + 任务量；亮度 = 健康在线（心跳且回执通）；琥珀色 = 在场但回执失败；标签 = 名称 · 状态 · 在做什么。没有消息时画面静止，不做假动态。</div>`;
+      <div class="lt">中台是恒星，Agent 是各自不同的星体。离线会变冷并标明离线多久；在线会区分空闲多久和忙碌，忙碌时标明正在做什么。光点只在真实消息或事件到达时沿引力索飞行。</div>`;
   }
 
   /* ---------- 视图：3D（桌面）/ 平面（手机、低端、减少动效） ---------- */
@@ -501,8 +502,16 @@
     return !mobile.matches && !saveData && !lowMem && !lowCpu && webglOK();
   }
   let loading3D = null;
+  const scriptLoads = {};
   function loadScript(src) {
-    return new Promise((res, rej) => { const s = document.createElement("script"); s.src = src; s.async = true; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+    if (scriptLoads[src]) return scriptLoads[src];
+    scriptLoads[src] = new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = src; s.async = true; s.onload = res;
+      s.onerror = () => { delete scriptLoads[src]; rej(new Error(src)); };
+      document.head.appendChild(s);
+    });
+    return scriptLoads[src];
   }
   function ensureView() {
     const kind = want3D() ? "3d" : "lite";
@@ -510,7 +519,7 @@
     if (kind === "3d") {
       if (S.viewKind === "3d-loading") return;
       S.viewKind = "3d-loading";
-      loading3D = loading3D || (window.THREE ? Promise.resolve() : loadScript("../vendor/three.min.js?v=r150")).then(() => (window.SB3D ? null : loadScript("v2/scene3d.js?v=2.0.0")));
+      loading3D = loading3D || (window.THREE ? Promise.resolve() : loadScript("../vendor/three.min.js?v=r150")).then(() => (window.SB3D ? null : loadScript("v2/scene3d.js?v=3.0.0")));
       loading3D.then(() => { mountView("3d"); }).catch(() => { localStorage.setItem("sb.view", "lite"); mountView("lite"); toast("3D 场景加载失败，已切到平面模式"); });
       return;
     }
@@ -520,7 +529,7 @@
     if (S.view) { S.view.dispose(); S.view = null; }
     const box = $("#stage");
     box.innerHTML = "";
-    const opts = { reduced: reduced.matches, onSelect: (id) => openNode(id), onHover: () => {} };
+    const opts = { reduced: reduced.matches, mobile: mobile.matches, onSelect: (id) => openNode(id), onHover: () => {} };
     try {
       S.view = kind === "3d" ? window.SB3D.create(box, opts) : Lite.create(box, opts);
       S.viewKind = kind;
@@ -541,7 +550,7 @@
       cv.setAttribute("role", "img"); cv.setAttribute("aria-label", "协作网平面拓扑");
       box.appendChild(cv);
       const ctx = cv.getContext("2d");
-      let W = 0, H = 0, dpr = 1, nodes = [], pos = {}, sel = null, parts = [], raf = 0, flash = {};
+      let W = 0, H = 0, dpr = 1, nodes = [], pos = {}, sel = null, parts = [], raf = 0, flash = {}, dust = [];
       const COL = { hub: "#f5c451", chief: "#ff5fa2", worker: "#3ee6c1", off: "#6b7a90", degraded: "#ffb547" };
       function layout() {
         const r = box.getBoundingClientRect();
@@ -552,6 +561,7 @@
         const chiefs = nodes.filter((n) => n.kind === "chief"), workers = nodes.filter((n) => n.kind === "worker");
         chiefs.forEach((n, i) => { const a = -Math.PI / 2 + (i / chiefs.length) * Math.PI * 2; pos[n.id] = { x: cx + R1 * Math.cos(a), y: cy + R1 * 0.82 * Math.sin(a) }; });
         workers.forEach((n, i) => { const a = -Math.PI / 2 + ((i + 0.5) / workers.length) * Math.PI * 2; pos[n.id] = { x: cx + R2 * Math.cos(a), y: cy + R2 * 0.8 * Math.sin(a) }; });
+        if (!dust.length) { for (let i = 0; i < 80; i++) dust.push({ x: Math.random(), y: Math.random(), r: Math.random() * 1.3 + 0.3, a: 0.25 + Math.random() * 0.55 }); }
         draw();
       }
       const isOn = (n) => n.kind === "hub" || n.live === "idle" || n.live === "working" || n.live === "degraded";
@@ -559,12 +569,19 @@
       function draw(t) {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, W, H);
+        const sky = ctx.createRadialGradient(W * 0.5, H * 0.46, 30, W * 0.5, H * 0.5, Math.max(W, H) * 0.72);
+        sky.addColorStop(0, "rgba(42, 28, 16, .45)");
+        sky.addColorStop(0.45, "rgba(18, 16, 36, .25)");
+        sky.addColorStop(1, "rgba(5, 7, 14, 0)");
+        ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+        dust.forEach((s) => { ctx.globalAlpha = s.a; ctx.fillStyle = s.r > 1.2 ? "#ffe2b0" : "#d5e4ff"; ctx.beginPath(); ctx.arc(s.x * W, s.y * H, s.r, 0, 7); ctx.fill(); });
+        ctx.globalAlpha = 1;
         const hub = pos[HUB]; if (!hub) return;
         nodes.forEach((n) => {
           if (n.id === HUB) return; const p = pos[n.id]; if (!p) return;
           const strong = (n.msgs || 0) > 0;
-          ctx.strokeStyle = strong ? "rgba(245,196,81,.45)" : "rgba(76,201,255,.22)";
-          ctx.lineWidth = strong ? Math.min(4, 1 + Math.log2(1 + n.msgs) / 2) : 1;
+          ctx.strokeStyle = strong ? "rgba(245,196,81,.28)" : "rgba(76,201,255,.16)";
+          ctx.lineWidth = strong ? 1.4 : 0.7;
           ctx.globalAlpha = isOn(n) ? 1 : 0.35;
           ctx.beginPath(); ctx.moveTo(hub.x, hub.y); ctx.lineTo(p.x, p.y); ctx.stroke();
         });
@@ -573,9 +590,12 @@
           const p = pos[n.id]; if (!p) return;
           const c = n.kind === "hub" ? COL.hub : n.live === "degraded" ? (COL.degraded || COL.amber || "#e6a23c") : isOn(n) ? COL[n.kind] : COL.off;
           const r = rad(n);
-          if (isOn(n)) { const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 3); g.addColorStop(0, c + "66"); g.addColorStop(1, c + "00"); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, r * 3, 0, 7); ctx.fill(); }
+          if (isOn(n)) { const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * (n.kind === "hub" ? 5 : 3.2)); g.addColorStop(0, c + "88"); g.addColorStop(1, c + "00"); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, r * (n.kind === "hub" ? 5 : 3.2), 0, 7); ctx.fill(); }
           const fl = flash[n.id]; if (fl && t && t - fl < 900) { ctx.strokeStyle = "rgba(255,255,255," + (1 - (t - fl) / 900) + ")"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x, p.y, r + 4 + (t - fl) / 60, 0, 7); ctx.stroke(); }
-          ctx.fillStyle = c; ctx.globalAlpha = isOn(n) ? 1 : 0.45; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+          const body = ctx.createRadialGradient(p.x - r * 0.35, p.y - r * 0.35, r * 0.1, p.x, p.y, r);
+          body.addColorStop(0, "#fff6e4"); body.addColorStop(0.45, c); body.addColorStop(1, "rgba(0,0,0,.55)");
+          ctx.fillStyle = body; ctx.globalAlpha = isOn(n) ? 1 : 0.45; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+          if (n.kind === "hub") { ctx.strokeStyle = "rgba(245,196,81,.55)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(p.x, p.y, r * 1.7, r * 0.42, -0.4, 0, 7); ctx.stroke(); }
           if (sel === n.id) { ctx.strokeStyle = COL.hub; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x, p.y, r + 5, 0, 7); ctx.stroke(); }
           if (n.working) { ctx.strokeStyle = COL.hub; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(p.x, p.y, r + 8, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
           ctx.fillStyle = isOn(n) ? "#e8eef8" : "#7d8aa0"; ctx.font = `${n.kind === "hub" ? 600 : 500} ${n.kind === "hub" ? 12 : 11}px ${getComputedStyle(document.body).fontFamily}`;
@@ -725,6 +745,7 @@
   }
   async function searchKb(q) {
     S.kbQ = q;
+    renderGalaxyNote(q);
     $("#kb").innerHTML = '<div class="kb-item skeleton" style="height:84px"></div><div class="kb-item skeleton" style="height:84px"></div><div class="kb-item skeleton" style="height:84px"></div>';
     try {
       const j = await api(`/api/knowledge?limit=${q ? 30 : 12}${q ? "&q=" + encodeURIComponent(q) : ""}`);
@@ -736,6 +757,107 @@
       $("#kb").innerHTML = `<div class="empty" role="alert"><b>检索失败</b>${esc(e.message)} <button class="chip" type="button" id="kb-retry">重试</button></div>`;
       $("#kb-retry").onclick = () => searchKb(q);
     }
+  }
+
+  /* 知识星图。文档来自 /api/knowledge，不编造条目。背景星不能点开。 */
+  let galaxyView = null;
+  function galaxyHitCount(q) {
+    const items = S.galaxyDocs || [];
+    const needle = String(q || "").trim().toLowerCase();
+    if (!needle) return items.length;
+    return items.filter((d) => [d.title, d.path, d.category, d.snippet, (d.tags || []).join(" ")].join(" ").toLowerCase().indexOf(needle) >= 0).length;
+  }
+  function renderGalaxyNote(q) {
+    const note = $("#galaxy-sub");
+    if (!note) return;
+    const total = S.galaxyTotal || 0;
+    const shown = (S.galaxyDocs || []).length;
+    const base = total > shown ? "共 " + total + " 篇 · 星图 " + shown + " 篇" : "共 " + total + " 篇";
+    const query = String(q || "").trim();
+    if (galaxyView && galaxyView.setQuery) galaxyView.setQuery(query);
+    if (!query) { note.textContent = base; return; }
+    note.textContent = base + " · “" + query + "” 命中 " + galaxyHitCount(query) + " 篇";
+  }
+  function showGalaxyError(msg) {
+    const el = $("#galaxy-error");
+    if (!el) return;
+    el.hidden = false;
+    el.replaceChildren();
+    el.append(document.createTextNode("知识库没有载入：" + (msg || "读取失败") + " "));
+    const b = document.createElement("button");
+    b.className = "chip"; b.type = "button"; b.textContent = "重试";
+    b.addEventListener("click", () => loadGalaxy());
+    el.append(b);
+  }
+  function hideGalaxyError() {
+    const el = $("#galaxy-error");
+    if (el) { el.hidden = true; el.replaceChildren(); }
+  }
+  async function loadGalaxy() {
+    const note = $("#galaxy-sub");
+    try {
+      const j = await api("/api/knowledge?limit=200");
+      const items = j.data || [];
+      S.galaxyDocs = items;
+      S.galaxyTotal = typeof j.total === "number" ? j.total : items.length;
+      hideGalaxyError();
+      if (galaxyView) galaxyView.setDocs(items);
+      renderGalaxyNote(S.kbQ || "");
+    } catch (e) {
+      S.galaxyDocs = [];
+      S.galaxyTotal = 0;
+      if (galaxyView) galaxyView.setDocs([]);
+      if (note) note.textContent = "知识库暂时没有读到";
+      showGalaxyError(e.message || "读取失败");
+    }
+  }
+  function ensureGalaxy() {
+    const box = $("#galaxy-stage");
+    if (!box || galaxyView) return;
+    const boot = () => {
+      if (!window.SBGALAXY) throw new Error("星图脚本没载入");
+      galaxyView = window.SBGALAXY.create(box, {
+        reduced: reduced.matches,
+        mobile: mobile.matches,
+        onSelect: (path) => openDoc(path)
+      });
+      if (S.galaxyDocs) galaxyView.setDocs(S.galaxyDocs);
+      if (S.kbQ) galaxyView.setQuery(S.kbQ);
+    };
+    const three = window.THREE ? Promise.resolve() : loadScript("../vendor/three.min.js?v=r150");
+    three.catch(() => null).then(() => (window.SBGALAXY ? null : loadScript("v2/galaxy.js?v=1.0.0"))).then(boot).catch((e) => showGalaxyError((e && e.message) || "星图加载失败"));
+  }
+  function galaxyFsOn() {
+    return document.documentElement.classList.contains("gal-fs");
+  }
+  function stageFsOn() {
+    return document.documentElement.classList.contains("stage-fs");
+  }
+  function syncGalaxyFsBtn() {
+    const b = $("#btn-galaxy-fs");
+    if (!b) return;
+    const on = galaxyFsOn();
+    b.textContent = on ? "退出全屏" : "全屏";
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+    b.title = on ? "退出全屏" : "让知识图谱占满屏幕";
+  }
+  function syncStageFsBtn() {
+    const b = $("#btn-stage-fs");
+    if (!b) return;
+    const on = stageFsOn();
+    b.textContent = on ? "退出全屏" : "全屏";
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+    b.title = on ? "退出全屏" : "让协作网占满屏幕";
+  }
+  function setGalaxyFullscreen(on) {
+    document.documentElement.classList.toggle("gal-fs", !!on);
+    try { localStorage.setItem("sb.gal.fullscreen", on ? "1" : "0"); } catch (err) { /* 记不住时仍可本次使用 */ }
+    syncGalaxyFsBtn();
+  }
+  function setStageFullscreen(on) {
+    document.documentElement.classList.toggle("stage-fs", !!on);
+    try { localStorage.setItem("sb.stage.fullscreen", on ? "1" : "0"); } catch (err) { /* 记不住时仍可本次使用 */ }
+    syncStageFsBtn();
   }
   async function openDoc(path) {
     openDrawer(head("知识库", esc(path)) + '<div class="dr-body"><div class="note">读取中…</div></div>');
@@ -2005,7 +2127,7 @@
   let deckKey = 0;
   function deckOn() { return document.documentElement.classList.contains("deck"); }
   function deckBlocked() {
-    if (!deckOn() || groupFsOn()) return true;
+    if (!deckOn() || groupFsOn() || stageFsOn() || galaxyFsOn()) return true;
     const dialog = $("#dlg");
     if (dialog && dialog.open) return true;
     if ($("#drawer").getAttribute("aria-hidden") === "false") return true;
@@ -2266,17 +2388,31 @@
       if ($("#drawer").getAttribute("aria-hidden") === "false") { closeDrawer(); return; }
       const ov = $("#grp-overlay");
       if (ov && !ov.hidden) { hideOverlay(); return; }
+      if (stageFsOn()) { setStageFullscreen(false); return; }
+      if (galaxyFsOn()) { setGalaxyFullscreen(false); return; }
       if (groupFsOn()) setGroupFullscreen(false);
     });
     $("#tabbar").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setTab(b.dataset.tab); });
     $("#btn-reset").addEventListener("click", () => { if (S.view) S.view.reset(); });
+    syncStageFsBtn();
+    $("#btn-stage-fs").addEventListener("click", () => setStageFullscreen(!stageFsOn()));
+    syncGalaxyFsBtn();
+    $("#btn-galaxy-fs").addEventListener("click", () => setGalaxyFullscreen(!galaxyFsOn()));
+    $("#btn-galaxy-reset").addEventListener("click", () => { if (galaxyView) galaxyView.reset(); });
+    $("#btn-galaxy-fly").addEventListener("click", () => { if (galaxyView) galaxyView.flyIn(); });
+    $("#galaxy-form").addEventListener("submit", (e) => { e.preventDefault(); searchKb($("#galaxy-q").value.trim()); });
+    $("#galaxy-q").addEventListener("input", () => { S.kbQ = $("#galaxy-q").value.trim(); renderGalaxyNote(S.kbQ); });
     $("#btn-mode").addEventListener("click", () => {
       const next = S.viewKind === "3d" ? "lite" : "3d";
       if (next === "3d" && !webglOK()) { toast("此设备不支持 WebGL，保持平面模式"); return; }
       localStorage.setItem("sb.view", next); S.view && S.view.dispose(); S.view = null; S.viewKind = null; ensureView();
     });
     $("#legend").addEventListener("click", (e) => { if (e.target.closest("summary")) { const lg = $("#legend"); lg.dataset.collapsed = lg.dataset.collapsed === "true" ? "false" : "true"; renderLegend(); } });
-    mobile.addEventListener && mobile.addEventListener("change", () => { if (!localStorage.getItem("sb.view")) { S.view && S.view.dispose(); S.view = null; S.viewKind = null; ensureView(); } renderLegend(); });
+    mobile.addEventListener && mobile.addEventListener("change", () => {
+      if (!localStorage.getItem("sb.view")) { S.view && S.view.dispose(); S.view = null; S.viewKind = null; ensureView(); }
+      if (galaxyView) { galaxyView.dispose(); galaxyView = null; ensureGalaxy(); }
+      renderLegend();
+    });
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") { loadDash(false); loadGroupHome(); if (G.current) refreshOpen(); if (!S.es || S.es.readyState === 2) { S.esFails = 0; startStream(); } }
     });
@@ -2294,7 +2430,7 @@
     loadDash(true);
     renderOwnerPill();
     if (/[#&]pair=/.test(location.hash)) history.replaceState(null, "", location.pathname + location.search);
-    loadServer(); loadRelations(); loadEvents(); searchKb(""); loadApprovals(); loadAudit(); loadChat(); loadProjects(); loadGroupHome();
+    loadServer(); loadRelations(); loadEvents(); searchKb(""); loadGalaxy(); ensureGalaxy(); loadApprovals(); loadAudit(); loadChat(); loadProjects(); loadGroupHome();
     if (!mobile.matches) document.documentElement.dataset.tab = "overview";
     setInterval(() => { if (document.visibilityState === "visible") loadProjects(); }, 60000);
     setInterval(() => { if (document.visibilityState === "visible" && S.mode !== "live") loadChat(); }, 15000);
