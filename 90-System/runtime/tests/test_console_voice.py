@@ -229,6 +229,122 @@ def test_http():
         os.environ.pop("DEEPGRAM_API_KEY", None)
 
 
+def _spoken(sock):
+    for raw in sock.sent:
+        try:
+            obj = json.loads(raw)
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and obj.get("type") == "Speak":
+            return obj.get("text") or ""
+    return ""
+
+
+def test_speak_stream_latency():
+    """本机打点：同一条 500 字响应，旧路径要等整段，新路径在第一块 PCM 就可播。不访问 Deepgram。"""
+    import http.client
+    import time
+    conn = fresh_db()
+    unlocked = owner_ops.unlock(conn, "语音测试口令", "流式机")
+    token = unlocked["token"]
+    conn.close()
+    pace = {"first": 0.0, "per_char": 0.0}
+    sockets = []
+    seen = {}
+
+    class PacedWS:
+        def __init__(self):
+            self.sent = []
+            self.n = 0
+            self.chars = 0
+
+        def send_text(self, text):
+            self.sent.append(text)
+            try:
+                obj = json.loads(text)
+            except ValueError:
+                return
+            if isinstance(obj, dict) and obj.get("type") == "Speak":
+                self.chars = len(obj.get("text") or "")
+
+        def send_bin(self, payload):
+            return None
+
+        def recv_event(self, timeout=20):
+            self.n += 1
+            if self.n == 1:
+                if pace["first"]:
+                    time.sleep(pace["first"])
+                return ("bin", b"\x01\x00" * 480)
+            if self.n == 2:
+                delay = pace["per_char"] * self.chars
+                if delay:
+                    time.sleep(delay)
+                return ("bin", b"\x02\x00" * 480)
+            if self.n == 3:
+                return ("text", json.dumps({"type": "SpeechMetadata"}))
+            return ("close", b"")
+
+        def close(self):
+            return None
+
+    def ws(url, headers):
+        seen["url"] = url
+        seen["auth"] = headers.get("Authorization", "")
+        sock = PacedWS()
+        sockets.append(sock)
+        return sock
+
+    deepgram_proxy.set_test_hooks(transport=None, ws=ws)
+    os.environ.pop("DEEPGRAM_API_KEY", None)
+    deepgram_proxy.save_provider_secret("deepgram", SECRET)
+    httpd = serve(str(TMP / "db" / "state.db"))
+    port = httpd.server_address[1]
+    try:
+        code, ctype, audio = req(port, "POST", "/api/owner/voice/speak", {"text": "句" * 600}, {"Authorization": "Bearer " + token}, raw=True)
+        spoken = _spoken(sockets[-1]) if sockets else ""
+        check("600 字不再被截成 500", code == 200 and ctype.startswith("audio/wav") and spoken == "句" * 600 and SECRET.encode() not in audio, len(spoken))
+        code, _ctype, audio = req(port, "POST", "/api/owner/voice/speak", {"text": "句" * 4500}, {"Authorization": "Bearer " + token}, raw=True)
+        spoken = _spoken(sockets[-1]) if sockets else ""
+        check("单次上限 4000", code == 200 and spoken == "句" * 4000 and SECRET.encode() not in audio, len(spoken))
+        check("流式上游仍是文静", "wss://api.deepgram.com/v2/speak" in seen.get("url", "") and "flux-wenjing-zh" in seen.get("url", "") and seen.get("auth") == "Token " + SECRET and SECRET not in seen.get("url", ""))
+        pace["first"] = 0.04
+        pace["per_char"] = 0.0009
+        text = "测" * 500
+        client = http.client.HTTPConnection("127.0.0.1", port, timeout=8)
+        t0 = time.perf_counter()
+        client.request("POST", "/api/owner/voice/speak", body=json.dumps({"text": text}).encode(), headers={
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + token,
+        })
+        resp = client.getresponse()
+        buf = b""
+        t_pcm = None
+        while True:
+            piece = resp.read(256)
+            if not piece:
+                break
+            buf += piece
+            if t_pcm is None and len(buf) >= 46 and buf.startswith(b"RIFF"):
+                t_pcm = time.perf_counter() - t0
+        t_full = time.perf_counter() - t0
+        client.close()
+        before_ms = round(t_full * 1000, 1)
+        after_ms = round((t_pcm if t_pcm is not None else t_full) * 1000, 1)
+        print("SPEAK_LATENCY " + json.dumps({
+            "before_ms": before_ms,
+            "after_ms": after_ms,
+            "saved_ms": round(before_ms - after_ms, 1),
+            "chars": 500,
+            "note": "local paced upstream, no Deepgram",
+        }, ensure_ascii=False))
+        check("首段 PCM 早于整段收完", t_pcm is not None and t_full > t_pcm + 0.25 and buf.startswith(b"RIFF") and SECRET.encode() not in buf and _spoken(sockets[-1]) == text, (after_ms, before_ms))
+    finally:
+        httpd.shutdown()
+        deepgram_proxy.set_test_hooks(None, None)
+        os.environ.pop("DEEPGRAM_API_KEY", None)
+
+
 def test_pages():
     html = (ROOT / "70-Console/design/prototype/index.html").read_text(encoding="utf-8")
     js = (ROOT / "70-Console/design/prototype/v2/app.js").read_text(encoding="utf-8")
@@ -236,7 +352,7 @@ def test_pages():
     galaxy = (ROOT / "70-Console/design/prototype/v2/galaxy.js").read_text(encoding="utf-8")
     check("三种模式都在设置里", all(x in html for x in ("value=\"hold\"", "value=\"stream\"", "value=\"live\"", "按住说话", "流式（本地小模型）", "实时语音 API")))
     check("音色写成文静", "flux-wenjing-zh" in html and "文静" in html)
-    check("欢迎语是完整一句并带版本号", "大古，欢迎回来" in html and "welcome-dagu-wenjing.mp3?v=2.8.3" in html and "welcome-dagu-wenjing.ogg?v=2.8.3" in html)
+    check("欢迎语是完整一句并带版本号", "大古，欢迎回来" in html and "welcome-dagu-wenjing.mp3?v=2.8.4" in html and "welcome-dagu-wenjing.ogg?v=2.8.4" in html)
     tools = html.split('class="chat-tools"', 1)[1].split("</div>", 1)[0]
     panel = html.split('id="voice-panel"', 1)[1].split('id="chat"', 1)[0]
     check("头栏有实时通话按钮", 'id="btn-live-call"' in tools and ">实时通话<" in tools and "btn-live-call" not in panel)
@@ -250,7 +366,23 @@ def test_pages():
     err = js.split("function micErrorText", 1)[1].split("async function micStart", 1)[0]
     check("拒绝麦克风时提示改地址栏并覆盖 iPhone", "NotAllowedError" in err and "SecurityError" in err and "地址栏" in err and "锁" in err and "麦克风图标" in err and "实时通话" in err and "设置 › Safari › 麦克风" in err and "键盘输入不受影响" in err)
     check("页面缓存仍是 no-store", 'Cache-Control" content="no-store' in html)
-    check("静态脚本样式版本是 2.8.3", "v2/app.js?v=2.8.3" in html and "v2/app.css?v=2.8.3" in html and "v2/voice-entry.js?v=2.8.3" in html)
+    check("静态脚本样式版本是 2.8.4", "v2/app.js?v=2.8.4" in html and "v2/app.css?v=2.8.4" in html and "v2/voice-entry.js?v=2.8.4" in html and "v2/speak-queue.js?v=2.8.4" in html and "v2/roster.js?v=2.8.4" in html)
+    queue = (ROOT / "70-Console/design/prototype/v2/speak-queue.js").read_text(encoding="utf-8")
+    proxy = (VOICE / "deepgram_proxy.py").read_text(encoding="utf-8")
+    voice = js.split("function stopSpeaking", 1)[1].split("async function commitUtterance", 1)[0]
+    check("朗读上限是 4000，服务端不再截 500", "SPEAK_TEXT_MAX = 4000" in proxy and "text[:500]" not in proxy and "SPEAK_TEXT_MAX = 4000" in queue)
+    check("边收边播，不支持时退回整段", "getReader" in voice and "arrayBuffer" in voice and voice.index("getReader") < voice.index("arrayBuffer"))
+    check("朗读路径不再截 500 字", "slice(0, 500)" not in voice)
+    say = js.split("async function say", 1)[1].split("async function commitUtterance", 1)[0]
+    say_head = say.split("await ", 1)[0]
+    check("按句排队且新朗读会先停掉上一段", "splitSpeakText" in queue and "createSession" in js and "stopSpeaking()" in say_head and "speakSession.begin" in say_head)
+    check("快速回复念正文，正式回复仍走 say", "say(chatBody(m))" in js and "say(m.text)" in js)
+    live = js.split("if (rms > 0.02)", 1)[1].split("else t.quiet", 1)[0]
+    check("开口仍打断当前播放", "stopSpeaking()" in live)
+    call = js.split("function startConversation", 1)[1].split("if (!canRecord", 1)[0]
+    check("进入实时通话会先停朗读", "stopSpeaking()" in call)
+    check("实时定稿仍走 sendChat", "await sendChat()" in js.split("async function commitUtterance", 1)[1].split("function pcm16", 1)[0])
+    check("音色常量仍是文静", 'TTS_MODEL = "flux-wenjing-zh"' in proxy and "flux-wenjing-zh" in js)
     check("前端不出现 Deepgram 主机和密钥名", "api.deepgram.com" not in js and "DEEPGRAM_API_KEY" not in js and "token=" not in js)
     begin = js[js.index("async function beginEntry"):js.index("function bindBgm")]
     check("欢迎语在背景音乐之前", begin.index("playWelcomeEl") < begin.index("startBgm"))
@@ -274,6 +406,7 @@ def test_node():
 if __name__ == "__main__":
     test_logic()
     test_http()
+    test_speak_stream_latency()
     proc = subprocess.run(
         ["node", "-e", r"""
 const fs = require("fs");
@@ -310,6 +443,11 @@ if (E.WELCOME_TEXT !== "大古，欢迎回来") fail("welcome text");
 """ , str(ROOT / "70-Console/design/prototype/v2/voice-entry.js"), str(ROOT / "70-Console/design/prototype/v2/roster.js")],
         capture_output=True, text=True)
     check("模式切换、欢迎语顺序和名字圈列数", proc.returncode == 0, (proc.stdout + proc.stderr)[-500:])
+    queued = subprocess.run(["node", "--check", str(ROOT / "70-Console/design/prototype/v2/app.js")], capture_output=True, text=True)
+    check("app.js 语法", queued.returncode == 0, queued.stderr[-300:])
+    queued = subprocess.run(["node", str(ROOT / "90-System/runtime/tests/test_speak_queue.mjs")], capture_output=True, text=True)
+    print(queued.stdout.strip())
+    check("按句排队与首段时钟", queued.returncode == 0 and "SPEAK_LATENCY_MODEL" in queued.stdout, (queued.stdout + queued.stderr)[-800:])
     test_pages()
     print("----")
     if FAILS:
