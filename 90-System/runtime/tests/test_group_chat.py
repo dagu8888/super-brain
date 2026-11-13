@@ -443,7 +443,7 @@ def test_pages_exist():
     check("操作台有群聊板块", 'data-tab="groups"' in html and "以你自己的身份说点什么" in html)
     check("前端走现有口令解锁和群接口", "group_send" in js and "/api/groupchat/roster" in js and "askUnlock" in js)
     check("前端不写死令牌", "token=" not in js and "?token" not in js)
-    check("静态资源版本已抬到 2.8.3", "v2/app.js?v=2.8.3" in html and "v2/app.css?v=2.8.3" in html)
+    check("静态资源版本已抬到 2.8.4", "v2/app.js?v=2.8.4" in html and "v2/app.css?v=2.8.4" in html)
     css = (ROOT / "70-Console/design/prototype/v2/app.css").read_text(encoding="utf-8")
     meta = html.split('<div class="top-meta">', 1)[1].split("</header>", 1)[0]
     mobile = css.split("@media (max-width: 760px)", 1)[1].split("@media", 1)[0]
@@ -527,7 +527,7 @@ def test_console_260_deck_and_scenes():
     check("第一屏包住 KPI 和协作网", i_hero < i_kpi < i_stage < i_grp and "sec-hero" in html[i_hero:i_grp])
     check("群聊是后续整页", i_grp < i_gal and '"grp grp grp"' in css)
     check("知识图谱在群聊之后、指挥官对话之前", i_grp < i_gal < i_chat < i_kb)
-    check("知识宇宙有画布钩子", 'id="galaxy-stage"' in html and "SBGALAXY" in js and "v2/galaxy.js?v=2.8.3" in js)
+    check("知识宇宙有画布钩子", 'id="galaxy-stage"' in html and "SBGALAXY" in js and "v2/galaxy.js?v=2.8.4" in js)
     check("星图读取知识库且不靠编造", "/api/knowledge?limit=200" in js and "openDoc" in js)
     check("协作网和星图都能全屏", 'id="btn-stage-fs"' in html and 'id="btn-galaxy-fs"' in html
           and "stage-fs" in js and "gal-fs" in js and "sb.stage.fullscreen" in js and "sb.gal.fullscreen" in js)
@@ -550,7 +550,7 @@ def test_console_270_visual_invariants():
     scene = (ROOT / "70-Console/design/prototype/v2/scene3d.js").read_text(encoding="utf-8")
     galaxy = (ROOT / "70-Console/design/prototype/v2/galaxy.js").read_text(encoding="utf-8")
     api = (ROOT / "90-System/runtime/console_api.py").read_text(encoding="utf-8")
-    check("版本号是 2.8.3，场景脚本仍是 4.0.0", "v2/app.js?v=2.8.3" in html and "v=2.7.0" not in html and 'version: "2.8.3"' in galaxy and 'version: "4.0.0"' in scene)
+    check("版本号是 2.8.4，场景脚本仍是 4.0.0", "v2/app.js?v=2.8.4" in html and "v=2.7.0" not in html and 'version: "2.8.4"' in galaxy and 'version: "4.0.0"' in scene)
     check("不写死火节点", "火" not in scene and "火" not in galaxy and "__fire__" not in js and "Fire" not in scene)
     check("中台仍是编排中心", "中台" in scene and "中台" in js and "photosphere" in scene)
     check("关系来自接口并可点开证据", "/api/relations" in js and "evidence" in js and "openRelation" in js and "onEdge" in scene)

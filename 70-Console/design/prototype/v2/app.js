@@ -1,4 +1,4 @@
-/* Super-Brain 协作中枢 v2.8.3（查看走已有主人会话 cookie；写操作仍是每台设备每天第一次口令）
+/* Super-Brain 协作中枢 v2.8.4（查看走已有主人会话 cookie；写操作仍是每台设备每天第一次口令）
    数据源：/api/dashboard（KPI/异常/点名/消息）、/api/server（服务器健康）、/api/relations、
           /api/agents/{id}、/api/messages?agent=、/api/tasks/{id}、/api/knowledge、/api/stream（SSE）。
    纪律：健康在线 = 5 分钟内心跳且近期消息有回执；心跳在但超过约 60 秒无回执 = 降级（在场但回执失败），
@@ -1133,7 +1133,7 @@
       if (S.kbQ) galaxyView.setQuery(S.kbQ);
     };
     const three = window.THREE ? Promise.resolve() : loadScript("../vendor/three.min.js?v=r150");
-    three.catch(() => null).then(() => (window.SBGALAXY ? null : loadScript("v2/galaxy.js?v=2.8.3"))).then(boot).catch((e) => showGalaxyError((e && e.message) || "星图加载失败"));
+    three.catch(() => null).then(() => (window.SBGALAXY ? null : loadScript("v2/galaxy.js?v=2.8.4"))).then(boot).catch((e) => showGalaxyError((e && e.message) || "星图加载失败"));
   }
   function galaxyFsOn() {
     return document.documentElement.classList.contains("gal-fs");
@@ -1745,8 +1745,22 @@
   }
   let voiceStatus = { deepgram: false, local_tts: false };
   let fluxAudio = null;
-  let fluxAbort = null;
+  let fluxUrl = null;
+  let fluxSources = [];
+  let speakCtls = [];
+  let speakCtx = null;
   let talking = null;
+  const speakSession = (window.SBSpeakQueue && SBSpeakQueue.createSession)
+    ? SBSpeakQueue.createSession()
+    : {
+        begin(text) {
+          this.g = (this.g || 0) + 1;
+          const s = String(text || "").trim().slice(0, 4000);
+          return { gen: this.g, parts: s ? [s] : [] };
+        },
+        cancel() { this.g = (this.g || 0) + 1; return this.g; },
+        generation() { return this.g || 0; }
+      };
   let lastCommitted = "";
   function voiceMode() {
     return window.SBVoiceEntry ? SBVoiceEntry.readMode(localStorage) : "hold";
@@ -1756,68 +1770,244 @@
     if (mode === "stream" || mode === "live") return true;
     return pref("tts");
   }
+  function stopPcmSources() {
+    const list = fluxSources;
+    fluxSources = [];
+    list.forEach((src) => { try { src.onended = null; src.stop(0); } catch (e) { /* 已停 */ } });
+  }
+  function abortSpeakFetches() {
+    const list = speakCtls;
+    speakCtls = [];
+    list.forEach((ctl) => { try { ctl.abort(); } catch (e) { /* 已结束 */ } });
+  }
   function stopSpeaking() {
-    if (fluxAbort) { try { fluxAbort.abort(); } catch (e) { /* 已结束 */ } fluxAbort = null; }
+    speakSession.cancel();
+    abortSpeakFetches();
+    stopPcmSources();
     if (fluxAudio) { try { fluxAudio.pause(); } catch (e) { /* 已停 */ } fluxAudio = null; }
+    if (fluxUrl) { try { URL.revokeObjectURL(fluxUrl); } catch (e) { /* 已释放 */ } fluxUrl = null; }
     if ("speechSynthesis" in window) { try { speechSynthesis.cancel(); } catch (e) { /* 忽略 */ } }
     bgmDuck = false;
     bgmApplyVolume();
   }
   function sayBrowser(text) {
-    if (!("speechSynthesis" in window) || !text) return;
-    const u = new SpeechSynthesisUtterance(String(text).replace(/https?:\/\/\S+/g, "链接").slice(0, 500));
-    u.lang = "zh-CN"; u.rate = 1.05;
-    const v = speechSynthesis.getVoices().find((x) => /zh[-_]CN/i.test(x.lang)); if (v) u.voice = v;
-    u.onstart = () => { bgmDuck = true; bgmApplyVolume(); };
-    u.onend = u.onerror = () => { bgmDuck = false; bgmApplyVolume(); };
-    speechSynthesis.cancel(); speechSynthesis.speak(u);
-  }
-  async function playFlux(text) {
-    const o = own();
-    if (!o) return false;
-    stopSpeaking();
-    const ctl = new AbortController();
-    fluxAbort = ctl;
+    if (!("speechSynthesis" in window) || !text) return false;
+    const parts = window.SBSpeakQueue ? SBSpeakQueue.splitSpeakText(text) : [String(text).replace(/https?:\/\/\S+/g, "链接").trim()].filter(Boolean);
+    if (!parts.length) return false;
+    const genAt = speakSession.generation();
+    speechSynthesis.cancel();
     bgmDuck = true; bgmApplyVolume();
-    let r;
+    const voices = speechSynthesis.getVoices();
+    const voice = voices.find((x) => /zh[-_]CN/i.test(x.lang));
+    parts.forEach((p, i) => {
+      const u = new SpeechSynthesisUtterance(p);
+      u.lang = "zh-CN"; u.rate = 1.05;
+      if (voice) u.voice = voice;
+      if (i === 0) u.onstart = () => { if (speakSession.generation() === genAt) { bgmDuck = true; bgmApplyVolume(); } };
+      if (i === parts.length - 1) u.onend = u.onerror = () => { if (speakSession.generation() !== genAt) return; bgmDuck = false; bgmApplyVolume(); };
+      speechSynthesis.speak(u);
+    });
+    return true;
+  }
+  function canStreamWav(r, ct) {
+    return ct.indexOf("wav") >= 0 && r.body && typeof r.body.getReader === "function"
+      && (window.AudioContext || window.webkitAudioContext)
+      && window.SBSpeakQueue && SBSpeakQueue.createWavPump;
+  }
+  function concatBytes(parts) {
+    let n = 0;
+    for (const p of parts) n += p.byteLength;
+    const out = new Uint8Array(n);
+    let o = 0;
+    for (const p of parts) { out.set(p, o); o += p.byteLength; }
+    return out.buffer;
+  }
+  async function playBuffered(buf, ct, gen) {
+    if (speakSession.generation() !== gen || !buf || !buf.byteLength) return false;
+    const url = URL.createObjectURL(new Blob([buf], { type: (ct || "audio/mpeg").split(";")[0] }));
+    fluxUrl = url;
+    const audio = new Audio(url);
+    fluxAudio = audio;
+    let poll = null;
+    const ended = new Promise((resolve) => {
+      let settled = false;
+      const finish = (ok) => {
+        if (settled) return;
+        settled = true;
+        if (poll) clearInterval(poll);
+        resolve(ok);
+      };
+      audio.onended = () => finish(true);
+      audio.onerror = () => finish(false);
+      poll = setInterval(() => {
+        if (speakSession.generation() !== gen) { try { audio.pause(); } catch (e) { /* 已停 */ } finish(false); }
+      }, 40);
+    });
     try {
-      r = await fetch(API + "/api/owner/voice/speak", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: "Bearer " + o.token },
-        body: JSON.stringify({ text: String(text).slice(0, 500) }),
-        signal: ctl.signal, cache: "no-store", credentials: "same-origin"
-      });
-    } catch (e) {
-      bgmDuck = false; bgmApplyVolume();
-      return false;
-    }
-    const ct = (r.headers.get("content-type") || "").toLowerCase();
-    if (!r.ok || ct.indexOf("audio/") !== 0) {
-      bgmDuck = false; bgmApplyVolume();
-      return false;
-    }
-    try {
-      const buf = await r.arrayBuffer();
-      if (ctl.signal.aborted || !buf.byteLength) { bgmDuck = false; bgmApplyVolume(); return false; }
-      const url = URL.createObjectURL(new Blob([buf], { type: ct.split(";")[0] }));
-      const audio = new Audio(url);
-      fluxAudio = audio;
-      audio.onended = audio.onerror = () => { URL.revokeObjectURL(url); if (fluxAudio === audio) fluxAudio = null; bgmDuck = false; bgmApplyVolume(); };
       await audio.play();
-      return true;
     } catch (e) {
-      bgmDuck = false; bgmApplyVolume();
+      if (poll) clearInterval(poll);
+      URL.revokeObjectURL(url);
+      if (fluxUrl === url) fluxUrl = null;
+      if (fluxAudio === audio) fluxAudio = null;
       return false;
     }
+    const ok = await ended;
+    URL.revokeObjectURL(url);
+    if (fluxUrl === url) fluxUrl = null;
+    if (fluxAudio === audio) fluxAudio = null;
+    return ok && speakSession.generation() === gen;
+  }
+  async function playWavStream(r, gen) {
+    const reader = r.body.getReader();
+    const collected = [];
+    const collect = (value) => { if (value && value.byteLength) collected.push(value); };
+    const drain = async () => {
+      try {
+        while (true) {
+          const more = await reader.read();
+          if (more.done) break;
+          collect(more.value);
+        }
+      } catch (e) { /* 连接已断 */ }
+    };
+    const blobPlay = async () => playBuffered(concatBytes(collected), "audio/wav", gen);
+    let pump;
+    try { pump = SBSpeakQueue.createWavPump(); }
+    catch (e) { await drain(); return blobPlay(); }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    try {
+      speakCtx = speakCtx || new AC();
+      if (speakCtx.state === "suspended") await speakCtx.resume();
+      if (speakCtx.state === "suspended" || speakCtx.state === "closed") {
+        await drain();
+        return blobPlay();
+      }
+    } catch (e) {
+      await drain();
+      return blobPlay();
+    }
+    const sources = [];
+    fluxSources = sources;
+    let started = false;
+    let nextAt = 0;
+    let last = null;
+    const schedule = (samples, rate) => {
+      if (!samples || !samples.length || speakSession.generation() !== gen) return;
+      const f32 = new Float32Array(samples.length);
+      for (let i = 0; i < samples.length; i++) {
+        const s = samples[i];
+        f32[i] = s < 0 ? s / 32768 : s / 32767;
+      }
+      const ab = speakCtx.createBuffer(1, f32.length, rate || 24000);
+      ab.getChannelData(0).set(f32);
+      const src = speakCtx.createBufferSource();
+      src.buffer = ab;
+      src.connect(speakCtx.destination);
+      const now = speakCtx.currentTime;
+      if (nextAt < now + 0.02) nextAt = now + 0.03;
+      src.start(nextAt);
+      nextAt += ab.duration;
+      sources.push(src);
+      last = src;
+      started = true;
+    };
+    try {
+      while (speakSession.generation() === gen) {
+        const step = await reader.read();
+        if (step.done) break;
+        collect(step.value);
+        const out = pump.push(step.value);
+        if (out && out.unsupported) {
+          if (!started) { await drain(); return blobPlay(); }
+          try { reader.cancel(); } catch (err) { /* 已取消 */ }
+          break;
+        }
+        if (out && out.samples) schedule(out.samples, out.rate);
+      }
+    } catch (e) {
+      try { reader.cancel(); } catch (err) { /* 已取消 */ }
+      if (speakSession.generation() !== gen) return false;
+      if (!started && collected.length) return blobPlay();
+      if (!started) return false;
+    }
+    if (speakSession.generation() !== gen) { stopPcmSources(); return false; }
+    if (!started) { await drain(); return blobPlay(); }
+    const waitMs = Math.max(80, Math.ceil((nextAt - speakCtx.currentTime) * 1000) + 60);
+    await new Promise((resolve) => {
+      let settled = false;
+      const finish = () => { if (settled) return; settled = true; clearTimeout(timer); clearInterval(poll); resolve(); };
+      if (last) last.onended = finish;
+      const timer = setTimeout(finish, waitMs);
+      const poll = setInterval(() => { if (speakSession.generation() !== gen) finish(); }, 40);
+    });
+    return speakSession.generation() === gen;
+  }
+  /* 一句的音频。文静的流是 WAV：头之后的第一块 PCM 立刻排进 AudioContext，不等这一句合成完。
+     没有 ReadableStream / AudioContext，或上游改回整段 mp3 时，退回 arrayBuffer 再播。 */
+  async function playFlux(r, gen) {
+    if (!r || speakSession.generation() !== gen) return false;
+    const ct = (r.headers.get("content-type") || "").toLowerCase();
+    if (!r.ok || ct.indexOf("audio/") !== 0) return false;
+    if (canStreamWav(r, ct)) return playWavStream(r, gen);
+    let buf;
+    try { buf = await r.arrayBuffer(); }
+    catch (e) { return false; }
+    if (speakSession.generation() !== gen) return false;
+    return playBuffered(buf, ct, gen);
+  }
+  function openSpeak(text) {
+    const o = own();
+    if (!o) return Promise.resolve(null);
+    const ctl = new AbortController();
+    speakCtls.push(ctl);
+    return fetch(API + "/api/owner/voice/speak", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + o.token },
+      body: JSON.stringify({ text: text }),
+      signal: ctl.signal, cache: "no-store", credentials: "same-origin"
+    }).catch(() => null);
+  }
+  function releaseSpeakDuck(gen) {
+    if (speakSession.generation() !== gen) return;
+    bgmDuck = false;
+    bgmApplyVolume();
   }
   async function say(text) {
     const raw = String(text || "").trim();
     if (!raw) return;
-    if (voiceStatus.deepgram && own()) {
-      const ok = await playFlux(raw);
-      if (ok) return;
+    stopSpeaking();
+    const begun = speakSession.begin(raw);
+    const gen = begun.gen;
+    const parts = begun.parts;
+    if (!parts.length) return;
+    if (!(voiceStatus.deepgram && own())) {
+      if (!sayBrowser(raw)) releaseSpeakDuck(gen);
+      return;
     }
-    sayBrowser(raw);
+    bgmDuck = true; bgmApplyVolume();
+    const jobs = new Array(parts.length);
+    const kick = (i) => {
+      if (i < 0 || i >= parts.length || jobs[i]) return;
+      jobs[i] = openSpeak(parts[i]);
+    };
+    kick(0);
+    for (let i = 0; i < parts.length; i++) {
+      if (speakSession.generation() !== gen) return;
+      kick(i + 1);
+      let resp = null;
+      try { resp = await jobs[i]; }
+      catch (e) { resp = null; }
+      if (speakSession.generation() !== gen) return;
+      const ok = resp ? await playFlux(resp, gen) : false;
+      if (speakSession.generation() !== gen) return;
+      if (!ok) {
+        abortSpeakFetches();
+        if (!sayBrowser(parts.slice(i).join(""))) releaseSpeakDuck(gen);
+        return;
+      }
+    }
+    releaseSpeakDuck(gen);
   }
   async function commitUtterance(text) {
     // 流式 / 实时通话的定稿与右侧输入框同一条发送：服务端先叫醒幕僚长，响应里带回快速回复。

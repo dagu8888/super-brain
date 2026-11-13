@@ -20,6 +20,8 @@ from urllib.parse import urlencode, urlparse
 SPEAK_VERSION = "v2"
 TTS_MODEL = "flux-wenjing-zh"
 TTS_NAME = "文静"
+# 单次朗读上限。前端按句切开，通常远小于此；这里只防止一次请求把整篇塞给上游。
+SPEAK_TEXT_MAX = 4000
 LISTEN_MODEL = "nova-3"
 LISTEN_LANGUAGE = "zh"
 API_HOST = "api.deepgram.com"
@@ -316,14 +318,19 @@ def iter_flux_wav(text, key):
 
 
 def synthesize(text, key):
-    """返回 (chunks, content_type) 或 (None, reason)。chunks 是字节迭代，可能只有一段。"""
+    """返回 (chunks, content_type) 或 (None, reason)。chunks 是字节迭代，可能只有一段。
+
+    超过 SPEAK_TEXT_MAX 的尾巴丢掉。流式时先交出 WAV 头，随后每到一块 PCM 就交出一块。
+    """
     text = str(text or "").strip()
     if not text:
         return None, "empty"
+    if len(text) > SPEAK_TEXT_MAX:
+        text = text[:SPEAK_TEXT_MAX]
     if not key:
         return None, "unconfigured"
     try:
-        iterator = iter_flux_wav(text[:500], key)
+        iterator = iter_flux_wav(text, key)
         first = next(iterator)
 
         def chain():
@@ -333,7 +340,7 @@ def synthesize(text, key):
 
         return chain(), "audio/wav"
     except Exception:
-        audio, ctype = _batch_speak(text[:500], key)
+        audio, ctype = _batch_speak(text, key)
         if not audio:
             return None, "failed"
         return [audio], ctype or "audio/mpeg"
