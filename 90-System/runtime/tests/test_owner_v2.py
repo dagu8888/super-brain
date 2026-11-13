@@ -302,7 +302,14 @@ def test_commander_hook():
     m2 = message_bus.post_message(conn, "dsh-chief", "普通消息", to="grok-chief")
     check("非大古消息不转发", conn.execute("SELECT COUNT(*) FROM webhook_outbox WHERE msg_id=?", (m2["msg_id"],)).fetchone()[0] == 0)
     chat = console_v2.chat_thread(conn)
-    check("/api/chat 只含大古↔幕僚长", {m["from_agent"] for m in chat["messages"]} == {"dagu-owner"} and len(chat["messages"]) == 2)
+    owners = [m for m in chat["messages"] if m["from_agent"] == "dagu-owner"]
+    quicks = [m for m in chat["messages"] if m["from_agent"] == "local-quick"]
+    check("/api/chat 只有大古和快速回复，不含其他发件人",
+          {m["from_agent"] for m in chat["messages"]} <= {"dagu-owner", "local-quick"} and len(owners) == 2,
+          {m["from_agent"] for m in chat["messages"]})
+    check("/api/chat 每条大古消息都有快速回复且不冒充幕僚长",
+          len(quicks) == 2 and all(q["from_agent"] != "grok-chief" and "快速回复（本地小模型）" in (q.get("text") or "") for q in quicks),
+          len(quicks))
     check("/api/chat 带投递状态", any((m.get("hook") or {}).get("sent_at") for m in chat["messages"]))
     srv.shutdown()
 

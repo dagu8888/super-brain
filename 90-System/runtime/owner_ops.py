@@ -809,4 +809,8 @@ def audit_detail(action, args, res):
     r = {k: v for k, v in (res or {}).items() if k not in (
         "token", "code", "text", "devices", "items", "audit", "value", "ticket",
         "message", "group", "wakes")}
+    qr = r.get("quick_reply")
+    if isinstance(qr, dict):
+        r["quick_reply"] = {"msg_id": qr.get("msg_id"), "engine": qr.get("engine"),
+                            "elapsed_ms": qr.get("elapsed_ms"), "label": qr.get("label")}
     return {"args": a, "result": r}

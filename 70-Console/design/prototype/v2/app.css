@@ -433,6 +433,11 @@ button.pill { cursor: pointer; }
 .bub .meta { display: flex; gap: 8px; align-items: center; margin-top: 4px; font-size: 10.5px; color: var(--ink3); white-space: normal; }
 .bub .meta button { border: 0; background: none; color: var(--cyan); padding: 0; font-size: 10.5px; }
 .bub .quote { display: block; font-size: 11.5px; color: var(--ink3); border-left: 2px solid var(--line2); padding-left: 6px; margin-bottom: 4px; max-height: 3em; overflow: hidden; }
+.bub.chief { box-shadow: inset 3px 0 0 rgba(179, 164, 224, .85); }
+.bub.quick { background: rgba(126, 214, 168, .08); border: 1px dashed rgba(126, 214, 168, .62); box-shadow: none; }
+.bub .who-tag { display: block; width: fit-content; margin: 0 0 4px; padding: 0 7px; border-radius: 999px; font-size: 10.5px; letter-spacing: .02em; line-height: 1.7; }
+.bub .who-tag.quick { color: #d7ffeb; background: rgba(126, 214, 168, .18); }
+.bub .who-tag.chief { color: #efe8ff; background: rgba(179, 164, 224, .2); }
 .bub.fresh { animation: bubIn .35s ease-out; }
 @keyframes bubIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .hook { color: var(--ink3); } .hook.ok { color: #9ff0c4; } .hook.warn { color: #ffd38a; } .hook.bad { color: #ff9aa4; }

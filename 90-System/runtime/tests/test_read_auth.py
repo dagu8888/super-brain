@@ -193,7 +193,7 @@ def test_http():
         code, raw, obj, _ = call(port, "/healthz", headers={"Authorization": "Bearer nope"})
         check("healthz 带错令牌仍公开", code == 200 and obj and obj.get("ok"))
         code, raw, _, _ = call(port, "/console/prototype/index.html")
-        check("静态页仍公开", code == 200 and b"v2/app.js?v=2.8.2" in raw, code)
+        check("静态页仍公开", code == 200 and b"v2/app.js?v=2.8.3" in raw, code)
 
         code, raw, obj, _ = call(port, "/api/messages", headers={"Authorization": "Bearer nope"})
         check("错令牌 401", code == 401 and MARKER.encode() not in raw)
@@ -278,7 +278,7 @@ def test_frontend_and_doc():
     js = (ROOT / "70-Console/design/prototype/v2/app.js").read_text(encoding="utf-8")
     ops = (ROOT / "70-Console/design/prototype/ops.js").read_text(encoding="utf-8")
     doc = (ROOT / "40-Agents/读接口鉴权-迁移说明.md").read_text(encoding="utf-8")
-    check("静态版本是 2.8.2", "v2/app.js?v=2.8.2" in html and "v2/app.css?v=2.8.2" in html and "v=3.0" not in html)
+    check("静态版本是 2.8.3", "v2/app.js?v=2.8.3" in html and "v2/app.css?v=2.8.3" in html and "v=3.0" not in html)
     check("读请求带会话", 'credentials: "same-origin"' in js and "withCredentials: true" in js)
     check("401 可见且不冒充没有风险", "这不是「没有风险」" in js and "need_auth" not in js or "未授权" in js)
     check("前端不把令牌放进 SSE 查询", "token=" not in js and "?token" not in js)
