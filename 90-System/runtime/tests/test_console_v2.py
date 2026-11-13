@@ -244,9 +244,12 @@ def _req(port, path, method="GET", data=None, headers=None):
         return e.code, e.read(), dict(e.headers)
 
 
-def _sse_collect(port, query, seconds=3.0):
+def _sse_collect(port, query, seconds=3.0, headers=None):
     s = socket.create_connection(("127.0.0.1", port), timeout=seconds + 2)
-    s.sendall(("GET /api/stream?%s HTTP/1.1\r\nHost: x\r\nAccept: text/event-stream\r\n\r\n" % query).encode())
+    extra = ""
+    if headers:
+        extra = "".join("%s: %s\r\n" % (k, v) for k, v in headers.items())
+    s.sendall(("GET /api/stream?%s HTTP/1.1\r\nHost: x\r\nAccept: text/event-stream\r\n%s\r\n" % (query, extra)).encode())
     s.settimeout(0.5)
     buf, end = b"", time.time() + seconds
     while time.time() < end:
@@ -282,27 +285,35 @@ def test_http(d):
         if not up:
             return
         code, body, _ = _req(port, "/api/dashboard")
-        check("HTTP dashboard 免口令 200", code == 200 and json.loads(body)["ok"], code)
+        check("HTTP dashboard 匿名 401", code == 401 and b'"data"' not in body, code)
         code, body, _ = _req(port, "/api/server")
-        check("HTTP server 免口令 200", code == 200 and json.loads(body)["ok"], code)
+        check("HTTP server 匿名 401", code == 401 and b'"data"' not in body, code)
+        auth = {"Authorization": "Bearer " + CHIEF}
+        code, body, _ = _req(port, "/api/dashboard", headers=auth)
+        check("令牌可读 dashboard", code == 200 and json.loads(body)["ok"], code)
+        code, body, _ = _req(port, "/api/server", headers=auth)
+        check("令牌可读 server", code == 200 and json.loads(body)["ok"], code)
         code, _, _ = _req(port, "/api/dashboard", method="POST", data=b"{}",
                           headers={"Content-Type": "application/json"})
         check("POST 新只读接口不可写（401/404）", code in (401, 404), code)
         code, _, _ = _req(port, "/cmd", method="POST", data=json.dumps({"cmd": "msg", "args": {"text": "x"}}).encode(),
                           headers={"Content-Type": "application/json"})
         check("/cmd 无口令 401", code == 401, code)
-        # SSE：观察模式能看到点对点消息；普通免口令连接看不到（行为不变）；带 instance 无口令 401
+        # SSE：观察模式要凭证才能看到点对点消息；匿名 401；带 instance 无口令仍 401
         conn = sqlite3.connect(str(db))
         now = int(time.time())
         msg(conn, "live1", "maus2-chief", "MAUS二号@笔记本", "grok-chief", "实时直达", now)
+        msg(conn, "live-private", "maus2-chief", "MAUS二号@笔记本", "dsh-chief", "旁人私信", now)
         conn.commit()
         conn.close()
-        raw = _sse_collect(port, "observe=1&since=%d" % (now - 2), 2.5)
-        check("SSE observe=1 收到点对点消息", b"live1" in raw and b"event: msg" in raw, raw[:200])
-        raw = _sse_collect(port, "since=%d" % (now - 2), 2.0)
-        check("SSE 非观察模式不推点对点消息", b"live1" not in raw and b"connected" in raw, raw[:200])
+        raw = _sse_collect(port, "observe=1&since=%d" % (now - 2), 1.2)
+        check("匿名 SSE observe 401", b"401" in raw[:80] and b"live1" not in raw and b"live-private" not in raw, raw[:120])
+        raw = _sse_collect(port, "observe=1&since=%d" % (now - 2), 2.5, auth)
+        check("已鉴权 SSE observe=1 收到点对点消息", b"live1" in raw and b"live-private" in raw and b"event: msg" in raw, raw[:240])
+        raw = _sse_collect(port, "since=%d" % (now - 2), 2.0, auth)
+        check("已鉴权但非观察模式只收发给自己的", b"live1" in raw and b"live-private" not in raw and b"connected" in raw, raw[:240])
         raw = _sse_collect(port, "observe=1&instance=%s" % urllib.request.quote("幕僚长@云端"), 1.0)
-        check("SSE 带 instance 无口令仍 401", b"401" in raw[:40], raw[:80])
+        check("SSE 带 instance 无口令仍 401", b"401" in raw[:80], raw[:120])
         # 静态资源：PWA、图标、ETag 304
         code, body, hdr = _req(port, "/console/prototype/index.html")
         html = body.decode()

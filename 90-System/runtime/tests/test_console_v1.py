@@ -224,8 +224,16 @@ def _get(port, path, token=VIEWER):
     req = urllib.request.Request(
         "http://127.0.0.1:%s%s" % (port, path),
         headers={"Authorization": "Bearer " + token})
-    with urllib.request.urlopen(req, timeout=8) as res:
-        return res.status, json.loads(res.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=8) as res:
+            return res.status, json.loads(res.read().decode())
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode()
+        try:
+            body = json.loads(raw or "{}")
+        except Exception:
+            body = {}
+        return e.code, body
 
 
 def _sse(port, instance):
@@ -248,8 +256,16 @@ def _sse(port, instance):
 
 def _get_plain(port, path):
     req = urllib.request.Request("http://127.0.0.1:%s%s" % (port, path))
-    with urllib.request.urlopen(req, timeout=8) as res:
-        return res.status, json.loads(res.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=8) as res:
+            return res.status, json.loads(res.read().decode())
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode()
+        try:
+            body = json.loads(raw or "{}")
+        except Exception:
+            body = {}
+        return e.code, body
 
 
 def _post_cmd(port, token=None):
@@ -289,13 +305,13 @@ def test_http_and_pages(db_path, port):
     code, health = _get(port, "/healthz", token="x")
     check("healthz 免鉴权", code == 200 and health.get("ok"), health)
     code, ov = _get_plain(port, "/api/overview")
-    check("只读 overview 免口令", code == 200 and ov.get("ok") is not False, ov if code != 200 else "ok")
+    check("匿名 overview 401", code == 401 and ov.get("need_auth") is True and "data" not in ov, code)
     code, ov = _get(port, "/api/overview", token="nope")
-    check("错口令仍可只读", code == 200 and "data" in ov, code)
+    check("错口令不能只读", code == 401 and "data" not in ov, code)
     cmd_code, _body = _post_cmd(port, token=None)
     check("写入 /cmd 无口令 401", cmd_code == 401, cmd_code)
     pub = _sse_query(port, "since=1")
-    check("操作台 SSE 免口令", b"200" in pub.split(b"\r\n", 1)[0] or b"connected" in pub, pub[:180])
+    check("匿名 SSE 401", b"401" in pub[:80] and b"connected" not in pub, pub[:180])
     denied = _sse_query(port, urllib.parse.urlencode({"instance": "幕僚长@云端", "since": "1"}))
     check("带 instance 的 SSE 无口令 401", b"401" in denied[:80], denied[:120])
     text = urllib.request.urlopen("http://127.0.0.1:%s/console/prototype/v1.html" % port, timeout=8).read().decode()
@@ -357,7 +373,15 @@ def shoot(port):
             page.locator('#nav button[data-page="%s"]' % page_id).click()
 
         page.goto(url)
-        page.wait_for_selector("#feed")
+        try:
+            page.wait_for_selector("#feed", timeout=4000)
+        except Exception:
+            body = page.inner_text("body")
+            check("旧版操作台匿名时显示未授权", "未授权" in body and "没有风险" in body, body[:180])
+            page.screenshot(path=str(art / "console-v1-unauthorized.png"))
+            browser.close()
+            print("SKIP 业务数据截图（匿名不再返回业务数据）")
+            return
         page.screenshot(path=str(art / "console-overview.png"))
         shots.append("console-overview.png")
         nav("agents")

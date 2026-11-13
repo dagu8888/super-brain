@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Super-Brain · 协作中枢 v2</title>
-<meta name="description" content="Super-Brain 多 Agent 协作网操作台：查看免口令，写操作每日一次口令">
+<meta name="description" content="Super-Brain 多 Agent 协作网操作台：查看走已有主人会话，写操作每日一次口令">
 <meta name="theme-color" content="#070b14">
 <meta name="color-scheme" content="dark">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -16,7 +16,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="v2/icons/favicon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="v2/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="v2/app.css?v=2.8.0">
+<link rel="stylesheet" href="v2/app.css?v=2.8.1">
 <script>
 try {
   var root = document.documentElement;
@@ -42,14 +42,14 @@ try {
     <span class="pill" id="conn" data-s="idle" role="status" aria-live="polite"><i></i><b>连接中</b></span>
     <span class="pill pill-ghost" id="health-pill" data-s="idle"><i></i><b>服务器检查中</b></span>
     <span class="clock" id="clock" title="北京时间">--:--:--<small>北京时间</small></span>
-    <button class="pill pill-ghost" id="owner-pill" type="button" data-s="idle" title="查看免口令；今天第一次写操作需输入口令"><i></i><b>只读</b></button>
+    <button class="pill pill-ghost" id="owner-pill" type="button" data-s="idle" title="正在确认主人设备会话"><i></i><b>未确认</b></button>
     <button class="chip" id="btn-voice" type="button" title="语音设置">语音</button>
     <button class="chip" id="btn-bgm" type="button" aria-pressed="true" title="背景音乐，拉夫劳伦超长版" aria-label="背景音乐，拉夫劳伦超长版">音乐 开</button>
     <a class="pill pill-ghost link-v1" href="v1.html" title="打开旧版 v1 操作台">旧版 v1</a>
   </div>
   <audio id="welcome" preload="auto">
-    <source src="v2/audio/welcome-dagu-wenjing.ogg?v=2.8.0" type="audio/ogg">
-    <source src="v2/audio/welcome-dagu-wenjing.mp3?v=2.8.0" type="audio/mpeg">
+    <source src="v2/audio/welcome-dagu-wenjing.ogg?v=2.8.1" type="audio/ogg">
+    <source src="v2/audio/welcome-dagu-wenjing.mp3?v=2.8.1" type="audio/mpeg">
   </audio>
   <audio id="bgm" loop preload="none">
     <source src="v2/audio/bgm.ogg" type="audio/ogg">
@@ -319,8 +319,8 @@ try {
   </form>
 </dialog>
 
-<script src="v2/voice-entry.js?v=2.8.0" defer></script>
-<script src="v2/roster.js?v=2.8.0" defer></script>
-<script src="v2/app.js?v=2.8.0" defer></script>
+<script src="v2/voice-entry.js?v=2.8.1" defer></script>
+<script src="v2/roster.js?v=2.8.1" defer></script>
+<script src="v2/app.js?v=2.8.1" defer></script>
 </body>
 </html>

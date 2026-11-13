@@ -16,6 +16,8 @@ partially_stale: true
 
 ## 1. 鉴权
 
+> 2026-11-13 P0-1：除 `GET /healthz` 与 `/console/` 静态资源外，读接口不再匿名返回业务数据。主人会话（`sb_owner` cookie 或等价 Bearer）、带 scope 的 Bearer，或与现有令牌的哈希比对可以通过。未带凭证返回 401。紧急回滚：`SB_ALLOW_ANON_READ=1`。详见 `40-Agents/读接口鉴权-迁移说明.md`。成功响应的路径和字段保持不变。
+
 | 口令类型 | 配置位置 | 权限 |
 |---|---|---|
 | chief 口令 ×7 | `api_tokens.json` → `tokens` | 七指令 + 只读接口 |
@@ -179,14 +181,14 @@ data: {"event_id":"evt_xxx","source":"trae-chief","type":"task_delegated","prior
 
 ## 操作台 v2 只读接口（2026-11-11，console_v2.py）
 
-均为 GET、免口令、只读；写入仍只走 `POST /cmd` 并要 chief 口令。
+均为 GET、只读，且要主人会话或令牌；字段与 2.8.0 相同。写入仍只走 `POST /cmd` 并要 chief 口令。
 
 | 端点 | 说明 |
 |---|---|
 | `/api/dashboard` | KPI（在线/近1h/24h/累计消息、事件、队列）、各 Agent 异常计数、点名历史（每节点首条回复耗时、重复回复数、未回名单）、近24h分时消息与消息连线、最近 80 条消息 |
 | `/api/server` | 服务器健康：开机时长、中台服务运行时长、负载、内存、磁盘、状态库体积、TLS 证书到期（读本地 Caddy 证书文件，不联网） |
 | `/api/messages?agent=<id>&limit=` | 某 Agent 发出或收到（含其实例名）的消息，新→旧 |
-| `/api/stream?observe=1` | SSE 观察模式：不带 instance 时推送全部消息（与 `/api/messages` 同口径）；带 instance 仍要口令 |
+| `/api/stream?observe=1` | SSE 观察模式：不带 instance 时推送全部消息（与 `/api/messages` 同口径），但不再免口令；带 instance 仍要节点令牌 |
 
 异常口径：死信=点名该 Agent（payload.to_agent / payload.to 经名册折回）的 dead 任务（5 分钟统计一次）；
 未认领=点名该 Agent、pending 且超过 10 分钟无人领；心跳过期=曾接入但超过 5 分钟无在场信号（实例逐个计）。

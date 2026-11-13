@@ -4,7 +4,7 @@
 令牌只从环境变量 SUPERBRAIN_GATEWAY_TOKEN 读取，不写文件、不打印。
 用法：
   chief_reply.py --to dagu-owner --text "收到，已安排" [--reply-to msg_xxx]
-  chief_reply.py --inbox [--limit 20]          # 看最近的大古 ↔ 幕僚长对话（只读，免口令）
+  chief_reply.py --inbox [--limit 20]          # 看最近的大古 ↔ 幕僚长对话（只读，带已有令牌）
   chief_reply.py --work "在做什么"              # 自报忙碌（控制台显示 忙碌 · 在做什么）
   chief_reply.py --work-clear                   # 做完清除
   chief_reply.py --approval "标题" --detail "..." [--options 同意,驳回,改期] [--assist url|text|vault] [--project id]
@@ -44,8 +44,17 @@ def cmd(name, args):
 
 
 def get(path):
-    with urllib.request.urlopen(GATEWAY + path, timeout=20) as r:
-        return json.loads(r.read().decode())
+    req = urllib.request.Request(
+        GATEWAY + path,
+        headers={"Authorization": "Bearer " + _token(), "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        try:
+            return json.loads(e.read().decode())
+        except Exception:
+            return {"ok": False, "error": "HTTP %s" % e.code}
 
 
 def bj(ts):
@@ -69,7 +78,12 @@ def main():
     a = ap.parse_args()
 
     if a.inbox:
-        d = get("/api/chat?limit=%d" % a.limit)["data"]
+        d = get("/api/chat?limit=%d" % a.limit)
+        if not d.get("ok"):
+            print(json.dumps({k: d.get(k) for k in ("ok", "error", "need_auth") if k in d},
+                             ensure_ascii=False))
+            return sys.exit(1)
+        d = d["data"]
         for m in d["messages"]:
             who = "大古" if m["from_agent"] == "dagu-owner" else (m.get("from_instance") or "幕僚长")
             print("[%s 北京时间] %s %s：%s" % (bj(m["created_at"]), m["msg_id"], who, m["text"]))

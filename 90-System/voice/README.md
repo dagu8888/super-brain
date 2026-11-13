@@ -21,4 +21,4 @@
 - 流式：同一台香港 Moonshine 边车做滚动识别，可随时打断。本机不装 ZipVoice / Kokoro。没有本地 TTS 时，朗读改用 Deepgram 文静；没配密钥就退回浏览器语音。
 - 实时：服务端代理 Nova-3（`language=zh`）和 Flux `/v2/speak`（`model=flux-wenjing-zh`）。对话仍发给幕僚长 `grok-chief`，不使用 Deepgram Voice Agent。
 - 欢迎语是静态文件 `70-Console/design/prototype/v2/audio/welcome-dagu-wenjing.mp3`（可再配同名 ogg），文案「大古，欢迎回来」。文件由幕僚长用文静生成后放进该路径。没有文件就跳过欢迎语，背景音乐照样按默认开播。
-- 密钥：环境变量 `DEEPGRAM_API_KEY`，或 `/root/provision/deepgram.env`（`chmod 600`）。模板见 `deepgram.env.example`。Gemini Live、ElevenLabs、阿里云百炼只预留槽位。查看免口令，保存要当日口令。
+- 密钥：环境变量 `DEEPGRAM_API_KEY`，或 `/root/provision/deepgram.env`（`chmod 600`）。模板见 `deepgram.env.example`。Gemini Live、ElevenLabs、阿里云百炼只预留槽位。查看语音状态走读接口鉴权（主人会话或令牌）；保存密钥仍要当日口令。

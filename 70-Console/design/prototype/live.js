@@ -82,7 +82,7 @@
   }
 
   async function apiGet(path, token) {
-    const res = await fetch(API + path, { headers: { Authorization: "Bearer " + token } });
+    const res = await fetch(API + path, { headers: { Authorization: "Bearer " + token }, credentials: "same-origin", cache: "no-store" });
     if (res.status === 401) throw new Error("口令无效");
     if (!res.ok) throw new Error("HTTP " + res.status);
     const body = await res.json();
@@ -96,6 +96,8 @@
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + chiefToken },
       body: JSON.stringify({ cmd, args: args || {} }),
+      credentials: "same-origin",
+      cache: "no-store",
     });
     const body = await res.json().catch(() => ({ ok: false, error: "响应解析失败" }));
     if (res.status === 401) throw new Error("指挥口令无效（只读口令无指挥权）");
@@ -234,7 +236,7 @@
     stopSSE();
     const since = lastEventTs || Math.floor(Date.now() / 1000) - 30;
     try {
-      es = new EventSource(`${API}/api/stream?token=${encodeURIComponent(token)}&since=${since}`);
+      es = new EventSource(`${API}/api/stream?token=${encodeURIComponent(token)}&since=${since}`, { withCredentials: true });
     } catch (e) {
       startPolling(token);
       return;

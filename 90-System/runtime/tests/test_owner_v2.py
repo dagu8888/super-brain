@@ -349,7 +349,7 @@ def test_http():
         J = {"Content-Type": "application/json"}
         for path in ("/api/chat", "/api/projects", "/api/approvals", "/api/audit"):
             c, b = _req(port, path)
-            check("GET %s 免口令 200" % path, c == 200 and b.get("ok"), c)
+            check("GET %s 匿名 401" % path, c == 401 and b.get("need_auth") and "data" not in b, c)
         c, b = _req(port, "/api/owner/act", "POST", json.dumps({"action": "msg", "args": {"to": "grok-chief", "text": "x"}}).encode(), J)
         check("写操作无令牌 401", c == 401 and b.get("need_unlock"), c)
         c, b = _req(port, "/api/owner/act", "POST", json.dumps({"action": "msg", "args": {"to": "grok-chief", "text": "x"}}).encode(),
@@ -386,9 +386,9 @@ def test_http():
         c, b = _req(port, "/api/owner/unlock", "POST", json.dumps({"phrase": "错的口令"}).encode(), J)
         check("HTTP 错口令 401", c == 401 and not b.get("token"), c)
         # 审计不含口令原文
-        c, b = _req(port, "/api/audit")
+        c, b = _req(port, "/api/audit", headers=dict(J, Authorization="Bearer " + daily))
         aud = json.dumps(b, ensure_ascii=False)
-        check("审计含 unlock 且不含口令原文", "unlock" in aud and PHRASE_A not in aud and PHRASE_B not in aud)
+        check("审计含 unlock 且不含口令原文", "unlock" in aud and PHRASE_A not in aud and PHRASE_B not in aud and daily not in aud)
         c, b, h = _req(port, "/api/owner/pair", "POST",
                        json.dumps({"code": "  " + PHRASE_A + "  ", "device_name": "旧配对框"}).encode(), J, with_headers=True)
         check("旧配对框输入当日口令也可解锁", c == 200 and b.get("ok") and b.get("token") and b.get("expires_at"), c)
@@ -414,11 +414,11 @@ def test_http():
         A = dict(J, Authorization="Bearer " + dev)
         c, b = _req(port, "/api/owner/act", "POST", json.dumps({"action": "msg", "args": {"to": "grok-chief", "text": "从手机发"}}).encode(), A)
         check("配对设备可发消息给幕僚长", c == 200 and b.get("ok"), b)
-        c, b = _req(port, "/api/chat")
+        c, b = _req(port, "/api/chat", headers=A)
         check("对话线程出现这条", any(m["text"] == "从手机发" for m in b["data"]["messages"]))
         c, b = _req(port, "/api/owner/act", "POST", json.dumps({"action": "vault_put", "args": {"name": "k1", "purpose": "测", "value": "VAL-xyz-123"}}).encode(), A)
         check("HTTP 存口令", c == 200 and b.get("ok") and "VAL-xyz-123" not in json.dumps(b), b)
-        c, b = _req(port, "/api/audit")
+        c, b = _req(port, "/api/audit", headers=A)
         aud = json.dumps(b, ensure_ascii=False)
         check("审计有记录且不含口令值/令牌", "vault_put" in aud and "VAL-xyz-123" not in aud and dev not in aud)
         c, b = _req(port, "/api/owner/act", "POST", json.dumps({"action": "phase_accept", "args": {"project_id": "xauusd-desk", "seq": 2, "evidence": "定时任务列表截图路径"}}).encode(), A)

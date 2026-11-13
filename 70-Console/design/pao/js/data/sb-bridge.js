@@ -75,7 +75,8 @@
     api: function (path) {
       return fetch(path, {
         headers: { Authorization: 'Bearer ' + SB.token },
-        cache: 'no-store'
+        cache: 'no-store',
+        credentials: 'same-origin'
       }).then(function (r) {
         if (r.status === 401) { var e = new Error('无效口令'); e.code = 401; throw e; }
         if (!r.ok) { var e2 = new Error('HTTP ' + r.status); e2.code = r.status; throw e2; }
@@ -231,7 +232,7 @@
       var since = Math.floor((SB.lastLoadAt || Date.now()) / 1000) - 60;
       var url = '/api/stream?token=' + encodeURIComponent(SB.token) + '&since=' + since;
       var es;
-      try { es = new EventSource(url); } catch (e) { SB._startPolling(); return; }
+      try { es = new EventSource(url, { withCredentials: true }); } catch (e) { SB._startPolling(); return; }
       SB._es = es;
 
       function onEvent(ev) {
