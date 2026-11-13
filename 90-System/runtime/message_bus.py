@@ -164,9 +164,17 @@ def post_message(conn, from_agent, text, to="all", kind="chat",
             "text": text, "reply_to": reply_to, "thread_id": thread,
             "created_at": now,
             "note": "已入消息总线，不进 events 路由"}
+    # webhook 先入队并立刻踢后台投递。快速回复在这之后，失败也不回头影响这条消息。
     try:
         import commander_hook
         commander_hook.enqueue(conn, out)
+    except Exception:
+        pass
+    try:
+        import quick_reply
+        quick = quick_reply.maybe_reply(conn, out)
+        if quick:
+            out["quick_reply"] = quick
     except Exception:
         pass
     return out

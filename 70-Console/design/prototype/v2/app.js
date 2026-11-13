@@ -1,4 +1,4 @@
-/* Super-Brain 协作中枢 v2.8.2（查看走已有主人会话 cookie；写操作仍是每台设备每天第一次口令）
+/* Super-Brain 协作中枢 v2.8.3（查看走已有主人会话 cookie；写操作仍是每台设备每天第一次口令）
    数据源：/api/dashboard（KPI/异常/点名/消息）、/api/server（服务器健康）、/api/relations、
           /api/agents/{id}、/api/messages?agent=、/api/tasks/{id}、/api/knowledge、/api/stream（SSE）。
    纪律：健康在线 = 5 分钟内心跳且近期消息有回执；心跳在但超过约 60 秒无回执 = 降级（在场但回执失败），
@@ -33,7 +33,7 @@
     es: null, esFails: 0, esTimer: null, pollTimer: null, mode: "idle",
     graph: null, view: null, viewKind: null, prevKpi: {}, selected: null,
     instMap: {}, agentById: {}, lastActivity: 0, kbQ: "",
-    chat: [], chatIds: new Set(), chatNames: new Set([CHAT_PEER]), chatReply: null, chatUnread: 0, chatHook: null,
+    chat: [], chatIds: new Set(), chatNames: new Set([CHAT_PEER]), chatReply: null, chatUnread: 0, chatHook: null, chatQuick: true,
     projects: [], apPrev: null, galaxyDocs: null, galaxyTotal: 0,
     authDenied: false, authChecked: false,
   };
@@ -124,6 +124,7 @@
     if (id === OWNER) return "大古";
     if (!id) return "—";
     if (id === "all") return "全体";
+    if (id === "local-quick") return "快速回复";
     const a = S.agentById[id];
     if (a) return a._label;
     if (S.instMap[id]) return id.split("@")[0];
@@ -1132,7 +1133,7 @@
       if (S.kbQ) galaxyView.setQuery(S.kbQ);
     };
     const three = window.THREE ? Promise.resolve() : loadScript("../vendor/three.min.js?v=r150");
-    three.catch(() => null).then(() => (window.SBGALAXY ? null : loadScript("v2/galaxy.js?v=2.8.2"))).then(boot).catch((e) => showGalaxyError((e && e.message) || "星图加载失败"));
+    three.catch(() => null).then(() => (window.SBGALAXY ? null : loadScript("v2/galaxy.js?v=2.8.3"))).then(boot).catch((e) => showGalaxyError((e && e.message) || "星图加载失败"));
   }
   function galaxyFsOn() {
     return document.documentElement.classList.contains("gal-fs");
@@ -1467,16 +1468,32 @@
   }
 
   /* ---------- 指挥官对话（A）：大古 ↔ 幕僚长，SSE 实时 ----------
-     发送 = /api/owner/act msg → 消息总线；服务端再经 webhook 转达指挥官（未配置时只入总线）。
-     幕僚长用 grok-chief 令牌经 /cmd msg 回复，SSE 推到这里。 */
-  const isChat = (m) => (m.from_agent === OWNER && (m.to === CHAT_PEER || S.chatNames.has(m.to))) || (m.from_agent === CHAT_PEER && m.to === OWNER);
+     发送 = /api/owner/act msg → 消息总线；服务端先把 webhook 入队，再附一条快速回复。
+     右侧聊天框和实时通话的定稿都走 sendChat。幕僚长用 grok-chief 令牌经 /cmd msg 回复，SSE 推到这里。
+     快速回复的发件人是 local-quick，不能当成幕僚长。 */
+  const QUICK_ID = "local-quick";
+  const QUICK_LABEL = "快速回复（本地小模型）";
+  const isQuick = (m) => !!(m && (m.from_agent === QUICK_ID || String(m.from_instance || "").indexOf(QUICK_LABEL) >= 0));
+  const isChat = (m) => (m.from_agent === OWNER && (m.to === CHAT_PEER || S.chatNames.has(m.to))) || (m.from_agent === CHAT_PEER && m.to === OWNER) || (isQuick(m) && m.to === OWNER);
+  function chatRank(m) {
+    if (m.from_agent === OWNER) return 0;
+    if (isQuick(m)) return 1;
+    return 2;
+  }
+  function chatBody(m) {
+    if (!isQuick(m)) return m.text || "";
+    const lines = String(m.text || "").split("\n");
+    if (lines[0].indexOf(QUICK_LABEL) >= 0) return lines.slice(1).join("\n").trim();
+    return m.text || "";
+  }
   function addChat(m, live) {
     if (!m || !m.msg_id || S.chatIds.has(m.msg_id)) return false;
     S.chatIds.add(m.msg_id);
     m._fresh = !!live;
     S.chat.push(m);
-    S.chat.sort((a, b) => (a.created_at || 0) - (b.created_at || 0));
+    S.chat.sort((a, b) => (a.created_at || 0) - (b.created_at || 0) || chatRank(a) - chatRank(b));
     if (live && m.from_agent === CHAT_PEER) onChiefReply(m);
+    else if (live && isQuick(m)) onQuickReply(m);
     return true;
   }
   async function loadChat(before) {
@@ -1484,6 +1501,7 @@
       const j = await api(`/api/chat?limit=80${before ? "&before=" + before : ""}`);
       (j.data.names || []).forEach((n) => S.chatNames.add(n));
       S.chatHook = j.data.hook_configured;
+      S.chatQuick = j.data.quick_reply !== false;
       const known = new Map(S.chat.map((m) => [m.msg_id, m]));
       (j.data.messages || []).forEach((m) => { const k = known.get(m.msg_id); if (k) { k.hook = m.hook; } else addChat(m, false); });
       renderChat(!before);
@@ -1503,9 +1521,12 @@
     const byId = new Map(S.chat.map((m) => [m.msg_id, m]));
     box.innerHTML = S.chat.length ? S.chat.map((m) => {
       const me = m.from_agent === OWNER;
+      const quick = isQuick(m);
+      const chief = !me && !quick;
       const sys = me && /^【(审批|协助)/.test(m.text || "");
       const q = m.reply_to && byId.get(m.reply_to);
-      return `<li class="bub${me ? " me" : ""}${sys ? " sys" : ""}${m._fresh && !reduced.matches ? " fresh" : ""}" data-mid="${esc(m.msg_id)}">${q ? `<span class="quote">${esc((q.text || "").slice(0, 80))}</span>` : ""}${esc(m.text)}<div class="meta"><time>${dtm(m.created_at)}</time>${me ? "" : `<span>${esc(m.from_instance || "幕僚长")}</span>`}${hookTag(m)}<button type="button" data-chat-reply="${esc(m.msg_id)}">回复</button>${!me && "speechSynthesis" in window ? `<button type="button" data-chat-say="${esc(m.msg_id)}">朗读</button>` : ""}</div></li>`;
+      const who = quick ? `<span class="who-tag quick">${QUICK_LABEL}</span>` : chief ? `<span class="who-tag chief">幕僚长 · 正式回复</span>` : "";
+      return `<li class="bub${me ? " me" : ""}${quick ? " quick" : ""}${chief ? " chief" : ""}${sys ? " sys" : ""}${m._fresh && !reduced.matches ? " fresh" : ""}" data-mid="${esc(m.msg_id)}">${who}${q ? `<span class="quote">${esc((q.text || "").slice(0, 80))}</span>` : ""}${esc(chatBody(m))}<div class="meta"><time>${dtm(m.created_at)}</time>${hookTag(m)}<button type="button" data-chat-reply="${esc(m.msg_id)}">回复</button>${!me && "speechSynthesis" in window ? `<button type="button" data-chat-say="${esc(m.msg_id)}">朗读</button>` : ""}</div></li>`;
     }).join("") : '<li class="empty"><b>还没有对话</b><br>在下面给幕僚长发第一条指令；回复会实时出现在这里</li>';
     S.chat.forEach((m) => { m._fresh = false; });
     if (stick || nearBottom) scrollChat();
@@ -1516,7 +1537,8 @@
     const el = $("#chat-foot"); if (!el) return;
     const g = S.agentById[CHAT_PEER];
     const so = g ? stateOf(g) : null;
-    el.textContent = `幕僚长：${so ? so.text + (so.work ? " · " + so.work : "") : "—"} · ${S.chatHook ? "新消息会经 webhook 即时转达" : "webhook 未配置：消息入总线，等幕僚长读取"}${own() ? "" : " · 今天第一次发送需输入口令"}`;
+    const quickNote = S.chatQuick === false ? "" : " · 发送后先出现「快速回复（本地小模型）」，幕僚长正式回复另起一条";
+    el.textContent = `幕僚长：${so ? so.text + (so.work ? " · " + so.work : "") : "—"} · ${S.chatHook ? "新消息会经 webhook 即时转达" : "webhook 未配置：消息入总线，等幕僚长读取"}${quickNote}${own() ? "" : " · 今天第一次发送需输入口令"}`;
   }
   function setChatReply(id) {
     S.chatReply = id || null;
@@ -1534,7 +1556,10 @@
     btn.disabled = false;
     if (j && j.ok) {
       ta.value = ""; autoGrow(ta); setChatReply(null);
-      addChat(Object.assign({ from_agent: OWNER, to: CHAT_PEER, kind: "chat", text, created_at: now() }, j), true);
+      const mine = Object.assign({ from_agent: OWNER, to: CHAT_PEER, kind: "chat", text, created_at: now() }, j);
+      delete mine.quick_reply;
+      addChat(mine, true);
+      if (j.quick_reply && j.quick_reply.msg_id) addChat(j.quick_reply, true);
       renderChat(true);
       setTimeout(() => loadChat(), 2500);
     }
@@ -1551,6 +1576,12 @@
     if (pref("sound")) beep(880);
     if (shouldSpeakReply()) say(m.text);
     localNotify("幕僚长回复", m.text, "chat");
+  }
+  function onQuickReply(m) {
+    const onChat = document.documentElement.dataset.tab === "chat" || !mobile.matches;
+    if (!onChat || document.visibilityState !== "visible") { S.chatUnread += 1; renderChatBadge(); }
+    if (shouldSpeakReply()) say(chatBody(m));
+    localNotify(QUICK_LABEL, chatBody(m), "quick");
   }
 
   /* ---------- 提醒（B 回退方案）：页内红点 + 角标 + 提示音 + 本地通知 ----------
@@ -1789,6 +1820,7 @@
     sayBrowser(raw);
   }
   async function commitUtterance(text) {
+    // 流式 / 实时通话的定稿与右侧输入框同一条发送：服务端先叫醒幕僚长，响应里带回快速回复。
     const t = String(text || "").trim();
     if (!t || t === lastCommitted) return;
     lastCommitted = t;
@@ -2774,7 +2806,7 @@
     ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !mobile.matches) { e.preventDefault(); sendChat(); } });
     $("#chat").addEventListener("click", (e) => {
       const r = e.target.closest("[data-chat-reply]"); if (r) { setChatReply(r.dataset.chatReply); return; }
-      const s2 = e.target.closest("[data-chat-say]"); if (s2) { const m = S.chat.find((x) => x.msg_id === s2.dataset.chatSay); if (m) say(m.text); }
+      const s2 = e.target.closest("[data-chat-say]"); if (s2) { const m = S.chat.find((x) => x.msg_id === s2.dataset.chatSay); if (m) say(isQuick(m) ? chatBody(m) : m.text); }
     });
     $("#btn-chat-more").addEventListener("click", () => loadChat(S.chat.length ? S.chat[0].created_at : undefined));
     $("#btn-tts").addEventListener("click", () => { setPref("tts", !pref("tts")); if (pref("tts")) sayBrowser("朗读已打开"); });

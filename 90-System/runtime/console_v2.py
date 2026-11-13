@@ -7,7 +7,7 @@
 #   /api/messages?agent=<id> 某 Agent 收发的最近消息（新→旧），供详情抽屉
 #   /api/approvals           审批中心：approvals 表 + 待拍板任务（只读）
 #   /api/audit               大古写操作审计（只读，不含 IP）
-#   /api/chat                指挥官对话线程：大古 ↔ grok-chief（旧→新）
+#   /api/chat                指挥官对话线程：大古 ↔ grok-chief，含快速回复（旧→新）
 #   /api/projects            项目 / 阶段 / 完成度（按阶段验收真实计算）
 # 口径（与手册第 5 章一致，不冒充）：
 #   在线 = 5 分钟内有心跳 / last_seen / 名册实例心跳（同 console_api._annotate_agent）；
@@ -518,13 +518,14 @@ CHAT_PEER = "grok-chief"
 
 
 def chat_thread(conn, limit=80, before=None):
-    """指挥官对话：dagu-owner ↔ grok-chief（含其实例）双向消息，旧→新。"""
+    """指挥官对话：dagu-owner ↔ grok-chief，外加快速回复（local-quick → 大古）。旧→新。"""
     message_bus.ensure_schema(conn)
+    import quick_reply
     names = [CHAT_PEER] + [n for n, a in _instance_map(conn).items() if a == CHAT_PEER]
     ph = ",".join("?" * len(names))
     sql = ('SELECT msg_id,from_agent,from_instance,"to",kind,text,reply_to,thread_id,created_at FROM messages '
-           'WHERE ((from_agent=? AND "to" IN (%s)) OR (from_agent=? AND "to"=?))' % ph)
-    args = [owner_ops.OWNER_ID] + names + [CHAT_PEER, owner_ops.OWNER_ID]
+           'WHERE ((from_agent=? AND "to" IN (%s)) OR (from_agent=? AND "to"=?) OR (from_agent=? AND "to"=?))' % ph)
+    args = [owner_ops.OWNER_ID] + names + [CHAT_PEER, owner_ops.OWNER_ID, quick_reply.AGENT, owner_ops.OWNER_ID]
     if before:
         sql += " AND created_at < ?"
         args.append(int(before))
@@ -546,7 +547,9 @@ def chat_thread(conn, limit=80, before=None):
     except Exception:
         pass
     import commander_hook
-    return {"peer": CHAT_PEER, "hook_configured": commander_hook.configured(), "owner": owner_ops.OWNER_ID, "names": names, "messages": rows}
+    return {"peer": CHAT_PEER, "hook_configured": commander_hook.configured(),
+            "quick_reply": quick_reply.enabled(), "owner": owner_ops.OWNER_ID,
+            "names": names, "messages": rows}
 
 
 def handle(conn, path, q, now):

@@ -1140,5 +1140,5 @@
     };
   }
 
-  window.SBGALAXY = { create: create, version: "2.8.2" };
+  window.SBGALAXY = { create: create, version: "2.8.3" };
 })();

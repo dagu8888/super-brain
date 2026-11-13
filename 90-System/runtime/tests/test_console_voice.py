@@ -236,7 +236,7 @@ def test_pages():
     galaxy = (ROOT / "70-Console/design/prototype/v2/galaxy.js").read_text(encoding="utf-8")
     check("三种模式都在设置里", all(x in html for x in ("value=\"hold\"", "value=\"stream\"", "value=\"live\"", "按住说话", "流式（本地小模型）", "实时语音 API")))
     check("音色写成文静", "flux-wenjing-zh" in html and "文静" in html)
-    check("欢迎语是完整一句并带版本号", "大古，欢迎回来" in html and "welcome-dagu-wenjing.mp3?v=2.8.2" in html and "welcome-dagu-wenjing.ogg?v=2.8.2" in html)
+    check("欢迎语是完整一句并带版本号", "大古，欢迎回来" in html and "welcome-dagu-wenjing.mp3?v=2.8.3" in html and "welcome-dagu-wenjing.ogg?v=2.8.3" in html)
     tools = html.split('class="chat-tools"', 1)[1].split("</div>", 1)[0]
     panel = html.split('id="voice-panel"', 1)[1].split('id="chat"', 1)[0]
     check("头栏有实时通话按钮", 'id="btn-live-call"' in tools and ">实时通话<" in tools and "btn-live-call" not in panel)
@@ -250,7 +250,7 @@ def test_pages():
     err = js.split("function micErrorText", 1)[1].split("async function micStart", 1)[0]
     check("拒绝麦克风时提示改地址栏并覆盖 iPhone", "NotAllowedError" in err and "SecurityError" in err and "地址栏" in err and "锁" in err and "麦克风图标" in err and "实时通话" in err and "设置 › Safari › 麦克风" in err and "键盘输入不受影响" in err)
     check("页面缓存仍是 no-store", 'Cache-Control" content="no-store' in html)
-    check("静态脚本样式版本是 2.8.2", "v2/app.js?v=2.8.2" in html and "v2/app.css?v=2.8.2" in html and "v2/voice-entry.js?v=2.8.2" in html)
+    check("静态脚本样式版本是 2.8.3", "v2/app.js?v=2.8.3" in html and "v2/app.css?v=2.8.3" in html and "v2/voice-entry.js?v=2.8.3" in html)
     check("前端不出现 Deepgram 主机和密钥名", "api.deepgram.com" not in js and "DEEPGRAM_API_KEY" not in js and "token=" not in js)
     begin = js[js.index("async function beginEntry"):js.index("function bindBgm")]
     check("欢迎语在背景音乐之前", begin.index("playWelcomeEl") < begin.index("startBgm"))
