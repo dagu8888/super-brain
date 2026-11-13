@@ -443,7 +443,7 @@ def test_pages_exist():
     check("操作台有群聊板块", 'data-tab="groups"' in html and "以你自己的身份说点什么" in html)
     check("前端走现有口令解锁和群接口", "group_send" in js and "/api/groupchat/roster" in js and "askUnlock" in js)
     check("前端不写死令牌", "token=" not in js and "?token" not in js)
-    check("静态资源版本已抬到 2.8.1", "v2/app.js?v=2.8.1" in html and "v2/app.css?v=2.8.1" in html)
+    check("静态资源版本已抬到 2.8.2", "v2/app.js?v=2.8.2" in html and "v2/app.css?v=2.8.2" in html)
     css = (ROOT / "70-Console/design/prototype/v2/app.css").read_text(encoding="utf-8")
     meta = html.split('<div class="top-meta">', 1)[1].split("</header>", 1)[0]
     mobile = css.split("@media (max-width: 760px)", 1)[1].split("@media", 1)[0]
@@ -527,12 +527,12 @@ def test_console_260_deck_and_scenes():
     check("第一屏包住 KPI 和协作网", i_hero < i_kpi < i_stage < i_grp and "sec-hero" in html[i_hero:i_grp])
     check("群聊是后续整页", i_grp < i_gal and '"grp grp grp"' in css)
     check("知识图谱在群聊之后、指挥官对话之前", i_grp < i_gal < i_chat < i_kb)
-    check("知识宇宙有画布钩子", 'id="galaxy-stage"' in html and "SBGALAXY" in js and "v2/galaxy.js?v=2.8.1" in js)
+    check("知识宇宙有画布钩子", 'id="galaxy-stage"' in html and "SBGALAXY" in js and "v2/galaxy.js?v=2.8.2" in js)
     check("星图读取知识库且不靠编造", "/api/knowledge?limit=200" in js and "openDoc" in js)
     check("协作网和星图都能全屏", 'id="btn-stage-fs"' in html and 'id="btn-galaxy-fs"' in html
           and "stage-fs" in js and "gal-fs" in js and "sb.stage.fullscreen" in js and "sb.gal.fullscreen" in js)
     check("全屏时不翻页", "stageFsOn() || galaxyFsOn()" in js)
-    check("桌面第一行是总览", css.split("grid-template-areas:", 1)[1].split(";", 1)[0].strip().startswith('"hero hero hero"'))
+    check("桌面第一屏左侧总览、右侧指挥官对话", css.split("grid-template-areas:", 1)[1].split(";", 1)[0].strip().startswith('"hero hero chat"'))
     check("KPI 在第一屏里保持自然高度", "html.deck .hero .kpis { flex: 0 0 auto; height: auto; }" in css)
     check("协作网场景改用着色器", "ShaderMaterial" in scene and "photosphere" in scene and "new T.MeshBasicMaterial" not in scene and "TorusGeometry" not in scene)
     check("协作网脚本版本 4.0.0", "v2/scene3d.js?v=4.0.0" in js and 'version: "4.0.0"' in scene)
@@ -550,7 +550,7 @@ def test_console_270_visual_invariants():
     scene = (ROOT / "70-Console/design/prototype/v2/scene3d.js").read_text(encoding="utf-8")
     galaxy = (ROOT / "70-Console/design/prototype/v2/galaxy.js").read_text(encoding="utf-8")
     api = (ROOT / "90-System/runtime/console_api.py").read_text(encoding="utf-8")
-    check("版本号是 2.8.1，场景脚本仍是 4.0.0", "v2/app.js?v=2.8.1" in html and "v=2.7.0" not in html and 'version: "2.8.1"' in galaxy and 'version: "4.0.0"' in scene)
+    check("版本号是 2.8.2，场景脚本仍是 4.0.0", "v2/app.js?v=2.8.2" in html and "v=2.7.0" not in html and 'version: "2.8.2"' in galaxy and 'version: "4.0.0"' in scene)
     check("不写死火节点", "火" not in scene and "火" not in galaxy and "__fire__" not in js and "Fire" not in scene)
     check("中台仍是编排中心", "中台" in scene and "中台" in js and "photosphere" in scene)
     check("关系来自接口并可点开证据", "/api/relations" in js and "evidence" in js and "openRelation" in js and "onEdge" in scene)
@@ -560,7 +560,18 @@ def test_console_270_visual_invariants():
     check("单击探索、双击打开", "onFocus" in galaxy and "onOpen" in galaxy and 'data-depth="8"' in html and 'id="btn-galaxy-open"' in html)
     check("全屏类名还在", "stage-fs" in css and "gal-fs" in css and "grp-fs" in css and "sb.stage.fullscreen" in js and "sb.gal.fullscreen" in js and "sb.grp.fullscreen" in js)
     check("三屏顺序还在", html.index('id="sec-hero"') < html.index('id="sec-groups"') < html.index('id="sec-galaxy"') < html.index('id="sec-chat"'))
-    check("桌面第一行仍是总览", css.split("grid-template-areas:", 1)[1].split(";", 1)[0].strip().startswith('"hero hero hero"'))
+    check("桌面第一屏仍是总览加右侧对话", css.split("grid-template-areas:", 1)[1].split(";", 1)[0].strip().startswith('"hero hero chat"'))
+    side = css.split("@media (min-width: 761px)", 1)[1].split("@media", 1)[0]
+    check("第一屏两侧同高", "#sec-hero" in side and "#sec-chat" in side and side.count("calc(100dvh - var(--deck-top, 58px))") >= 1)
+    check("语音设置不撑满右侧对话", "#sec-chat .voice-panel" in side and "max-height" in side.split("#sec-chat .voice-panel", 1)[1].split("}", 1)[0])
+    fs = css.split("html.stage-fs .stage", 1)[1].split("html.stage-fs .stage-head", 1)[0]
+    check("全屏协作网盖住窗口", "position: fixed" in fs and "z-index: 28" in fs and "top: 0" in fs and "background-color: var(--bg)" in fs)
+    check("全屏时聊天不叠在全图上", "html.stage-fs #sec-chat" not in css and "html.stage-fs .chat" not in css)
+    check("退出全屏去掉遮罩类", 'classList.toggle("stage-fs"' in js)
+    phone = css.split("@media (max-width: 760px)", 1)[1]
+    check("手机不并排，指挥 tab 仍是对话", ".wrap { display: block;" in phone and 'html[data-tab="chat"] .sec[data-t~="chat"] { display: flex; }' in css)
+    mid = css.split("@media (max-width: 1280px)", 1)[1].split("}", 1)[0]
+    check("中等桌面宽度对话仍在第一行右侧", '"hero chat"' in mid and '"chat chat"' not in mid)
     check("知识列表暴露正文类型", '"type": fm.get("type", "")' in api)
     note = ROOT / "10-Knowledge/Playbooks/幕僚长工作沉淀与团队速览.md"
     links = console_api._wikilinks(note)

@@ -1,4 +1,4 @@
-/* Super-Brain 协作中枢 v2.8.1（查看走已有主人会话 cookie；写操作仍是每台设备每天第一次口令）
+/* Super-Brain 协作中枢 v2.8.2（查看走已有主人会话 cookie；写操作仍是每台设备每天第一次口令）
    数据源：/api/dashboard（KPI/异常/点名/消息）、/api/server（服务器健康）、/api/relations、
           /api/agents/{id}、/api/messages?agent=、/api/tasks/{id}、/api/knowledge、/api/stream（SSE）。
    纪律：健康在线 = 5 分钟内心跳且近期消息有回执；心跳在但超过约 60 秒无回执 = 降级（在场但回执失败），
@@ -1132,7 +1132,7 @@
       if (S.kbQ) galaxyView.setQuery(S.kbQ);
     };
     const three = window.THREE ? Promise.resolve() : loadScript("../vendor/three.min.js?v=r150");
-    three.catch(() => null).then(() => (window.SBGALAXY ? null : loadScript("v2/galaxy.js?v=2.8.1"))).then(boot).catch((e) => showGalaxyError((e && e.message) || "星图加载失败"));
+    three.catch(() => null).then(() => (window.SBGALAXY ? null : loadScript("v2/galaxy.js?v=2.8.2"))).then(boot).catch((e) => showGalaxyError((e && e.message) || "星图加载失败"));
   }
   function galaxyFsOn() {
     return document.documentElement.classList.contains("gal-fs");
@@ -1615,10 +1615,11 @@
     el.hidden = !text; el.textContent = text || ""; el.dataset.k = kind || "";
     const b = $("#btn-mic"); b.classList.toggle("rec", kind === "rec"); b.classList.toggle("busy", kind === "busy");
     b.setAttribute("aria-pressed", kind === "rec" ? "true" : "false");
+    renderLiveCall();
   }
   function micErrorText(err) {
     const n = (err && err.name) || "";
-    if (n === "NotAllowedError" || n === "SecurityError") return "没有麦克风权限：iPhone 请到「设置 › Safari › 麦克风」选允许，或在地址栏「大小」菜单里允许本网站使用麦克风；键盘输入不受影响";
+    if (n === "NotAllowedError" || n === "SecurityError") return "浏览器拦住了麦克风。请点地址栏左侧的锁或麦克风图标，把麦克风改成「允许」，再刷新页面后重点「实时通话」；iPhone 还可到「设置 › Safari › 麦克风」。键盘输入不受影响";
     if (n === "NotFoundError" || n === "OverconstrainedError") return "没找到可用的麦克风";
     if (n === "NotReadableError" || n === "AbortError") return "麦克风被别的 App 占用（比如正在通话或录音），稍后再试";
     return "录音没开起来，请用键盘输入";
@@ -1823,16 +1824,17 @@
     micStatus("");
     const b = $("#btn-mic"); if (b) { b.classList.remove("rec"); b.setAttribute("aria-pressed", "false"); }
   }
-  function startConversation(e, mode) {
-    if (talking) { stopConversation(); return; }
+  function startConversation(e, mode, micPromise) {
+    if (talking) { stopConversation(); dropMic(micPromise); return; }
     stopSpeaking();
-    if (!canRecord()) { toast("这个浏览器不能录音，请用键盘输入"); return; }
-    if (!own()) { toast("语音要先完成今日授权（键盘随时可用）"); askUnlock(); return; }
+    if (!canRecord()) { toast("这个浏览器不能录音，请用键盘输入"); dropMic(micPromise, true); return; }
+    if (!own()) { toast("语音要先完成今日授权（键盘随时可用）"); askUnlock(); dropMic(micPromise, true); return; }
     const ctx = new AC();
     try { ctx.resume(); } catch (x) { /* iOS 要在这次手势里恢复 */ }
     const t = talking = { mode: mode, ctx: ctx, chunks: [], pending: [], rate: ctx.sampleRate, stop: false, text: "", quiet: 0, session: "" };
     micStatus(mode === "live" ? "正在听，说完会发给幕僚长" : "流式听写中，说完一句就发给幕僚长", "rec");
-    navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } }).then(async (stream) => {
+    const pending = micPromise || navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    pending.then(async (stream) => {
       if (t.stop || talking !== t) { stream.getTracks().forEach((tr) => tr.stop()); return; }
       t.stream = stream;
       const src = ctx.createMediaStreamSource(stream);
@@ -1897,6 +1899,38 @@
       };
       tick();
     }).catch((err) => { if (talking === t) talking = null; micStatus(""); toast(micErrorText(err)); });
+  }
+  function renderLiveCall() {
+    const b = $("#btn-live-call");
+    if (!b) return;
+    const on = !!talking;
+    b.textContent = on ? "结束通话" : "实时通话";
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+    b.classList.toggle("live-on", on);
+    b.title = on ? "结束和幕僚长的实时通话" : "开始和幕僚长实时通话";
+  }
+  function dropMic(p, tell) {
+    if (!p || !p.then) return;
+    p.then((stream) => {
+      try { stream.getTracks().forEach((tr) => tr.stop()); } catch (err) { /* 通话流由 startConversation 持有 */ }
+    }).catch((err) => { if (tell) toast(micErrorText(err)); });
+  }
+  function onLiveCall(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (talking) { stopConversation(); return; }
+    if (mic) { const held = mic; held.released = true; micCleanup(held); }
+    let micPromise = null;
+    const devices = navigator.mediaDevices;
+    if (devices && devices.getUserMedia) {
+      micPromise = devices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    }
+    if (window.SBVoiceEntry) SBVoiceEntry.writeMode(localStorage, "live");
+    applyVoiceMode("live");
+    const o = own();
+    if (o) postJSON("/api/owner/voice/settings", { mode: "live" }, o.token).then((j) => {
+      if (j && j.ok === false) toast("这台设备已记住，服务器没同步：" + (j.error || ""));
+    });
+    startConversation(e, "live", micPromise);
   }
 
   /* 背景音乐默认开。开关记在 sb.bgm.on，显式写成 0 才关。
@@ -2673,10 +2707,10 @@
     try {
       const j = await api("/api/voice/status");
       voiceStatus = j || voiceStatus;
-      if (j.mode && window.SBVoiceEntry) {
+      if (j.mode && window.SBVoiceEntry && !talking) {
         SBVoiceEntry.writeMode(localStorage, j.mode);
         applyVoiceMode(j.mode);
-      } else applyVoiceMode(voiceMode());
+      } else if (!talking) applyVoiceMode(voiceMode());
       $$("[data-provider]").forEach((form) => {
         const id = form.dataset.provider;
         const slot = (j.providers || []).find((p) => p.id === id);
@@ -2744,6 +2778,9 @@
     });
     $("#btn-chat-more").addEventListener("click", () => loadChat(S.chat.length ? S.chat[0].created_at : undefined));
     $("#btn-tts").addEventListener("click", () => { setPref("tts", !pref("tts")); if (pref("tts")) sayBrowser("朗读已打开"); });
+    const liveBtn = $("#btn-live-call");
+    if (liveBtn) liveBtn.addEventListener("click", onLiveCall);
+    renderLiveCall();
     renderTtsBtn();
     bindBgm();
     bindVoice();
