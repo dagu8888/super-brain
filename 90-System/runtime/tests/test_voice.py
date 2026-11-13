@@ -214,7 +214,7 @@ def test_frontend():
     check("识别结果只放进输入框，不自动发送", "sendChat" not in s2 and "#chat-input" in s2)
     check("页面不把录音存进 Cache/IndexedDB", "indexedDB" not in js and "caches.open" not in js)
     check("有明确的录音/识别状态", "录音中" in js and "识别中" in js and 'id="mic-status"' in html)
-    check("权限被拒说人话", "设置 › Safari › 麦克风" in js)
+    check("权限被拒说人话", "设置 › Safari › 麦克风" in js and "地址栏" in js and "实时通话" in js)
 
 
 def test_real_model():
