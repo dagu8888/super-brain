@@ -179,7 +179,7 @@ def public_status():
     deepgram = next(item for item in providers if item["id"] == "deepgram")
     return {
         "ok": True,
-        "version": "2.8.0",
+        "version": "2.8.1",
         "mode": load_mode(),
         "voice": {
             "model": TTS_MODEL,

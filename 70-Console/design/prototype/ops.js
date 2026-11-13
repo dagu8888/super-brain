@@ -141,7 +141,7 @@ function setHealth(monitor) {
 }
 
 async function apiGet(path) {
-  const res = await fetch(API + path);
+  const res = await fetch(API + path, { credentials: "same-origin", cache: "no-store" });
   let body = null;
   try { body = await res.json(); } catch (e) { body = null; }
   if (!res.ok || !body || body.ok === false) {
@@ -213,6 +213,10 @@ async function refreshQuiet() {
     await refreshStatus();
     renderIfIdle();
   } catch (e) {
+    if (e.status === 401 || e.status === 403) {
+      setConn("error", e.status === 403 ? "权限不足" : "未授权", "看不到数据不是因为没有风险");
+      return;
+    }
     setConn("error", "连接中断", e.message || "数据可能已过期");
   }
 }
@@ -224,7 +228,7 @@ function connectStream() {
   const since = state.lastEventTs || Math.floor(nowSec()) - 3600;
   let es;
   try {
-    es = new EventSource(API + "/api/stream?since=" + since);
+    es = new EventSource(API + "/api/stream?since=" + since, { withCredentials: true });
   } catch (e) {
     startPoll();
     return;
@@ -259,6 +263,10 @@ function connectStream() {
       setConn("poll", "轮询模式", "实时推送不可用，已改为 6 秒轮询");
       startPoll();
     }).catch((e) => {
+      if (e.status === 401 || e.status === 403) {
+        setConn("error", e.status === 403 ? "权限不足" : "未授权", "看不到数据不是因为没有风险");
+        return;
+      }
       setConn("error", "连接中断", e.message || "数据可能已过期，将继续重试");
       startPoll();
     });
@@ -278,7 +286,11 @@ function startPoll() {
       const body = await apiGet("/api/events?limit=40" + (state.lastEventTs ? "&since=" + state.lastEventTs : ""));
       mergeEvents(body.data);
       renderIfIdle();
-    } catch (e) { /* 轮询失败时保留上次数据，下轮再试 */ }
+    } catch (e) {
+      if (e.status === 401 || e.status === 403) {
+        setConn("error", e.status === 403 ? "权限不足" : "未授权", "看不到数据不是因为没有风险");
+      }
+    }
   };
   state.poll = setInterval(tick, 6000);
 }
@@ -888,9 +900,15 @@ async function boot() {
     render();
     connectStream();
   } catch (e) {
-    setConn("error", "连接失败", e.message || "");
+    const denied = e.status === 401 || e.status === 403;
+    setConn("error", denied ? (e.status === 403 ? "权限不足" : "未授权") : "连接失败",
+      denied ? "看不到数据不是因为没有风险" : (e.message || ""));
     const host = $("#views");
-    if (host) host.innerHTML = `<p class="ops-error">进不去：${esc(e.message)}</p>`;
+    if (host) {
+      host.innerHTML = denied
+        ? `<p class="ops-error" role="alert">未授权：${esc(e.message)}。看不到数据不是因为没有风险。</p>`
+        : `<p class="ops-error">进不去：${esc(e.message)}</p>`;
+    }
   }
 }
 

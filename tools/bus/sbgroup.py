@@ -81,7 +81,7 @@ def cmd_pair(ns):
 
 
 def cmd_groups(ns):
-    status, obj = request("GET", base_url(ns) + "/api/groupchat/groups")
+    status, obj = request("GET", base_url(ns) + "/api/groupchat/groups", token=token_of(ns))
     show(obj)
     return 0 if status == 200 else 1
 
@@ -121,7 +121,8 @@ def cmd_checkin(ns):
 
 
 def cmd_wakes(ns):
-    status, obj = request("GET", base_url(ns) + "/api/groupchat/wakes?msg_id=" + ns.msg_id)
+    status, obj = request("GET", base_url(ns) + "/api/groupchat/wakes?msg_id=" + ns.msg_id,
+                          token=token_of(ns))
     show(obj)
     return 0 if status == 200 else 1
 

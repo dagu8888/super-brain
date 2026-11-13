@@ -28,7 +28,7 @@ def log_event(kind, **fields):
 conf = json.loads(Path(token_file).read_text(encoding="utf-8"))
 handler = api_server._make_handler(
     db_fn, execute_fn, log_event, conf.get("tokens") or {}, conf.get("viewers") or {},
-    threading.Event(), conf.get("owner") or {})
+    threading.Event(), conf.get("owner") or {}, None, conf.get("token_scopes") or {})
 server = api_server.ThreadingHTTPServer(("127.0.0.1", int(port)), handler)
 print("FIXTURE_READY %s" % port, flush=True)
 server.serve_forever()

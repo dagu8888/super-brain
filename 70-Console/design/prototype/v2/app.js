@@ -1,9 +1,10 @@
-/* Super-Brain 协作中枢 v2（查看免口令；写操作：每台设备每天第一次输入口令）
+/* Super-Brain 协作中枢 v2.8.1（查看走已有主人会话 cookie；写操作仍是每台设备每天第一次口令）
    数据源：/api/dashboard（KPI/异常/点名/消息）、/api/server（服务器健康）、/api/relations、
           /api/agents/{id}、/api/messages?agent=、/api/tasks/{id}、/api/knowledge、/api/stream（SSE）。
    纪律：健康在线 = 5 分钟内心跳且近期消息有回执；心跳在但超过约 60 秒无回执 = 降级（在场但回执失败），
         不计入「在线 Agent」。执行中只认任务租约；粒子只在真实消息/事件到达时出现；
-        数字只在两次真实取数之间过渡，不编数据。不需要口令，也不保存任何口令。 */
+        数字只在两次真实取数之间过渡，不编数据。读接口带 credentials，不把令牌放进 URL。
+        已有设备会话时查看不用再输当日口令；没有会话时显示未授权，不用空数据冒充没有风险。 */
 "use strict";
 (function () {
   const API = location.protocol.startsWith("http") ? "" : "https://console.8.218.106.225.nip.io";
@@ -34,6 +35,7 @@
     instMap: {}, agentById: {}, lastActivity: 0, kbQ: "",
     chat: [], chatIds: new Set(), chatNames: new Set([CHAT_PEER]), chatReply: null, chatUnread: 0, chatHook: null,
     projects: [], apPrev: null, galaxyDocs: null, galaxyTotal: 0,
+    authDenied: false, authChecked: false,
   };
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -62,12 +64,50 @@
   const lat = (s) => (s == null ? "—" : s < 60 ? s + "s" : s < 3600 ? Math.round(s / 60) + "分" : (s / 3600).toFixed(1) + "时");
   const big = (n) => (n == null ? "—" : n >= 10000 ? (n / 10000).toFixed(n >= 100000 ? 1 : 2) + "万" : String(n));
 
+  function isAuthErr(e) { return !!(e && (e.auth || e.status === 401 || e.status === 403)); }
+  function showAuthBanner(err) {
+    S.authDenied = true;
+    S.authChecked = true;
+    const code = err && err.status === 403 ? "权限不足" : "未授权";
+    const msg = (err && err.message) || "需要主人设备会话。这不是「没有风险」。";
+    const box = $("#kpis");
+    if (box) {
+      box.innerHTML = `<div class="kpi" style="grid-column:1/-1" role="alert"><div class="k-label">${esc(code)}</div><div class="k-sub">${esc(msg)}</div><div class="acts"><button class="act gold" id="btn-auth-unlock" type="button">今日授权</button></div></div>`;
+      const b = $("#btn-auth-unlock");
+      if (b) b.onclick = async () => {
+        if (await askUnlock()) {
+          S.authDenied = false;
+          loadDash(true); loadServer(); loadRelations(); loadEvents(); loadGroupHome(); loadGalaxy();
+        }
+      };
+    }
+    setConn("down", code);
+    const feed = $("#feed");
+    if (feed && !S.feed.length) {
+      feed.innerHTML = `<li class="empty" role="alert"><b>${esc(code)}</b>看不到消息不是因为没有风险，而是当前没有主人会话或令牌。</li>`;
+    }
+    const pill = $("#health-pill");
+    if (pill) { pill.dataset.s = "bad"; pill.querySelector("b").textContent = code + "，健康数据未读取"; }
+    const loading = $("#stage-loading");
+    if (loading) loading.textContent = code + "，协作网未读取。这不是「没有风险」。";
+    renderOwnerPill();
+  }
   async function api(path, timeout = 12000) {
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), timeout);
     try {
-      const r = await fetch(API + path, { signal: ctl.signal, cache: "no-store" });
-      const j = await r.json();
+      const r = await fetch(API + path, { signal: ctl.signal, cache: "no-store", credentials: "same-origin" });
+      let j = {};
+      try { j = await r.json(); } catch (err) { j = {}; }
+      if (r.status === 401 || r.status === 403 || j.need_auth) {
+        const err = new Error(r.status === 403
+          ? "权限不足，不能把空数据当成没有风险"
+          : "需要主人设备会话（HTTP 401）。这不是「没有风险」。");
+        err.status = r.status || 401;
+        err.auth = true;
+        showAuthBanner(err);
+        throw err;
+      }
       if (!r.ok || j.ok === false) throw new Error(j.error || "HTTP " + r.status);
       if (j.ts) S.skew = j.ts - Math.floor(Date.now() / 1000);
       return j;
@@ -132,18 +172,27 @@
   async function loadDash(first) {
     try {
       const j = await api("/api/dashboard");
-      ingestDash(j.data, first);
+      const recover = S.authDenied;
+      S.authDenied = false;
+      S.authChecked = true;
+      ingestDash(j.data, first || recover);
+      renderOwnerPill();
     } catch (e) {
+      if (isAuthErr(e)) return;
       if (first) $("#kpis").innerHTML = `<div class="kpi" style="grid-column:1/-1"><div class="k-label">取数失败</div><div class="k-sub">${esc(e.message)} · 10 秒后重试</div></div>`;
       setTimeout(() => loadDash(first), 10000);
     }
   }
   async function loadServer() {
     try { S.server = (await api("/api/server")).data; renderServer(); renderKpis(); }
-    catch (e) { $("#health-pill").dataset.s = "bad"; $("#health-pill b").textContent = "健康数据不可用"; }
+    catch (e) {
+      $("#health-pill").dataset.s = "bad";
+      $("#health-pill b").textContent = isAuthErr(e) ? "未授权，健康数据未读取" : "健康数据不可用";
+    }
   }
   async function loadRelations() {
-    try { S.relations = (await api("/api/relations")).data || []; if (S.dash) buildGraph(); } catch (e) { /* 关系为可选增强 */ }
+    try { S.relations = (await api("/api/relations")).data || []; if (S.dash) buildGraph(); }
+    catch (e) { if (isAuthErr(e)) return; /* 关系为可选增强 */ }
   }
   async function loadEvents() {
     try {
@@ -151,7 +200,7 @@
       (j.data || []).forEach((e) => addFeed(evtItem(e), false));
       S.lastEvtTs = Math.max(S.lastEvtTs, ...(j.data || []).map((e) => e.created_at || 0), 0);
       renderFeed();
-    } catch (e) { /* 事件流为可选增强 */ }
+    } catch (e) { if (isAuthErr(e)) return; /* 事件流为可选增强 */ }
   }
 
   function ingestDash(d, first) {
@@ -210,6 +259,10 @@
     return false;
   }
   function renderFeed() {
+    if (S.authDenied && !S.feed.length) {
+      $("#feed").innerHTML = '<li class="empty" role="alert"><b>未授权</b>看不到消息不是因为没有风险，而是当前没有主人会话或令牌。</li>';
+      return;
+    }
     const f = S.feedFilter;
     const items = S.feed.filter((it) => f === "all" || (f === "msg" && it.k === "msg") || (f === "ping" && it.k === "ping") || (f === "event" && (it.k === "event" || it.k === "alert"))).slice(0, 120);
     $("#feed").innerHTML = items.length ? items.map(feedRow).join("")
@@ -219,11 +272,12 @@
 
   /* ---------- SSE 实时 ---------- */
   function startStream() {
+    if (S.authDenied) { setConn("down", "未授权"); return; }
     if (!("EventSource" in window)) { startPolling(); return; }
     clearTimeout(S.esTimer);
     if (S.es) { try { S.es.close(); } catch (e) { /* noop */ } }
     const since = Math.max(S.lastMsgTs, S.lastEvtTs, now() - 120);
-    const es = new EventSource(`${API}/api/stream?observe=1&since=${since}`);
+    const es = new EventSource(`${API}/api/stream?observe=1&since=${since}`, { withCredentials: true });
     S.es = es;
     let opened = false;
     const warnT = setTimeout(() => { if (!opened) setConn("warn", "连接中…"); }, 2500);
@@ -238,6 +292,7 @@
       clearTimeout(warnT);
       es.close();
       if (S.es !== es) return;
+      if (S.authDenied) { setConn("down", "未授权"); return; }
       S.esFails += 1;
       // 服务端每 10 分钟主动断一次属正常；先静默快速重连，连续失败才亮黄/改轮询
       const wait = Math.min(30000, 1000 * Math.pow(2, Math.max(0, S.esFails - 1)));
@@ -257,7 +312,10 @@
         const e = await api(`/api/events?since=${S.lastEvtTs || now() - 600}&limit=50`);
         (e.data || []).slice().reverse().forEach(onLiveEvent);
         if (S.mode !== "live") setConn("warn", "轮询模式 · 8 秒");
-      } catch (err) { setConn("down", "离线 · 重试中"); }
+      } catch (err) {
+        if (isAuthErr(err)) { setConn("down", "未授权"); return; }
+        setConn("down", "离线 · 重试中");
+      }
     };
     tick();
     S.pollTimer = setInterval(tick, 8000);
@@ -1044,6 +1102,13 @@
       if (galaxyView) { galaxyView.setDocs(items); renderGalaxyFilters(); }
       renderGalaxyNote(S.kbQ || "");
     } catch (e) {
+      if (isAuthErr(e)) {
+        S.galaxyDocs = null;
+        S.galaxyTotal = 0;
+        if (note) note.textContent = "未授权，知识库未读取";
+        showGalaxyError(e.message || "需要主人设备会话。这不是「没有风险」。");
+        return;
+      }
       S.galaxyDocs = [];
       S.galaxyTotal = 0;
       if (galaxyView) galaxyView.setDocs([]);
@@ -1067,7 +1132,7 @@
       if (S.kbQ) galaxyView.setQuery(S.kbQ);
     };
     const three = window.THREE ? Promise.resolve() : loadScript("../vendor/three.min.js?v=r150");
-    three.catch(() => null).then(() => (window.SBGALAXY ? null : loadScript("v2/galaxy.js?v=2.8.0"))).then(boot).catch((e) => showGalaxyError((e && e.message) || "星图加载失败"));
+    three.catch(() => null).then(() => (window.SBGALAXY ? null : loadScript("v2/galaxy.js?v=2.8.1"))).then(boot).catch((e) => showGalaxyError((e && e.message) || "星图加载失败"));
   }
   function galaxyFsOn() {
     return document.documentElement.classList.contains("gal-fs");
@@ -1113,7 +1178,8 @@
   }
 
   /* ---------- 大古操作：当日口令、写操作、审批中心、审计 ----------
-     查看免口令；写操作：每台设备每天第一次输入口令，通过后签发当日会话令牌
+     查看走已有会话 cookie。已有设备会话时不用再输当日口令；没有会话则 401，不能当成没风险。
+     写操作：每台设备每天第一次输入口令，通过后签发当日会话令牌
      （本机 localStorage + HttpOnly cookie），有效至北京时间当天 23:59。
      不提供删除、交易类按钮。每次写操作服务端都会记审计。 */
   const OWN_KEY = "sb.owner.daily.v1";
@@ -1134,9 +1200,23 @@
   function renderOwnerPill() {
     const o = own(), el = $("#owner-pill");
     if (!el) return;
-    el.dataset.s = o ? "owner" : "idle";
-    el.querySelector("b").textContent = o ? "今日已授权" : "只读";
-    el.title = o ? `今日操作已授权，有效至 ${o.expires_at ? dtm(o.expires_at) : "今晚 23:59"}（北京时间）` : "查看免口令；今天第一次写操作需输入口令";
+    if (o) {
+      el.dataset.s = "owner";
+      el.querySelector("b").textContent = "今日已授权";
+      el.title = `今日操作已授权，查看不用再输口令，有效至 ${o.expires_at ? dtm(o.expires_at) : "今晚 23:59"}（北京时间）`;
+    } else if (!S.authChecked) {
+      el.dataset.s = "idle";
+      el.querySelector("b").textContent = "未确认";
+      el.title = "正在确认主人设备会话";
+    } else if (S.authDenied) {
+      el.dataset.s = "bad";
+      el.querySelector("b").textContent = "未授权";
+      el.title = "没有主人设备会话。已有会话时查看不用再输当日口令。";
+    } else {
+      el.dataset.s = "idle";
+      el.querySelector("b").textContent = "查看中";
+      el.title = "已有设备会话时可查看，不用再输当日口令";
+    }
   }
   function deviceName() {
     const ua = navigator.userAgent;
@@ -1155,7 +1235,7 @@
   async function askUnlock() {
     const v = await dlg({
       title: "今日授权",
-      desc: "今天第一次操作请输入口令。通过后到今晚 23:59（北京时间）这台设备都不用再输。查看始终不用口令。",
+      desc: "今天第一次操作请输入口令。通过后到今晚 23:59（北京时间）这台设备都不用再输。已有设备会话时，查看不用再输当日口令。",
       placeholder: "请输入口令",
       field: "text",
       rows: 1,
@@ -1216,11 +1296,11 @@
   async function settings() {
     const o = own();
     const until = o && o.expires_at ? dtm(o.expires_at) : "今晚 23:59";
-    openDrawer(head("设备与权限", o ? `今日已授权，有效至 ${until}（北京时间）` : "今日尚未授权：可以查看，写操作时再输入口令", o ? "var(--gold)" : "var(--gray)") + `<div class="dr-body">
+    openDrawer(head("设备与权限", o ? `今日已授权，有效至 ${until}（北京时间）` : "今日尚未授权：已有设备会话可以查看，写操作时再输入口令", o ? "var(--gold)" : "var(--gray)") + `<div class="dr-body">
       ${o ? `<div class="acts"><button class="act no" id="st-logout" type="button">退出今日授权</button></div>` : `<div class="acts"><button class="act gold" id="st-unlock" type="button">输入今日口令</button></div>`}
       <div><h4>提醒</h4>${prefRows()}</div>
       ${o ? `<div><h4>口令包 <small style="color:var(--ink3);font-weight:400">只显示名称和用途，值永不回显</small></h4><div id="st-vault" class="list"><div class="note">读取中…</div></div><div class="acts"><button class="act gold" id="st-vault-add" type="button">存入 / 更新口令</button></div></div>` : ""}
-      <div class="note">查看始终免口令。每天第一次写操作在这台设备输入一次口令，到当晚 23:59（北京时间）都不用再输。口令不会显示在页面或日志里。所有写操作都会记入「操作审计」。不提供删除和交易类操作。</div></div>`);
+      <div class="note">已有设备会话时查看不用再输当日口令。没有会话时页面会显示未授权，不会把空数据当成没有风险。每天第一次写操作在这台设备输入一次口令，到当晚 23:59（北京时间）都不用再输。口令不会显示在页面或日志里。所有写操作都会记入「操作审计」。不提供删除和交易类操作。</div></div>`);
     const dr = $("#drawer");
     if ($("#st-unlock", dr)) $("#st-unlock", dr).onclick = async () => { if (await askUnlock()) settings(); };
     if ($("#st-logout", dr)) $("#st-logout", dr).onclick = async () => {
@@ -1228,7 +1308,7 @@
       if (!c) return;
       const tok = (own() || {}).token;
       if (tok) await postJSON("/api/owner/act", { action: "logout", args: {} }, tok);
-      setOwn(null); loadAudit(); closeDrawer(); toast("已退出，本机恢复只读");
+      setOwn(null); S.authDenied = true; loadDash(false); loadAudit(); closeDrawer(); toast("已退出。没有会话时不能查看业务数据");
     };
     bindPrefs(dr);
     if (o) loadVault(dr);
@@ -2610,6 +2690,10 @@
       if (label && j.voice) label.textContent = "音色 " + (j.voice.name || "文静") + " · " + (j.voice.model || "flux-wenjing-zh");
     } catch (e) {
       applyVoiceMode(voiceMode());
+      if (isAuthErr(e)) {
+        const label = $("#voice-voice-label");
+        if (label) label.textContent = "未授权，语音状态未读取";
+      }
     }
   }
   async function onVoiceMode(mode) {

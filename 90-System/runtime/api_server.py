@@ -21,6 +21,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import console_api
 import message_bus
 import owner_ops
+import read_auth
 import voice_http
 
 HERE = Path(__file__).parent
@@ -47,8 +48,9 @@ STT_RATE = {}                             # device -> [请求时刻]，每设备
 STT_BUSY = threading.Semaphore(2)         # 同时最多 2 路排队，其余直接 429
 
 
-def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None, owners=None, emit_fn=None):
+def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None, owners=None, emit_fn=None, token_scopes=None):
     viewers = viewers or {}
+    token_scopes = token_scopes or {}
     stop_event = stop or threading.Event()
 
     class Handler(BaseHTTPRequestHandler):
@@ -101,26 +103,22 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
                 t and hmac.compare_digest(str(t).encode(), token.encode()) for t in allowed)
 
         def _stream(self):
-            """SSE 增量推送（EventSource 不支持自定义请求头，token 走查询参数）。"""
+            """SSE 增量推送。观察模式不再免口令，先过 _gate_read。
+            EventSource 不能带自定义头，因此本接口仍接受查询参数 token 或 sb_owner cookie。
+            带 instance 的节点连接必须是 tokens/viewers 令牌，不能只用主人会话冒充在场。"""
             u = urlparse(self.path)
             q = {k: v[0] for k, v in parse_qs(u.query).items()}
-            auth = self.headers.get("Authorization", "")
-            token = q.get("token") or (auth[7:] if auth.startswith("Bearer ") else "")
-            allowed = list(tokens.values()) + list(viewers.values())
-            authed = bool(token) and any(
-                    t and hmac.compare_digest(str(t).encode(), token.encode()) for t in allowed)
-            # S3 节点信使：?instance=<名册实例名> 以长连注册心跳（不写新表，沿用 heartbeats/agents）
-            # 带 instance 的连接可冒充在场、收取定向消息，必须持有口令。
-            # 不带 instance 的连接是操作台只读推送，按 2026-11-11 批示免口令。
+            principal = getattr(self, "_read_principal", None) or {}
+            token = getattr(self, "_presented", "") or ""
             instance = (q.get("instance") or "").strip()
-            # 操作台 v2 观察模式：?observe=1 且不带 instance 时，推送全部消息（与免口令的
-            # GET /api/messages 同口径，只读）。带 instance 的节点连接不受影响。
+            # 操作台 v2 观察模式：?observe=1 且不带 instance 时，推送全部消息（与 GET /api/messages
+            # 同口径，只读）。必须已通过读鉴权。带 instance 的节点连接不受观察模式影响。
             observe = (not instance) and q.get("observe") == "1"
-            if instance and not authed:
+            if instance and principal.get("kind") not in ("token", "viewer"):
                 log_event("api_auth_failed", ip=self.client_address[0], path="/api/stream")
-                return self._send(401, {"ok": False, "error": "无效口令"})
-            if not authed:
-                token = ""
+                if principal.get("kind") in ("owner", "group"):
+                    return self._send(403, {"ok": False, "error": "实例连接需要节点令牌", "need_auth": True})
+                return self._send(401, {"ok": False, "error": "无效口令", "need_auth": True})
             if STREAM["active"] >= STREAM_MAX_CLIENTS:
                 return self._send(429, {"ok": False, "error": "推送连接已达上限"})
             try:
@@ -497,6 +495,22 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
                     except Exception:
                         return self._send(400, {"ok": False, "error": "请求无效"})
                     code, obj = group_chat.handle_post(conn, path, req, token, tokens)
+                    who = {"actor": "pair" if path == "/api/groupchat/pair" else "http",
+                           "device": "groupchat"}
+                    if token and path != "/api/groupchat/pair":
+                        try:
+                            act = group_chat.actor_from_token(conn, token, tokens)
+                        except Exception:
+                            act = None
+                        if act and act.get("id"):
+                            who = {"actor": str(act["id"])[:80],
+                                   "device": str(act.get("kind") or "")[:40]}
+                    try:
+                        owner_ops.audit(conn, who, "groupchat_post", path[-80:],
+                                        {"ok": bool(obj.get("ok"))}, ok=bool(obj.get("ok")),
+                                        ip=self._client_ip())
+                    except Exception:
+                        pass
             except Exception as e:
                 code, obj = 500, {"ok": False, "error": "内部错误: %s" % type(e).__name__}
             finally:
@@ -504,15 +518,81 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
             log_event("groupchat", method=method, path=path[-80:], ok=bool(obj.get("ok")))
             return self._send(code, obj)
 
+        def _audit_access(self, conn, path, principal, ok, action=None):
+            action = action or ("read" if ok else "read_denied")
+            actor = str((principal or {}).get("actor") or "anonymous")[:80]
+            if not read_auth.should_record((actor, path, action, bool(ok))):
+                return
+            try:
+                owner_ops.audit(
+                    conn,
+                    {"actor": actor, "device": str((principal or {}).get("kind") or "")[:40]},
+                    action, path[:200],
+                    {"via": str((principal or {}).get("auth") or (principal or {}).get("kind") or "")[:40]},
+                    ok=bool(ok), ip=self._client_ip())
+            except Exception:
+                pass
+            if not ok:
+                log_event("api_read_denied" if action == "read_denied" else "api_read_forbidden",
+                          path=path, actor=actor, ip=self._client_ip())
+
+        def _gate_read(self):
+            """业务读接口：主人会话、带 scope 的 Bearer，或过渡期令牌哈希比对。匿名默认 401。"""
+            parsed = urlparse(self.path)
+            path = parsed.path.rstrip("/") or "/"
+            need = "stream" if path.startswith("/api/stream") else "read"
+            secret = read_auth.presented_secret(self, allow_query=path.startswith("/api/stream"))
+            conn = db_fn()
+            try:
+                principal = None
+                if secret:
+                    principal = read_auth.resolve(
+                        conn, secret, tokens, viewers, owners or {}, token_scopes)
+                if read_auth.anon_enabled():
+                    read_auth.note_anon_window(log_event, True)
+                    if not (principal and read_auth.allows(principal, path, need)):
+                        principal = {"kind": "anon", "actor": "anon", "auth": "rollback",
+                                     "scopes": ("read", "stream")}
+                        secret = ""
+                    self._read_principal = principal
+                    self._presented = secret if principal.get("kind") in ("token", "viewer") else ""
+                    self._audit_access(conn, path, principal, True)
+                    return True
+                read_auth.note_anon_window(log_event, False)
+                if not principal:
+                    self._audit_access(conn, path, {"kind": "anonymous", "actor": "anonymous"}, False)
+                    self._send(401, {"ok": False, "error": "需要主人会话或令牌", "need_auth": True})
+                    return False
+                if not read_auth.allows(principal, path, need):
+                    self._audit_access(conn, path, principal, False, action="read_forbidden")
+                    self._send(403, {"ok": False, "error": "权限不足", "need_auth": True})
+                    return False
+                self._read_principal = principal
+                self._presented = secret if principal.get("kind") in ("token", "viewer") else ""
+                self._audit_access(conn, path, principal, True)
+                return True
+            except Exception as e:
+                log_event("api_read_auth_error", path=path, error=type(e).__name__)
+                try:
+                    self._send(500, {"ok": False, "error": "鉴权失败"})
+                except Exception:
+                    pass
+                return False
+            finally:
+                conn.close()
+
         def do_GET(self):
+            path = urlparse(self.path).path
+            if path == "/healthz" or path.startswith("/healthz/"):
+                return self._send(200, {"ok": True, "service": "super-brain-api"})
+            if path.startswith("/api/") and not self._gate_read():
+                return
             if voice_http.try_handle(self, "GET", db_fn, log_event):
                 return
-            if self.path.startswith("/healthz"):        # 免鉴权探活
-                return self._send(200, {"ok": True, "service": "super-brain-api"})
-            gpath = urlparse(self.path).path.rstrip("/")
+            gpath = path.rstrip("/") or "/"
             if gpath in ("/api/groupchat/inbox", "/api/groupchat/me"):
                 return self._groupchat("GET")
-            if self.path.startswith("/api/owner/"):     # 大古身份自查（需设备令牌）
+            if path.startswith("/api/owner/"):     # 大古身份自查（需主人会话）
                 conn = db_fn()
                 try:
                     who = self._owner(conn)
@@ -521,9 +601,9 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
                 if not who:
                     return self._send(401, {"ok": False, "error": "需要先输入当日口令", "need_unlock": True})
                 return self._send(200, {"ok": True, "data": {k: who[k] for k in ("actor", "device", "device_id")}})
-            if self.path.startswith("/api/stream"):     # 实时推送（SSE）
+            if path.startswith("/api/stream"):     # 实时推送（SSE，已过读鉴权）
                 return self._stream()
-            if self.path.startswith("/api/"):           # 只读控制台接口：2026-11-11 起免口令（写入仍走 /cmd）
+            if path.startswith("/api/"):           # 只读控制台接口：字段与旧版相同，但不再匿名
                 conn = db_fn()
                 try:
                     code, obj = console_api.handle_get(conn, self.path)
@@ -553,11 +633,13 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
             if self.path != "/cmd":
                 return self._send(404, {"ok": False, "error": "not found"})
             auth = self.headers.get("Authorization", "")
-            token = auth[7:] if auth.startswith("Bearer ") else ""
-            chief = next((c for c, t in tokens.items()
-                          if token and hmac.compare_digest(str(t).encode(), token.encode())), None)
-            if not chief:
-                log_event("api_auth_failed", ip=self.client_address[0])
+            token = auth[7:].strip() if auth.startswith("Bearer ") else ""
+            chief, why = read_auth.chief_for_write(token, tokens, token_scopes)
+            if why != "ok":
+                log_event("api_auth_failed", ip=self.client_address[0],
+                          reason="scope" if why == "forbidden" else "missing")
+                if why == "forbidden":
+                    return self._send(403, {"ok": False, "error": "权限不足", "need_auth": True})
                 return self._send(401, {"ok": False, "error": "无效口令"})
             try:
                 n = int(self.headers.get("Content-Length", 0))
@@ -572,6 +654,12 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
             conn = db_fn()
             try:
                 res = execute_fn(conn, chief, cmd, args)
+                try:
+                    owner_ops.audit(conn, {"actor": chief, "device": "bearer"}, "cmd", cmd[:60],
+                                    {"ok": bool(res.get("ok"))}, ok=bool(res.get("ok")),
+                                    ip=self._client_ip())
+                except Exception:
+                    pass
             finally:
                 conn.close()
             log_event("api_call", chief=chief, cmd=cmd, ok=bool(res.get("ok")))
@@ -591,15 +679,17 @@ def maybe_start(stop, log_event, db_fn, execute_fn, emit_fn=None):
         return None
     viewers = conf.get("viewers") or {}
     owners = conf.get("owner") or {}          # 大古独立身份 {"dagu-owner": "..."}，不与 Agent 口令混用
+    token_scopes = conf.get("token_scopes") or {}
     bind, port = str(conf.get("bind", "127.0.0.1")), int(conf.get("port", 18765))
     srv = ThreadingHTTPServer(
         (bind, port),
-        _make_handler(db_fn, execute_fn, log_event, tokens, viewers, stop, owners, emit_fn))
+        _make_handler(db_fn, execute_fn, log_event, tokens, viewers, stop, owners, emit_fn, token_scopes))
     srv.daemon_threads = True
     srv.timeout = 2                         # handle_request 轮询间隔，便于响应 stop
 
     def _serve():
-        log_event("api_started", bind=bind, port=port, chiefs=sorted(tokens), viewers=sorted(viewers))
+        log_event("api_started", bind=bind, port=port, chiefs=sorted(tokens), viewers=sorted(viewers),
+                  anon_read=read_auth.anon_enabled())
         while not stop.is_set():
             srv.handle_request()
 
@@ -607,7 +697,7 @@ def maybe_start(stop, log_event, db_fn, execute_fn, emit_fn=None):
     t.start()
 
     # 可选：同时监听 80，方便直接用 http://<公网IP>/ 打开控制台（端口被占用则忽略）
-    handler = _make_handler(db_fn, execute_fn, log_event, tokens, viewers, stop, owners, emit_fn)
+    handler = _make_handler(db_fn, execute_fn, log_event, tokens, viewers, stop, owners, emit_fn, token_scopes)
     for extra in conf.get("extra_ports") or []:
         try:
             s2 = ThreadingHTTPServer(("0.0.0.0", int(extra)), handler)

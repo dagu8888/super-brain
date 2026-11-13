@@ -12,7 +12,7 @@ quality: reviewed
 approved_by: grok-chief
 approval_note: 大古 2026-11-11 23:03（北京时间）在聊天中批准转正
 approved_at: 2026-11-11
-updated: 2026-11-11
+updated: 2026-11-13
 
 ---
 
@@ -39,7 +39,7 @@ updated: 2026-11-11
 
 ## 控制台与网关（api_server.py / projects.py）
 
-- 控制台只读接口 GET /api/*：2026-11-11 起免口令（写入仍走 /cmd 或大古口令）；“需要 viewer 只读口令”是旧口径。
+- 控制台只读接口 GET /api/*：2026-11-13 起必须带主人设备会话、带 scope 的 Bearer，或与现有令牌做哈希比对。匿名返回 401，不再返回业务数据。`/healthz` 与 `/console/` 静态资源仍公开。紧急回滚环境变量 `SB_ALLOW_ANON_READ=1`（默认关闭）。“GET 免口令”是旧口径。迁移说明见 `40-Agents/读接口鉴权-迁移说明.md`。
 - 大古在操作台做写操作：2026-11-11 起用每日口令（当日口令，当天首次输入，当晚 23:59 前有效），旧配对框输入当日口令也可解锁；“配对码”是旧口径。
 - https 正式入口：console.8.218.106.225.nip.io + Let's Encrypt，已验收；“只有明文 HTTP、没有 HTTPS”是旧口径。
 - 项目编辑、改阶段、验收的权限：`EDITORS = ("dagu-owner", "grok-chief")`，即大古（dagu-owner）与指挥官 grok-chief，其他 Agent 只读。
