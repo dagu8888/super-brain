@@ -1,0 +1,56 @@
+id	type	question	gold_answer	answer_keys	gold_sources	query_kw	stale_keys	current_sources
+CS01	现行状态	网关 /cmd 的 kb_search 接受哪些参数名作为检索词？	args 里 q / text / keyword 任选其一（三者都空则 400「空关键词」）；limit 默认 10、上限 20。	"q/text/keyword || args.get(""keyword"")"	90-System/runtime/runtime.py	空关键词		
+CS02	现行状态	Super-Brain 中台服务器的公网 IP 和地域是什么？	阿里云香港轻量服务器，公网 IP 8.218.106.225。	8.218.106.225	部署完成报告.md || 30-Reviews/2026-11-08-V3-总控-进度与交接.md	阿里云香港		
+CS03	现行状态	服务器上 super-brain 仓库多久自动同步一次、用什么署名？	cron 每 30 分钟跑 90-System/sync/sync.sh，署名 hk-server。	hk-server	部署完成报告.md	署名 hk-server		
+CS04	现行状态	按权限矩阵，Grok bot 可以写哪些目录？	只写 00-Inbox 与 60-Outputs；禁写 40-Agents、90-System。	`00-Inbox` `60-Outputs`	40-Agents/权限与同步规则.md	| Grok bot |		
+CS05	现行状态	10-Knowledge 正式笔记的唯一写入口是谁？	KnowledgeWorker（knowledge-worker）。	KnowledgeWorker || knowledge-worker	40-Agents/权限与同步规则.md || 40-Agents/README.md	唯一写入口		
+CS06	现行状态	消息总线的消息存在哪里？会不会触发 LLM worker？	只进 state.db 的 messages 表，不进 events，不触发任何 LLM worker。	messages	40-Agents/实时消息总线-v1.md	不触发任何 LLM worker		
+CS07	现行状态	外部节点执行完任务后，结果文件应写到哪里？	写到 queue/<节点>/results/task-<任务id>-结果.md，信使收口后挪到 60-Outputs/results/。	results/task-	90-System/queue/README.md	节点怎么做		
+CS08	现行状态	操作台「按住说话」用什么识别模型、跑在哪里？	Moonshine Voice tiny-streaming-zh，跑在服务器边车（127.0.0.1:18791），不在浏览器里。	tiny-streaming-zh	90-System/voice/README.md	Moonshine		
+CS09	现行状态	录音/合成音频最多保留几条？	只留最近 10 条。	10 条	90-System/voice/README.md	音频保留硬规则		
+CS10	现行状态	DSH一号节点当前的生产值守插件是哪个？	waker v2（AiNodeGuardian），activator 转为备用。	waker v2	10-Knowledge/Decisions/DSH一号节点双插件收敛与-activator-转备用值守.md	生产值守		
+CS11	现行状态	10-Knowledge 笔记的 category 允许哪些取值？	Playbooks / Concepts / Decisions 三选一。	Playbooks || Decisions	10-Knowledge/README.md || 90-System/runtime/runtime.py	category` 必须是		
+CS12	现行状态	任务租约时长和执行中续租间隔分别是多少？	租约 120 秒，续租间隔 30 秒。	LEASE_SECONDS = 120	90-System/runtime/runtime.py	LEASE_SECONDS		
+CS13	现行状态	任务认领超时阈值是多少秒？	600 秒（CLAIM_TIMEOUT）。	CLAIM_TIMEOUT = 600	90-System/runtime/runtime.py	CLAIM_TIMEOUT = 		
+CS14	现行状态	kb_search / kb_read 会过滤掉哪些敏感文件？	名称以 api_tokens、llm.json、state.db、.env 开头，或后缀 .db/.db-wal/.db-shm/.pem/.key 的文件。	api_tokens	90-System/runtime/runtime.py	SENSITIVE_NAMES		
+CS15	现行状态	幕僚长在 OpenMausBot 里监督哪三个部门？	General、视频部门、私人AI OS。	视频部门	10-Knowledge/Playbooks/幕僚长工作沉淀与团队速览.md || 10-Knowledge/Playbooks/幕僚长接入登记与工作流.md	三个部门		
+CS16	现行状态	仓库的文件命名规范是什么？	YYYY-MM-DD-主题-来源agent.md。	YYYY-MM-DD-主题	README.md || 40-Agents/权限与同步规则.md || 90-System/sync/同步规则.md	文件命名规范		
+CS17	现行状态	谁有权编辑项目、改阶段和验收？	大古（dagu-owner）与指挥官 grok-chief；其他 Agent 只读。	dagu-owner	90-System/runtime/projects.py	EDITORS		
+CS18	现行状态	中台 HTTP 网关监听哪个端口、指挥指令走哪个路径？	18765 端口，POST /cmd。	18765/cmd	40-Agents/五入口在线接入.md	接口地址		
+HI01	历史事件	2026-11-08 inbox-triage 死信事故的两层根因是什么？	① handle_inbox_triage 只认 payload.path，纯文本 {text} 触发 KeyError 被判不可重试；② 长文本让 LLM 输出超 max_tokens=3000 被截断、JSON 解析失败。	max_tokens	30-Reviews/2026-11-08-P0-死信修复记录.md	根因（两层		
+HI02	历史事件	2026-11-09 告警递归事故把死信放大到多少条？	约 16 万条（「一夜 16 万+任务」）。	16 万	90-System/runtime/runtime.py	16 万		
+HI03	历史事件	香港云主机首次购买实付多少钱？	¥50.71（1 个月，原价 ¥56，余额抵扣 ¥5.29）。	50.71	部署完成报告.md || 如何让你单机DSH开启Obsidian双联云记忆Super-Agent架构保姆级教程.md	50.71		
+HI04	历史事件	2026-11-10 用 submit 广播「所有在线 Agent 回复 1」时，实际是谁回复的？	只有服务器上的 chat-worker（LLM）约 11 秒后代答，真 Agent 都没回。	chat-worker	40-Agents/实时消息总线-v1.md	为什么不走原来的		
+HI05	历史事件	DSH一号节点施工单 #334 暴露了什么风险？	同节点两套自唤醒插件并发建成，会对同一新任务各自拉起 worker，竞态双执行。	竞态	10-Knowledge/Decisions/DSH一号节点双插件收敛与-activator-转备用值守.md	竞态双执行		
+HI06	历史事件	Super-Brain 3.0 交付时真实数据渲染测试结果如何？	22/22 通过。	22/22	30-Reviews/2026-11-08-V3-总控-进度与交接.md	22/22		
+HI07	历史事件	V2 核心设计书对「记忆体系」做了什么决策？	frontmatter Schema + 文件级检索接口，向量库暂缓（量级不足，预留接口）。	向量库暂缓	30-Reviews/2026-11-08-V2-核心设计书.md	向量库暂缓		
+HI08	历史事件	交易研究台两条定时任务为什么被判「错过」？	电脑离线超过 12 小时，到点时机器不在。	离线超过 12 小时	10-Knowledge/Playbooks/幕僚长工作沉淀与团队速览.md	被判「错过」		
+TF01	事实变更	Super-Brain 是不是只有 Grok/DeepSeek/MAUS/DSH/TRAE 五个指挥入口？	已失效：同日追加 MAUS2、DSH2，页面口径为「现共 7 个入口」（另：state.db 现有 8 个 chief，含 muse-chief，页面未更新——见分歧清单）。	现共 7 个入口	40-Agents/五入口在线接入.md	五个幕僚长	五个幕僚长	40-Agents/五入口在线接入.md
+TF02	事实变更	控制台只读接口 GET /api/* 现在还需要 viewer 只读口令吗？	已失效：2026-11-11 起只读接口免口令（写入仍走 /cmd 或大古口令）。旧口径见 API-Contract 与 V3 总控。	免口令	90-System/runtime/api_server.py	viewers	viewers	90-System/runtime/api_server.py
+TF03	事实变更	Router 事件轮询间隔是不是 30 秒？	已失效：2026-11-08 批示#2 由 30 秒提速到 10 秒（SCAN_INTERVAL = 10）。	SCAN_INTERVAL = 10	90-System/runtime/runtime.py	SCAN_INTERVAL	30	90-System/runtime/runtime.py
+TF04	事实变更	inbox-triage 调模型的 max_tokens 还是 3000 吗？	已失效：P0 修复后改为 8000。	8000	30-Reviews/2026-11-08-P0-死信修复记录.md || 90-System/runtime/runtime.py	max_tokens	3000	90-System/runtime/runtime.py || 30-Reviews/2026-11-08-P0-死信修复记录.md
+TF05	事实变更	认领超时/死信告警现在还会自动生成告警任务吗？	已失效：2026-11-09 止血后 ALERTS_ENABLED = False，告警只记日志；超时判定、改派、死信转移仍在。	ALERTS_ENABLED = False	90-System/runtime/runtime.py	ALERTS_ENABLED		90-System/runtime/runtime.py
+TF06	事实变更	DSH一号节点的 dsh1-activator 还是生产值守吗？	已失效：收敛为 waker v2 生产，activator 改为备用（常驻已停、自启入口 .disabled）。	备用	10-Knowledge/Decisions/DSH一号节点双插件收敛与-activator-转备用值守.md	activator		10-Knowledge/Decisions/DSH一号节点双插件收敛与-activator-转备用值守.md
+TF07	事实变更	中台网关是不是只有明文 HTTP、没有 HTTPS？	已失效：https 正式入口 console.8.218.106.225.nip.io + Let's Encrypt 已验收（projects 种子数据）；V3 总控「明文 HTTP，无 HTTPS」为旧口径。	nip.io	90-System/runtime/projects.py	明文 HTTP	无 HTTPS	90-System/runtime/projects.py
+TF08	事实变更	控制台页面数据是不是每 6 秒轮询一次？	已失效：3.0 起改为 SSE 实时推送（/api/stream），推送不可用才降级轮询。	SSE	30-Reviews/2026-11-08-V3-交付说明与回滚.md	每 6 秒轮询	每 6 秒轮询	30-Reviews/2026-11-08-V3-交付说明与回滚.md
+TF09	事实变更	大古在操作台做写操作还是用配对码吗？	已失效：2026-11-11 改为每日口令（当天首次输入，当晚 23:59 前有效），旧配对框输入当日口令也可解锁。	当日口令	90-System/runtime/api_server.py	/api/owner/unlock	配对码	90-System/runtime/api_server.py
+TF10	事实变更	Super-Agent 架构是不是 Router + 3 个 Worker？	已失效：3.0 起为 7 指挥入口 + 7 执行者（knowledge/archive/research/analysis/chat/code/trae-developer）。	7 执行者	30-Reviews/2026-11-08-V3-总控-进度与交接.md	3 个 Worker	3 个 Worker	30-Reviews/2026-11-08-V3-总控-进度与交接.md
+CD01	跨域综合	grok-chief 想直接往 10-Knowledge 写正式笔记，规则允许吗？应该怎么走？	不允许：权限矩阵里 Grok 只写 00-Inbox/60-Outputs，chief 在 PathGuard 的写白名单为空；应写入 00-Inbox，由 knowledge-worker 整理入 10-Knowledge。	00-Inbox	40-Agents/权限与同步规则.md || 00-Inbox/README.md || 90-System/runtime/path_guard.py	| Grok bot |		
+CD02	跨域综合	节点 Agent 动一个任务文件前要先做什么？做完结果写到哪？	先经网关 status 查任务状态，cancelled 的不执行；结果写 results/task-<id>-结果.md，信使收口到 60-Outputs/results/。	cancelled	90-System/queue/README.md	执行前先验状态		
+CD03	跨域综合	为什么点名时 DSH一号/二号只回「1 · 实例 · 收到于…」而没有实质回复？	DSH 一号/二号是 Grok Bot，节点桥 handler=none，只回 transport 层回执；agent 层回复要经 webhook 或人工转达。	handler=none	tools/bus/INSTALL-Windows.md || 40-Agents/实时消息总线-v1.md	handler=none		
+CD04	跨域综合	DSH1 提的网关 HTTPS 化与令牌治理变更请求，哪些已落地、哪些没有？	HTTPS 正式入口（nip.io + Let's Encrypt）已验收；令牌短期化/JWT、guardian 上报端点、按 token 限速在库内无落地证据。	nip.io	10-Knowledge/Decisions/Super-Brain-网关-HTTPS-化与令牌治理变更请求.md || 90-System/runtime/projects.py	令牌短期化		
+CD05	跨域综合	强制回写的「完成定义」是什么？看门狗什么时候做回写审计？	任务完成 = 成果已 push 到云端 + Router 收到汇报；每周日 23:00 看门狗比对任务记录与实际成果并出审计报告。	23:00	90-System/sop/强制回写SOP.md	每周日 23:00		
+CD06	跨域综合	外部用纯文本 submit 的笔记，是怎么一路进到 10-Knowledge 的？	落盘 00-Inbox/.staging/inbox-<hash>.md → inbox-triage（LLM）分类 → 写入 10-Knowledge/<category>/，frontmatter quality: auto-triaged，原 staging 文件删除。	.staging	90-System/runtime/runtime.py || 30-Reviews/2026-11-08-P0-死信修复记录.md	.staging		
+CD07	跨域综合	3.0 红线对 Agent 数量怎么规定？与当前名册一致吗？	红线：不加到 7+7 之外（除用户明确要求）；库内页面未记录之后新增的 muse-chief 等，是否经批准需裁定（state.db 不在库内）。	7+7	30-Reviews/2026-11-08-V3-总控-进度与交接.md	7+7		
+PF01	跨会话偏好	给大古汇报，语言上有什么要求？	中文汇报、说人话（面向非技术背景）。	说人话	30-Reviews/2026-11-08-V3-总控-进度与交接.md || 30-Reviews/2026-11-08-V3-交付说明与回滚.md	说人话		
+PF02	跨会话偏好	大古的私人档案能写进 super-brain 仓库吗？	不能：私人档案只在本地处理，永不写入本仓库，仓库只放可共享的工作内容。	永不写入本仓库	10-Knowledge/Playbooks/幕僚长工作沉淀与团队速览.md || 10-Knowledge/Playbooks/幕僚长接入登记与工作流.md	隐私红线		
+PF03	跨会话偏好	系统里记录时间用什么时区口径？	北京时间。	北京时间	90-System/runtime/projects.py || 40-Agents/实时消息总线-v1.md	时间均为北京时间		
+OK01	库外拒答	Super-Brain 部署用的 Kubernetes 命名空间叫什么？	库内无此信息，应答「知识库里没有」。			Kubernetes		
+OK02	库外拒答	大古老师的雅思成绩是多少？	库内无此信息，应答「知识库里没有」。			雅思		
+OK03	库外拒答	Super-Brain 用的 Milvus 集合名是什么？	库内无此信息，应答「知识库里没有」。			Milvus		
+OK04	库外拒答	XAUUSD 研判台 2026 年 10 月的实盘收益率是多少？	库内无此信息，应答「知识库里没有」。			实盘收益率		
+OK05	库外拒答	Horizon 新闻雷达部署在哪个端口？	库内无此信息，应答「知识库里没有」。			Horizon		
+OK06	库外拒答	元Ai 的 VRM 角色身高设定是多少？	库内无此信息，应答「知识库里没有」。			身高设定		
+OK07	库外拒答	Super-Brain 对外承诺的 SLA 可用性是几个 9？	库内无此信息，应答「知识库里没有」。			SLA		
+OK08	库外拒答	DSH三号节点的实例名是什么？	库内无此信息，应答「知识库里没有」。			DSH三号		
+OK09	库外拒答	Super-Brain 的 Grafana 监控面板地址是什么？	库内无此信息，应答「知识库里没有」。			Grafana		
