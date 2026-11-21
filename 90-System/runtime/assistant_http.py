@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """受控会话 HTTP。日常语音流式转发给官方 DeepSeek，密钥不进响应。"""
 import json
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import assistant_session
 import assistant_store
@@ -203,9 +203,10 @@ def _history(handler, db_fn, log_event):
     who = _require(handler, db_fn, log_event)
     if not who:
         return True
+    wanted = (parse_qs(urlparse(handler.path).query).get("session_id") or [""])[0]
     conn = db_fn()
     try:
-        payload = assistant_store.history(conn, _device(who))
+        payload = assistant_store.history(conn, _device(who), wanted or None)
     finally:
         conn.close()
     payload["mock"] = False

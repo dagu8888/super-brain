@@ -4,6 +4,7 @@
 可编辑的是身份和口气。程序安全约束不写进这张卡，每次组提示时另附。
 持久记录和模型用的短上下文分开。部分识别不入库。
 """
+import os
 import re
 import time
 import uuid
@@ -29,6 +30,12 @@ LOCKED_RULES = (
 CARD_MAX = 2000
 _HOLD = re.compile(r"删除|删掉|下单|买入|卖出|转账|付款|支付|改配置|改设定|改设置")
 _TASK = re.compile(r"帮我|请你|记得|安排|告诉幕僚长|让幕僚长办|交给幕僚长")
+_SECRET_SHAPE = re.compile(
+    r"(?i)(?:bearer\s+[A-Za-z0-9._~+/-]{16,}"
+    r"|(?:api[_ -]?key|x-api-key)\s*[:=]\s*[A-Za-z0-9._~+/-]{8,}"
+    r"|sk-[A-Za-z0-9]{12,})"
+)
+_SECRET_MARK = "[已隐藏]"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS steward_card(
@@ -41,7 +48,8 @@ CREATE TABLE IF NOT EXISTS steward_sessions(
   device_id TEXT NOT NULL,
   opened_at INTEGER NOT NULL,
   closed_at INTEGER,
-  pack_msg_id TEXT
+  pack_msg_id TEXT,
+  pack_claim TEXT
 );
 CREATE TABLE IF NOT EXISTS steward_turns(
   turn_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,6 +65,34 @@ CREATE TABLE IF NOT EXISTS steward_turns(
 
 def ensure_schema(conn):
     conn.executescript(SCHEMA)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(steward_sessions)")}
+    if "pack_claim" not in cols:
+        conn.execute("ALTER TABLE steward_sessions ADD COLUMN pack_claim TEXT")
+        conn.commit()
+
+
+def _known_secrets():
+    found = []
+    for name, least in (("SB_DEEPSEEK_API_KEY", 8), ("SB_OWNER_UNLOCK_PHRASE", 8)):
+        value = os.environ.get(name, "").strip()
+        if len(value) >= least:
+            found.append(value)
+    return found
+
+
+def secret_in(text):
+    raw = str(text or "")
+    if _SECRET_SHAPE.search(raw):
+        return True
+    return any(secret in raw for secret in _known_secrets())
+
+
+def redact_text(text):
+    raw = str(text or "")
+    for secret in _known_secrets():
+        if secret in raw:
+            raw = raw.replace(secret, _SECRET_MARK)
+    return _SECRET_SHAPE.sub(_SECRET_MARK, raw)
 
 
 def compose_system(card_text=None):
@@ -81,6 +117,8 @@ def save_card(conn, text):
     card = str(text or "").strip()
     if not card:
         return {"ok": False, "error": "角色卡是空的"}
+    if secret_in(card):
+        return {"ok": False, "error": "角色卡里有密钥形内容，没有保存。"}
     if len(card) > CARD_MAX:
         return {"ok": False, "error": "角色卡超过 %d 字" % CARD_MAX}
     now = int(time.time())
@@ -109,12 +147,25 @@ def open_session(conn, device):
 
 def latest_session(conn, device):
     ensure_schema(conn)
-    row = conn.execute(
-        "SELECT session_id, closed_at, pack_msg_id FROM steward_sessions WHERE device_id=? ORDER BY opened_at DESC LIMIT 1",
-        (device,)).fetchone()
-    if not row:
-        return None
-    return {"session_id": row[0], "closed": row[1] is not None, "pack_msg_id": row[2]}
+    sessions = list_sessions(conn, device)
+    return sessions[0] if sessions else None
+
+
+def list_sessions(conn, device):
+    ensure_schema(conn)
+    rows = conn.execute(
+        "SELECT session_id, opened_at, closed_at, pack_msg_id FROM steward_sessions WHERE device_id=? ORDER BY opened_at DESC",
+        (device,)).fetchall()
+    out = []
+    for sid, opened, closed, pack in rows:
+        out.append({
+            "session_id": sid,
+            "opened_at": opened,
+            "closed": closed is not None,
+            "pack_msg_id": pack,
+            "label": "本段" if closed is None else "已打包",
+        })
+    return out
 
 
 def append_turn(conn, session_id, role, text, dedupe_key, source=""):
@@ -123,9 +174,9 @@ def append_turn(conn, session_id, role, text, dedupe_key, source=""):
         return {"ok": True, "stored": False, "reason": "partial"}
     if role not in ("dagu", "steward"):
         return {"ok": False, "stored": False, "reason": "role"}
-    body = str(text or "").strip()
+    body = redact_text(str(text or "").strip())
     key = str(dedupe_key or "").strip()
-    if not body or not key:
+    if not body or not key or body == _SECRET_MARK:
         return {"ok": False, "stored": False, "reason": "empty"}
     before = conn.execute(
         "SELECT turn_id FROM steward_turns WHERE session_id=? AND dedupe_key=?",
@@ -150,25 +201,34 @@ def list_turns(conn, session_id):
         out.append({
             "role": role,
             "speaker": "大古" if role == "dagu" else "操作台管家",
-            "text": text,
+            "text": redact_text(text),
             "created_at": created,
         })
     return out
 
 
-def history(conn, device):
-    current = latest_session(conn, device)
-    if not current:
-        return {"ok": True, "session_id": None, "turns": [], "channel": "steward", "separate_from": "chief"}
-    turns = list_turns(conn, current["session_id"])
+def history(conn, device, session_id=None):
+    sessions = list_sessions(conn, device)
+    open_id = next((item["session_id"] for item in sessions if not item["closed"]), None)
+    chosen = None
+    if session_id:
+        chosen = next((item for item in sessions if item["session_id"] == session_id), None)
+    if chosen is None:
+        chosen = next((item for item in sessions if item["session_id"] == open_id), None)
+    if chosen is None and sessions:
+        chosen = sessions[0]
+    turns = list_turns(conn, chosen["session_id"]) if chosen else []
     return {
         "ok": True,
-        "session_id": current["session_id"],
-        "closed": current["closed"],
-        "pack_msg_id": current["pack_msg_id"],
+        "session_id": chosen["session_id"] if chosen else None,
+        "open_session_id": open_id,
+        "closed": bool(chosen and chosen["closed"]),
+        "pack_msg_id": chosen["pack_msg_id"] if chosen else None,
+        "sessions": sessions,
         "turns": turns,
         "channel": "steward",
         "separate_from": "chief",
+        "note": "打包后，下一次定稿另开一段，可以再次交给幕僚长。已打包的段留在回看里。",
     }
 
 
@@ -177,14 +237,14 @@ def build_pack(turns):
     steward = [item for item in turns if item["role"] == "steward"]
     lines = [
         "【操作台管家会话打包】交给幕僚长。这是本段草稿，不是已经执行的动作。",
-        "摘要：本段大古 %d 句，管家 %d 句。" % (len(dagu), len(steward)),
+        "摘要（按句数摘出的草稿，不是模型抽取）：本段大古 %d 句，管家 %d 句。" % (len(dagu), len(steward)),
     ]
     if dagu:
         lines.append("大古最近一句：" + dagu[-1]["text"][:180])
     lines.append("候选任务（只列能在原文对上的；敏感句不代执行）：")
     found = 0
     for item in dagu:
-        text = item["text"].strip()
+        text = redact_text(item["text"]).strip()
         if _HOLD.search(text):
             lines.append("- 未纳入交办（需大古本人确认）：" + text[:120])
             continue
@@ -197,29 +257,80 @@ def build_pack(turns):
     lines.append("原文：")
     for item in turns:
         who = "大古" if item["role"] == "dagu" else "操作台管家"
-        lines.append("%s：%s" % (who, item["text"][:400]))
+        lines.append("%s：%s" % (who, redact_text(item["text"])[:400]))
     return "\n".join(lines)[:8000]
 
 
-def pack_session(conn, device, session_id, poster):
+def _clear_claim(conn, session_id, claim):
+    conn.execute(
+        "UPDATE steward_sessions SET pack_claim=NULL WHERE session_id=? AND pack_claim=?",
+        (session_id, claim))
+    conn.commit()
+
+
+def _wait_pack(conn, device, session_id, timeout=3.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        row = conn.execute(
+            "SELECT device_id, pack_msg_id FROM steward_sessions WHERE session_id=?",
+            (session_id,)).fetchone()
+        if row and row[0] == device and row[1]:
+            return {"ok": True, "handed": True, "duplicate": True, "msg_id": row[1]}
+        time.sleep(0.05)
+    return {"ok": False, "handed": False, "error": "上一次交办还没有回执"}
+
+
+def _claim_pack(conn, device, session_id):
     ensure_schema(conn)
+    conn.execute("BEGIN IMMEDIATE")
     row = conn.execute(
-        "SELECT device_id, pack_msg_id FROM steward_sessions WHERE session_id=?",
+        "SELECT device_id, pack_msg_id, pack_claim FROM steward_sessions WHERE session_id=?",
         (session_id,)).fetchone()
     if not row or row[0] != device:
-        return {"ok": False, "handed": False, "error": "没有这段管家会话"}
+        conn.commit()
+        return {"state": "missing"}
     if row[1]:
-        return {"ok": True, "handed": True, "duplicate": True, "msg_id": row[1]}
+        conn.commit()
+        return {"state": "done", "msg_id": row[1]}
+    if row[2]:
+        conn.commit()
+        return {"state": "busy"}
+    claim = uuid.uuid4().hex
+    conn.execute(
+        "UPDATE steward_sessions SET pack_claim=? WHERE session_id=? AND device_id=? AND pack_msg_id IS NULL AND pack_claim IS NULL",
+        (claim, session_id, device))
+    won = conn.execute("SELECT changes()").fetchone()[0] == 1
+    conn.commit()
+    if not won:
+        return {"state": "busy"}
+    return {"state": "claimed", "claim": claim}
+
+
+def pack_session(conn, device, session_id, poster):
+    claim = _claim_pack(conn, device, session_id)
+    if claim["state"] == "missing":
+        return {"ok": False, "handed": False, "error": "没有这段管家会话"}
+    if claim["state"] == "done":
+        return {"ok": True, "handed": True, "duplicate": True, "msg_id": claim["msg_id"]}
+    if claim["state"] == "busy":
+        return _wait_pack(conn, device, session_id)
     turns = list_turns(conn, session_id)
     if not turns:
+        _clear_claim(conn, session_id, claim["claim"])
         return {"ok": False, "handed": False, "error": "这段还没有可打包的话"}
     body = build_pack(turns)
-    receipt = poster(body) if poster else {"ok": False}
+    try:
+        receipt = poster(body) if poster else {"ok": False}
+    except Exception:
+        _clear_claim(conn, session_id, claim["claim"])
+        return {"ok": False, "handed": False, "msg_id": None, "error": "没有回执，不能称为已交。"}
     receipt = receipt or {"ok": False}
     if receipt.get("ok") and receipt.get("msg_id"):
+        conn.execute("BEGIN IMMEDIATE")
         conn.execute(
-            "UPDATE steward_sessions SET pack_msg_id=?, closed_at=? WHERE session_id=?",
-            (receipt["msg_id"], int(time.time()), session_id))
+            "UPDATE steward_sessions SET pack_msg_id=?, closed_at=?, pack_claim=NULL WHERE session_id=? AND pack_claim=?",
+            (receipt["msg_id"], int(time.time()), session_id, claim["claim"]))
         conn.commit()
         return {"ok": True, "handed": True, "duplicate": False, "msg_id": receipt["msg_id"]}
+    _clear_claim(conn, session_id, claim["claim"])
     return {"ok": False, "handed": False, "msg_id": None, "error": "没有回执，不能称为已交。"}

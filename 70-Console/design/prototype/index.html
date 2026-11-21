@@ -237,9 +237,11 @@ try {
     <section id="steward-talk" aria-label="操作台管家对话">
       <div class="sec-head">
         <h2>操作台管家</h2>
+        <label class="steward-session-label" for="steward-session">回看</label>
+        <select id="steward-session" aria-label="回看管家会话"></select>
         <button class="chip" id="btn-steward-pack" type="button">交给幕僚长：打包本段</button>
       </div>
-      <p class="note">这里只记大古和管家的定稿。部分识别不存。下面的列表仍是给幕僚长的文字直聊。</p>
+      <p class="note" id="steward-session-note">定稿记在这里。打包后，下一次定稿另开一段。下面仍是幕僚长直聊。</p>
       <ol id="steward-log"><li class="empty">这段还没有定稿。</li></ol>
       <p id="steward-pack-status" class="note" role="status"></p>
     </section>

@@ -3364,6 +3364,29 @@
     const ol = $("#steward-log");
     if (!ol) return;
     stewardSessionId = (data && data.session_id) || "";
+    const select = $("#steward-session");
+    if (select) {
+      const sessions = (data && data.sessions) || [];
+      select.replaceChildren();
+      if (!sessions.length) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "本段";
+        select.appendChild(opt);
+      }
+      sessions.forEach((item) => {
+        const opt = document.createElement("option");
+        opt.value = item.session_id;
+        const when = item.opened_at ? new Date(item.opened_at * 1000).toLocaleString() : "";
+        opt.textContent = (item.closed ? "已打包" : "本段") + (when ? " · " + when : "");
+        select.appendChild(opt);
+      });
+      if (data && data.session_id) select.value = data.session_id;
+    }
+    const sessionNote = $("#steward-session-note");
+    if (sessionNote && data && data.note) sessionNote.textContent = data.note;
+    const packNote = $("#steward-pack-status");
+    if (packNote && data && data.pack_msg_id) packNote.textContent = "已交给幕僚长。回执 " + data.pack_msg_id;
     const turns = (data && data.turns) || [];
     ol.replaceChildren();
     if (!turns.length) {
@@ -3422,11 +3445,12 @@
     if (box && j.text) box.value = j.text;
     if (note) note.textContent = j.ok ? "已保存，回读一致。后续管家对话使用这段。" : (j.error || "没有保存。");
   }
-  async function loadStewardHistory() {
+  async function loadStewardHistory(sessionId) {
     const o = own();
     if (!o) return;
     try {
-      const r = await fetch(API + "/api/owner/assistant/history", { headers: { Authorization: "Bearer " + o.token }, cache: "no-store", credentials: "same-origin" });
+      const q = sessionId ? ("?session_id=" + encodeURIComponent(sessionId)) : "";
+      const r = await fetch(API + "/api/owner/assistant/history" + q, { headers: { Authorization: "Bearer " + o.token }, cache: "no-store", credentials: "same-origin" });
       if (!r.ok) return;
       renderStewardLog(await r.json());
     } catch (e) { /* 刷新失败时保留已显示的记录 */ }
@@ -3506,6 +3530,8 @@
     if (saveCard) saveCard.addEventListener("click", () => saveStewardCard());
     const pack = $("#btn-steward-pack");
     if (pack) pack.addEventListener("click", () => packSteward());
+    const sessionPick = $("#steward-session");
+    if (sessionPick) sessionPick.addEventListener("change", () => loadStewardHistory(sessionPick.value));
   }
   function bindExtras() {
     $("#chat-form").addEventListener("submit", (e) => { e.preventDefault(); sendChat(); });

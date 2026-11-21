@@ -6,6 +6,7 @@ import sqlite3
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 RT = Path(__file__).resolve().parents[1]
@@ -139,6 +140,14 @@ def test_card_and_separation():
     for i in range(8):
         book2.remember("d", "user", "短%d" % i)
     check("模型短上下文仍最多 6 条", book2.context_size("d") == 6 and len(turns) > 6)
+    packed = assistant_store.pack_session(conn, "dev", sid, lambda text: {"ok": True, "msg_id": "pack-1"})
+    sid2 = assistant_store.open_session(conn, "dev")
+    assistant_store.append_turn(conn, sid2, "dagu", "第二段新内容", "dagu:new")
+    now = assistant_store.history(conn, "dev")
+    old = assistant_store.history(conn, "dev", sid)
+    again = assistant_store.pack_session(conn, "dev", sid, lambda text: (_ for _ in ()).throw(AssertionError("旧段不应再投递")))
+    second = assistant_store.pack_session(conn, "dev", sid2, lambda text: {"ok": True, "msg_id": "pack-2"})
+    check("打包后新段可再交，旧段可回看", packed.get("msg_id") == "pack-1" and sid2 != sid and now["session_id"] == sid2 and now["open_session_id"] == sid2 and any(item["session_id"] == sid and item["pack_msg_id"] == "pack-1" for item in now["sessions"]) and any(item["text"] == "第一句" for item in old["turns"]) and all(item["text"] != "第二段新内容" for item in old["turns"]) and again["duplicate"] is True and again["msg_id"] == "pack-1" and second["msg_id"] == "pack-2" and second["duplicate"] is False)
     conn.close()
 
 
@@ -193,9 +202,79 @@ def test_http_pack():
         httpd.shutdown()
 
 
+def test_parallel_pack_and_secrets():
+    path = fresh()
+    conn = sqlite3.connect(str(path))
+    sid = assistant_store.open_session(conn, "dev")
+    assistant_store.append_turn(conn, sid, "dagu", "帮我记一下周五开会", "dagu:1")
+    conn.close()
+    calls = {"n": 0}
+    gate = threading.Lock()
+
+    def poster(text):
+        with gate:
+            calls["n"] += 1
+            mine = calls["n"]
+        time.sleep(0.2)
+        return {"ok": True, "msg_id": "parallel-%d" % mine}
+
+    results = [None, None]
+
+    def worker(idx):
+        own = sqlite3.connect(str(path), timeout=10)
+        try:
+            results[idx] = assistant_store.pack_session(own, "dev", sid, poster)
+        finally:
+            own.close()
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in (0, 1)]
+    for item in threads:
+        item.start()
+    for item in threads:
+        item.join(5)
+    ids = [item.get("msg_id") if item else None for item in results]
+    check("并发双击只投递一次且回执相同", calls["n"] == 1 and ids[0] and ids[0] == ids[1] and any(item.get("duplicate") for item in results), ids)
+
+    key = "unit-secret-" + "a" * 24
+    phrase = "unit-unlock-" + "b" * 16
+    old_key = os.environ.get("SB_DEEPSEEK_API_KEY")
+    old_phrase = os.environ.get("SB_OWNER_UNLOCK_PHRASE")
+    os.environ["SB_DEEPSEEK_API_KEY"] = key
+    os.environ["SB_OWNER_UNLOCK_PHRASE"] = phrase
+    try:
+        conn = sqlite3.connect(str(path))
+        rejected = assistant_store.save_card(conn, "口吻如下 " + key)
+        plain = json.dumps(rejected, ensure_ascii=False)
+        check("保存角色卡拒绝密钥且错误不含密钥", rejected.get("ok") is False and key not in plain and phrase not in plain)
+        kept = assistant_store.load_card(conn)
+        check("拒绝后原卡还在", key not in kept["text"] and kept["text"] != "口吻如下 " + key)
+        ordinary = assistant_store.save_card(conn, "讨论一下接口用法，把会议记下来。")
+        check("普通讨论不会被当成密钥", ordinary.get("ok") is True and ordinary.get("text") == "讨论一下接口用法，把会议记下来。")
+        bearer = assistant_store.save_card(conn, "Bearer " + ("c" * 20))
+        check("明确的 Bearer 形式被拒绝", bearer.get("ok") is False and "c" * 20 not in json.dumps(bearer))
+        sid2 = assistant_store.open_session(conn, "dev2")
+        assistant_store.append_turn(conn, sid2, "dagu", "记一下 " + key + " 别外传", "dagu:secret")
+        stored = assistant_store.list_turns(conn, sid2)
+        blob = json.dumps(stored, ensure_ascii=False)
+        check("聊天记录不保留密钥原文", key not in blob and "已隐藏" in blob)
+        packed = assistant_store.build_pack(stored)
+        check("打包草稿不带出密钥", key not in packed and "不是模型抽取" in packed)
+        conn.close()
+    finally:
+        if old_key is None:
+            os.environ.pop("SB_DEEPSEEK_API_KEY", None)
+        else:
+            os.environ["SB_DEEPSEEK_API_KEY"] = old_key
+        if old_phrase is None:
+            os.environ.pop("SB_OWNER_UNLOCK_PHRASE", None)
+        else:
+            os.environ["SB_OWNER_UNLOCK_PHRASE"] = old_phrase
+
+
 if __name__ == "__main__":
     test_card_and_separation()
     test_http_pack()
+    test_parallel_pack_and_secrets()
     if FAILS:
         print("FAILED " + ", ".join(FAILS))
         sys.exit(1)
