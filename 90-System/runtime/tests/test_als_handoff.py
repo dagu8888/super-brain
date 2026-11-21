@@ -105,7 +105,7 @@ def test_slots_and_memory_gap():
     check("新会话四栏有来源且主人记忆仍是缺口",
           "NOT IMPLEMENTED" in slots["{{USER_MEMORY}}"] and "没有主人记忆表" in slots["{{USER_MEMORY}}"]
           and "没有 projects 表" in slots["{{PROJECT_STATE}}"]
-          and "0 条" in slots["{{ACTIVE_TASKS}}"] and "tasks" in slots["{{ACTIVE_TASKS}}"]
+          and "0 条" in slots["{{ACTIVE_TASKS}}"] and "als_handoff" in slots["{{ACTIVE_TASKS}}"]
           and "0 条" in slots["{{ASR_GLOSSARY}}"] and "asr_glossary" in slots["{{ASR_GLOSSARY}}"]
           and "贾维斯" not in slots["{{ASR_GLOSSARY}}"]
           and "{{USER_MEMORY}}" not in text and "二、发给 Grokbot" not in text)
@@ -248,7 +248,7 @@ def test_verbal_and_status():
               and "任务号 %s" % link[0] in chief and link[1] not in str(link[0]))
         check("状态是未执行且没有假百分比",
               stored["execution"] == "未执行" and stored["progress_percent"] is None and stored["status"] == "pending"
-              and stored["msg_id"] == link[1] and payload["approval_required"] is True and "title" in payload)
+              and stored["msg_id"] == link[1] and payload["approval_required"] is True and payload.get("no_claim_timeout") is True and "title" in payload)
         code, body = req(port, "GET", "/api/owner/assistant/task?task_id=%s" % link[0], headers=auth)
         check("主人能查到同一条真实状态", code == 200 and body.get("task_id") == link[0] and body.get("execution") == "未执行" and body.get("progress_percent") is None)
         code, missing = req(port, "GET", "/api/owner/assistant/task?task_id=99999", headers=auth)
@@ -330,12 +330,33 @@ def test_pack_once_and_old_rows():
     check("并发打包只有一个任务号", calls["n"] == 1 and len(ids) == 1 and task_rows(path2).__len__() == 1)
 
 
+def test_exemption_and_count_scope():
+    path = fresh()
+    conn = sqlite3.connect(str(path))
+    now = int(time.time())
+    for i in range(40):
+        conn.execute(
+            "INSERT INTO tasks(type,payload,status,priority,max_retries,created_at) VALUES(?,?,?,?,?,?)",
+            ("chat", json.dumps({"n": i}, ensure_ascii=False), "pending", 0, 3, now))
+    conn.commit()
+    empty = assistant_handoff.active_tasks_slot(conn)
+    opened = assistant_handoff.ensure_handoff(
+        conn, "verbal:scope", assistant_handoff.fields_for_verbal("告诉幕僚长一件"), "owner_verbal")
+    payload = json.loads(conn.execute("SELECT payload FROM tasks WHERE id=?", (opened["task_id"],)).fetchone()[0])
+    scoped = assistant_handoff.active_tasks_slot(conn)
+    conn.close()
+    check("无关任务不进入管家活动栏", "0 条" in empty and "40" not in empty and "chat" not in empty)
+    check("交办豁免认领超时且只计这一条",
+          opened.get("ok") and payload.get("no_claim_timeout") is True and "pending 1" in scoped and "40" not in scoped and "chat" not in scoped)
+
+
 if __name__ == "__main__":
     test_slots_and_memory_gap()
     test_glossary_correction()
     test_chat_does_not_dispatch()
     test_verbal_and_status()
     test_pack_once_and_old_rows()
+    test_exemption_and_count_scope()
     if FAILS:
         print("FAILED " + ", ".join(FAILS))
         sys.exit(1)

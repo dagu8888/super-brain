@@ -107,6 +107,7 @@ def ensure_handoff(conn, key, fields, source):
             "expected_outcome": fields["expected_outcome"],
             "approval_required": True,
             "source": source,
+            "no_claim_timeout": True,
         }, ensure_ascii=False, sort_keys=True)
         now = int(time.time())
         cur = conn.execute(
@@ -222,17 +223,18 @@ def active_tasks_slot(conn):
     if "tasks" not in _tables(conn):
         return "NOT IMPLEMENTED（已核主库：没有 tasks 表，未另建）"
     try:
-        counts = conn.execute("SELECT status, COUNT(*) FROM tasks GROUP BY status").fetchall()
+        counts = conn.execute(
+            "SELECT status, COUNT(*) FROM tasks WHERE type=? GROUP BY status", (TASK_TYPE,)).fetchall()
         rows = conn.execute(
             "SELECT id, status, payload, created_at, claimed_at, done_at FROM tasks WHERE type=? ORDER BY id DESC LIMIT 5",
             (TASK_TYPE,)).fetchall()
     except sqlite3.Error:
-        return "NOT IMPLEMENTED（已核 tasks，读失败，未另建）"
-    if not counts and not rows:
-        return "已核 state.db tasks，0 条。来源 tasks。没有进行中的交办。"
-    lines = ["来源 state.db tasks。没有进度百分比。"]
-    if counts:
-        lines.append("各状态条数：" + "，".join("%s %d" % (status, count) for status, count in counts))
+        return "NOT IMPLEMENTED（已核 als_handoff，读失败，未另建）"
+    total = sum(count for _, count in counts)
+    if total == 0:
+        return "已核 als_handoff，0 条。来源 tasks.type=als_handoff。没有把其他任务算进管家交办。没有进度百分比。"
+    lines = ["来源 tasks.type=als_handoff。只计这类交办记录，不含其他任务。没有进度百分比。"]
+    lines.append("als_handoff 各状态：" + "，".join("%s %d" % (status, count) for status, count in counts))
     for task_id, status, payload, created_at, claimed_at, done_at in rows:
         try:
             body = json.loads(payload or "{}")
