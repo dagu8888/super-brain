@@ -395,7 +395,7 @@ def test_frontend_marks():
     check("气泡区分快速回复和正式回复", "who-tag quick" in js and "幕僚长 · 正式回复" in js and ".bub.quick" in css and ".who-tag.chief" in css)
     check("发送响应会立刻画上快速回复", "j.quick_reply" in js and "addChat(j.quick_reply, true)" in js)
     check("文字发送仍会带上快速回复，语音健康仍走 sendChat", "async function commitUtterance" in js and "await sendChat({ voiceGen: sttGen })" in js and "runAssistantTurn" in js)
-    check("页面版本已抬到 2.8.10", "v2/app.js?v=2.8.10" in html and "v2/app.css?v=2.8.10" in html)
+    check("页面版本已抬到 2.8.11", "v2/app.js?v=2.8.11" in html and "v2/app.css?v=2.8.11" in html)
     check("前端没有把令牌写进查询", "token=" not in js and "?token" not in js)
 
 

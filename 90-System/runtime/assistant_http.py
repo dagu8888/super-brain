@@ -3,6 +3,7 @@
 import json
 from urllib.parse import parse_qs, urlparse
 
+import assistant_handoff
 import assistant_session
 import assistant_store
 import message_bus
@@ -67,9 +68,20 @@ def _poster(db_fn, device):
     def poster(text, key):
         conn = db_fn()
         try:
-            return message_bus.post_message(
-                conn, "dagu-owner", "【语音委托】%s" % str(text or "")[:500],
+            opened = assistant_handoff.ensure_handoff(
+                conn, "verbal:" + str(key or ""), assistant_handoff.fields_for_verbal(text), "owner_verbal")
+            if not opened.get("ok"):
+                return {"ok": False, "error": opened.get("error")}
+            if opened.get("msg_id"):
+                return {"ok": True, "duplicate": True, "msg_id": opened["msg_id"], "task_id": opened["task_id"]}
+            receipt = message_bus.post_message(
+                conn, "dagu-owner",
+                "【语音委托】任务号 %s（任务库编号，不是消息号）。当前未执行。%s" % (opened["task_id"], str(text or "")[:500]),
                 to=assistant_session.CHIEF_ID, kind="chat")
+            if receipt.get("ok") and receipt.get("msg_id"):
+                assistant_handoff.attach_msg(conn, opened["task_id"], receipt["msg_id"])
+                receipt["task_id"] = opened["task_id"]
+            return receipt
         except Exception:
             return {"ok": False}
         finally:
@@ -109,9 +121,13 @@ def _stream(handler, db_fn, log_event):
         _json_send(handler, 400, {"ok": False, "stored": False, "error": "部分识别不存档", "mock": False})
         return True
     card_text = None
+    slots = None
+    utterance = None
     conn = db_fn()
     try:
         card_text = assistant_store.load_card(conn)["text"]
+        slots = assistant_handoff.context_slots(conn)
+        utterance = assistant_handoff.prepare_turn(conn, req.get("text") or "", req.get("domain"))
     finally:
         conn.close()
     mode = assistant_session.public_status().get("mode") or "unconfigured"
@@ -132,7 +148,9 @@ def _stream(handler, db_fn, log_event):
             uncertain=uncertain,
             budget=budget, timeout_s=timeout_s,
             poster=_poster(db_fn, device),
-            card_text=card_text):
+            card_text=card_text,
+            slots=slots,
+            utterance=utterance):
         if _BOOK.current(device) != turn_id and item.get("event") != "error":
             item = {"event": "error", "mock": False, "code": "superseded", "stop_tts": True, "stop_mic": False,
                     "message": "新一轮已到，旧流关闭。"}
@@ -249,6 +267,55 @@ def _pack(handler, db_fn, log_event):
     return True
 
 
+def _task(handler, db_fn, log_event):
+    if not _require(handler, db_fn, log_event):
+        return True
+    raw = (parse_qs(urlparse(handler.path).query).get("task_id") or [""])[0]
+    conn = db_fn()
+    try:
+        found = assistant_handoff.task_status(conn, raw)
+    finally:
+        conn.close()
+    if not found:
+        _json_send(handler, 404, {"ok": False, "error": "没有这条任务", "execution": "未知", "progress_percent": None, "mock": False})
+        return True
+    found["mock"] = False
+    _json_send(handler, 200, found)
+    return True
+
+
+def _glossary_get(handler, db_fn, log_event):
+    if not _require(handler, db_fn, log_event):
+        return True
+    conn = db_fn()
+    try:
+        rows = assistant_handoff.list_corrections(conn)
+    finally:
+        conn.close()
+    _json_send(handler, 200, {"ok": True, "mock": False, "items": rows, "source": "state.db asr_glossary"})
+    return True
+
+
+def _glossary_post(handler, db_fn, log_event):
+    who = _require(handler, db_fn, log_event)
+    if not who:
+        return True
+    try:
+        req = handler._read_json()
+    except Exception:
+        _json_send(handler, 400, {"ok": False, "error": "请求无效", "mock": False})
+        return True
+    conn = db_fn()
+    try:
+        saved = assistant_handoff.save_correction(conn, req, _device(who))
+    finally:
+        conn.close()
+    saved["mock"] = False
+    log_event("asr_glossary", ok=bool(saved.get("ok")))
+    _json_send(handler, 200 if saved.get("ok") else 400, saved)
+    return True
+
+
 def _cancel(handler, db_fn, log_event):
     who = _require(handler, db_fn, log_event)
     if not who:
@@ -268,12 +335,15 @@ _GET = {
     "/api/owner/assistant/status": _status,
     "/api/owner/assistant/card": _card_get,
     "/api/owner/assistant/history": _history,
+    "/api/owner/assistant/task": _task,
+    "/api/owner/assistant/glossary": _glossary_get,
 }
 _POST = {
     "/api/owner/assistant/stream": _stream,
     "/api/owner/assistant/cancel": _cancel,
     "/api/owner/assistant/card": _card_post,
     "/api/owner/assistant/pack": _pack,
+    "/api/owner/assistant/glossary": _glossary_post,
 }
 
 

@@ -3425,8 +3425,8 @@
     if (sessionNote && data && data.note) sessionNote.textContent = data.note;
     const packNote = $("#steward-pack-status");
     const summary = $("#steward-more-summary");
-    if (packNote && data && data.pack_msg_id) packNote.textContent = "已交给幕僚长。回执 " + data.pack_msg_id;
-    if (summary) summary.textContent = data && data.pack_msg_id ? ("回看与交办 · 回执 " + data.pack_msg_id) : "回看与交办";
+    if (packNote && data && data.pack_msg_id) packNote.textContent = "已交给幕僚长。回执 " + data.pack_msg_id + (data.pack_task_id ? "。任务号 " + data.pack_task_id : "");
+    if (summary) summary.textContent = data && data.pack_msg_id ? ("回看与交办 · 回执 " + data.pack_msg_id + (data.pack_task_id ? " · 任务 " + data.pack_task_id : "")) : "回看与交办";
     const turns = (data && data.turns) || [];
     ol.replaceChildren();
     if (!turns.length) {
@@ -3509,7 +3509,7 @@
     let j = {};
     try { j = await r.json(); } catch (e) { j = { ok: false }; }
     if (note) {
-      if (j.handed && j.msg_id) note.textContent = (j.duplicate ? "已经交给幕僚长。回执仍是 " : "已交给幕僚长。回执 ") + j.msg_id;
+      if (j.handed && j.msg_id) note.textContent = (j.duplicate ? "已经交给幕僚长。回执仍是 " : "已交给幕僚长。回执 ") + j.msg_id + (j.task_id ? "。任务号 " + j.task_id : "");
       else note.textContent = j.error || "没有回执，不能称为已交。";
     }
     loadStewardHistory();
