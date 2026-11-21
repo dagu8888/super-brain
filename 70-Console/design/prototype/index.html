@@ -16,7 +16,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="v2/icons/favicon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="v2/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="v2/app.css?v=2.8.4">
+<link rel="stylesheet" href="v2/app.css?v=2.8.5">
 <script>
 try {
   var root = document.documentElement;
@@ -173,50 +173,55 @@ try {
     <div class="sec-head">
       <h2>指挥官对话 <small id="chat-sub">大古 ↔ 幕僚长</small></h2>
       <div class="chat-tools">
-        <button class="chip chip-gold live-call" id="btn-live-call" type="button" aria-pressed="false" title="开始和幕僚长实时通话">实时通话</button>
-        <button class="chip" id="btn-tts" type="button" aria-pressed="false" title="朗读幕僚长的新回复">朗读 关</button>
+        <button class="chip" id="btn-capture" type="button" aria-pressed="false" title="语音采集关闭。麦克风不会打开。">语音采集 关</button>
+        <button class="chip chip-gold live-call" id="btn-live-call" type="button" aria-pressed="false" title="开始实时通话。识别走本地 Moonshine，不打开 Nova-3。">实时通话</button>
+        <button class="chip" id="btn-tts" type="button" aria-pressed="false" title="朗读关。不会把回复文字交给浏览器语音。">朗读 关</button>
         <button class="chip" id="btn-chat-more" type="button" title="加载更早的消息">更早</button>
       </div>
     </div>
     <section class="voice-panel" id="voice-panel" aria-label="语音设置">
       <div class="voice-panel-head">
-        <h3>语音</h3>
+        <h3 id="voice-panel-title">语音</h3>
+        <button class="chip" id="btn-voice-collapse" type="button" aria-expanded="true" aria-controls="voice-panel-body">收起</button>
         <p id="voice-voice-label">音色 文静 · flux-wenjing-zh</p>
       </div>
+      <div id="voice-panel-body">
       <div class="voice-modes" role="radiogroup" aria-label="语音模式">
-        <label class="voice-mode"><input type="radio" name="voice-mode" value="hold" checked><span><b>按住说话</b><small>松手转文字，不自动发送。Deepgram 已配置时，幕僚长回复可用文静朗读。</small></span></label>
-        <label class="voice-mode"><input type="radio" name="voice-mode" value="stream"><span><b>流式（本地小模型）</b><small>香港 Moonshine 边听边出字，可随时打断。本机没有现成 TTS，流式朗读用 Deepgram 文静；没配密钥时改用浏览器语音。</small></span></label>
-        <label class="voice-mode"><input type="radio" name="voice-mode" value="live"><span><b>实时语音 API</b><small>对着讲，文静用 Deepgram 开口。转写 Nova-3 简体中文。对话仍是幕僚长，不另开语音大模型。</small></span></label>
+        <label class="voice-mode"><input type="radio" name="voice-mode" value="hold" checked><span><b>按住说话</b><small>先打开「语音采集」。松手只把文字填进输入框，不自动发送。</small></span></label>
+        <label class="voice-mode"><input type="radio" name="voice-mode" value="stream"><span><b>流式（本地小模型）</b><small>本地 Moonshine 滚动识别。部分转写就地更新，停顿后定稿。可打断。朗读要单独打开。</small></span></label>
+        <label class="voice-mode"><input type="radio" name="voice-mode" value="live"><span><b>实时语音 API</b><small>按钮仍在。本次识别不打开 Nova-3，改走同一条本地 Moonshine。文静不更换；未打开朗读或未配置时不发合成。</small></span></label>
       </div>
       <label class="toggle-row" for="voice-bgm"><span>背景音乐<small>默认开。先播完「大古，欢迎回来」，再放音乐，两段不重叠。</small></span><input id="voice-bgm" type="checkbox" checked></label>
       <div class="voice-slots" id="voice-slots">
         <form class="voice-slot" data-provider="deepgram" autocomplete="off">
           <div><b>Deepgram</b><small>本次接入 · Nova-3 + 文静</small></div>
-          <em data-slot-state>未配置</em>
+          <em data-slot-state data-state="pending">读取中</em>
           <input type="password" name="api_key" autocomplete="new-password" placeholder="密钥只存服务器" aria-label="Deepgram 密钥">
           <button class="chip" type="submit">保存</button>
         </form>
         <form class="voice-slot" data-provider="gemini_live" autocomplete="off">
           <div><b>Gemini Live</b><small>预留，尚未接入通话</small></div>
-          <em data-slot-state>未配置</em>
+          <em data-slot-state data-state="pending">读取中</em>
           <input type="password" name="api_key" autocomplete="new-password" placeholder="密钥只存服务器" aria-label="Gemini Live 密钥">
           <button class="chip" type="submit">保存</button>
         </form>
         <form class="voice-slot" data-provider="elevenlabs" autocomplete="off">
           <div><b>ElevenLabs</b><small>预留，尚未接入通话</small></div>
-          <em data-slot-state>未配置</em>
+          <em data-slot-state data-state="pending">读取中</em>
           <input type="password" name="api_key" autocomplete="new-password" placeholder="密钥只存服务器" aria-label="ElevenLabs 密钥">
           <button class="chip" type="submit">保存</button>
         </form>
         <form class="voice-slot" data-provider="bailian" autocomplete="off">
           <div><b>阿里云百炼</b><small>预留，尚未接入通话</small></div>
-          <em data-slot-state>未配置</em>
+          <em data-slot-state data-state="pending">读取中</em>
           <input type="password" name="api_key" autocomplete="new-password" placeholder="密钥只存服务器" aria-label="阿里云百炼密钥">
           <button class="chip" type="submit">保存</button>
         </form>
       </div>
       <p class="note" id="voice-entry-note">进入页面先由文静说「大古，欢迎回来」（本地音频，不现场调用）。说完再放背景音乐。文件还没放进目录、或浏览器拦住自动播放时，点一下页面任意处会按同样顺序补播；欢迎语播不了就只放音乐。</p>
+      <p class="note" id="voice-flow-note">声音只在「语音采集」打开后进入麦克风，经本机接口交给已有的 Moonshine，不打开 Nova-3。文字回复是整段到达：快速回复不是幕僚长正式回复，也不是逐字流。朗读默认关。打开后，已配置的文静仍走服务器原来的接口；浏览器语音只有确认 localService=true 的中文本地音色才使用。不能确认就显示不可用，不把文字送去外部合成。</p>
       <p class="note">查看不用口令。切换模式和保存密钥需要今日口令。页面上看不到已保存的密钥。</p>
+      </div>
     </section>
     <ol class="chat-list" id="chat" aria-live="polite" aria-relevant="additions"><li class="empty">读取中…</li></ol>
     <div class="chat-reply" id="chat-reply" hidden></div>
@@ -227,6 +232,9 @@ try {
       <button class="btn" id="chat-send" type="submit">发送</button>
     </form>
     <div class="mic-status" id="mic-status" role="status" aria-live="polite" hidden></div>
+    <p id="voice-live" class="voice-live" role="status" aria-live="polite" hidden></p>
+    <p id="voice-speak-state" class="voice-speak-state">朗读关。对话语音不会播放，也不会把文字交给浏览器语音。</p>
+    <div id="voice-result" class="voice-result" role="status" hidden></div>
     <div class="chat-foot" id="chat-foot"></div>
   </section>
 
@@ -322,7 +330,8 @@ try {
 
 <script src="v2/voice-entry.js?v=2.8.4" defer></script>
 <script src="v2/speak-queue.js?v=2.8.4" defer></script>
+<script src="v2/voice-turn.js?v=2.8.5" defer></script>
 <script src="v2/roster.js?v=2.8.4" defer></script>
-<script src="v2/app.js?v=2.8.4" defer></script>
+<script src="v2/app.js?v=2.8.5" defer></script>
 </body>
 </html>

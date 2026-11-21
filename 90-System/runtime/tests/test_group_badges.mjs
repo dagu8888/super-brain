@@ -80,6 +80,8 @@ function loadApp() {
   };
   sandbox.window = sandbox;
   sandbox.globalThis = sandbox;
+  const turnPath = resolve(root, "70-Console/design/prototype/v2/voice-turn.js");
+  vm.runInNewContext(readFileSync(turnPath, "utf8"), sandbox, { filename: turnPath });
   vm.runInNewContext(src, sandbox, { filename: appPath });
   return { sandbox, document };
 }

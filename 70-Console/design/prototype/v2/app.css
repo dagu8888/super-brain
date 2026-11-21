@@ -456,6 +456,11 @@ button.pill { cursor: pointer; }
 .mic.busy { border-color: var(--gold, #e8c46a); background: rgba(232, 196, 106, .14); animation: micBusy 1s ease-in-out infinite alternate; }
 @keyframes micBusy { from { box-shadow: 0 0 0 2px rgba(232, 196, 106, .10); } to { box-shadow: 0 0 0 7px rgba(232, 196, 106, .22); } }
 .mic-status { margin: 6px 2px 0; font-size: 12.5px; color: var(--ink2); }
+.voice-live, .voice-speak-state, .voice-result { margin: 6px 2px 0; font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; }
+.voice-live { color: var(--ink); }
+.voice-speak-state { color: var(--ink3); }
+.voice-result { color: var(--ink2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: rgba(8, 12, 20, .35); }
+#btn-capture[aria-pressed="true"] { color: #ffd4cf; border-color: rgba(224, 122, 114, .85); }
 .mic-status[data-k="rec"] { color: #ffc0c6; }
 .mic-status[data-k="busy"] { color: var(--gold, #e8c46a); }
 .mic-status[data-k="ok"] { color: #8fe3b0; }
@@ -771,9 +776,11 @@ html.gal-fs .galaxy-card { position: fixed; z-index: 29; }
 .galaxy-depth button { width: 26px; height: 26px; border-radius: 50%; border: 1px solid transparent; background: transparent; color: var(--ink2); font-size: 12px; }
 .galaxy-depth button.on { color: var(--hub2); border-color: rgba(142, 172, 232, .55); background: rgba(142, 172, 232, .16); }
 .voice-panel { display: grid; gap: 8px; margin: 0 0 10px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: rgba(8, 12, 20, .35); }
-.voice-panel-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.voice-panel-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; position: sticky; top: 0; z-index: 2; background: rgba(8, 12, 20, .96); }
 .voice-panel-head h3 { margin: 0; font-size: 13px; letter-spacing: .04em; }
-.voice-panel-head p { margin: 0; color: var(--ink3); font-size: 12px; }
+.voice-panel-head p { margin: 0; color: var(--ink3); font-size: 12px; flex: 1 1 140px; text-align: right; }
+.voice-panel.is-collapsed #voice-panel-body { display: none; }
+#voice-panel-body { display: grid; gap: 8px; min-width: 0; }
 .voice-modes { display: grid; gap: 6px; }
 .voice-mode { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: rgba(255, 255, 255, .02); }
 .voice-mode input { margin-top: 3px; }
@@ -790,6 +797,10 @@ html.gal-fs .galaxy-card { position: fixed; z-index: 29; }
   .chat-list { max-height: none; }
   .galaxy-depth { order: 3; }
   .voice-slot { grid-template-columns: 1fr; }
+  #sec-chat { min-height: 0; overflow: hidden; }
+  #sec-chat .sec-head { position: sticky; top: 0; z-index: 3; background: rgba(12, 18, 30, .94); }
+  #sec-chat .voice-panel { max-height: min(46dvh, 420px); overflow: auto; -webkit-overflow-scrolling: touch; flex: 0 1 auto; min-height: 0; }
+  #sec-chat .chat-list { flex: 1 1 auto; min-height: 120px; }
 }
 
 @media (max-width: 760px) {
