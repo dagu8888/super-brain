@@ -3,7 +3,7 @@
    麦克风 → 本机 Web Audio → 已鉴权的 /api/owner/stt 或 /api/owner/voice/partial
    → 127.0.0.1 上的 Moonshine。页面不打开 Nova-3。
    文字直聊仍走原来的 /api/owner/act。语音定稿的普通闲聊不走 act("msg")，
-   改走明确标记的模拟流。白名单整句只走 GET /api/server，不发给幕僚长，也不生成 shell。
+   改走官方 deepseek-flash。白名单整句只走 GET /api/server，不发给幕僚长，也不生成 shell。
    朗读：用户打开后，已配置文静仍走已有 /api/owner/voice/speak；
    浏览器语音只有 localService===true 的中文音色才允许。不能确认就不可用，不外传。
    快速回复和幕僚长回复按整段描述，不把全量重绘当成逐字流。 */
@@ -56,8 +56,8 @@
     var route = chatRoute(text);
     if (route.kind === "health") return { channel: "health", chief: false, clientAct: false, mock: false, serverMayPost: false };
     if (route.kind !== "chat" || !route.auto) return { channel: "hold", chief: false, clientAct: false, mock: false, serverMayPost: false };
-    if (DELEGATE.test(String(text || ""))) return { channel: "delegate", chief: false, clientAct: false, mock: true, serverMayPost: true, once: true };
-    return { channel: "assistant-mock", chief: false, clientAct: false, mock: true, serverMayPost: false };
+    if (DELEGATE.test(String(text || ""))) return { channel: "delegate", chief: false, clientAct: false, mock: false, serverMayPost: true, once: true };
+    return { channel: "assistant", chief: false, clientAct: false, mock: false, serverMayPost: false };
   }
 
   function voiceAutoAction(text) {
@@ -448,7 +448,7 @@
   }
 
   root.SBVoiceTurn = {
-    VERSION: "2.8.7",
+    VERSION: "2.8.8",
     slotBadgeText: slotBadgeText,
     authPills: authPills,
     ECHO_RMS: ECHO_RMS,

@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""指挥页受控会话。本轮只有明确标记的 mock 流。
+"""指挥页受控会话。日常语音走官方 DeepSeek，不经幕僚长。
 
-不调用文本供应商，不读取密钥，不把回环地址或口述 model ID 写成默认值。
-真实 base URL 只能等于管理员事先给出的 HTTPS 允许名单；本模块不发起连接，
-因此也不会跟随跳转。
+权限在这里用代码强制：A 类直办，明确委托或确需协助才转交一次，
+C 类不执行也不转交代批。模型输出的动作标记只是提议。
+未接通或上游失败时只给出可见错误，不用模拟回答顶上。
 """
-import ipaddress
+import json
 import re
-from urllib.parse import urlparse
+import threading
+
+import assistant_deepseek
 
 CHIEF_ID = "grok-chief"
-MODE = "mock"
+MODE = "deepseek"
 ROLE_CORE = (
     "你是大古的操作台常驻私人助手，不是幕僚长。"
     "这是未生效的核心短卡，只放进模拟上下文，不授予权限。"
@@ -18,6 +20,9 @@ ROLE_CORE = (
     "不要把听写误词写入永久记忆。不要生成任意脚本。"
 )
 DELEGATE_RE = re.compile(r"告诉幕僚长|让幕僚长办")
+GENUINE_RE = re.compile(r"跨项目|多步骤|需要幕僚长协助|交给幕僚长")
+SENSITIVE_RE = re.compile(r"删除|删掉|重启|关机|下单|买入|卖出|转账|付款|支付|改配置|改设定|改设置|执行命令|运行命令|sudo|\brm\b|\bcurl\b|\bwget\b|\bbash\b|\bsh\b|\beval\b|powershell|drop\s+table|[|&;`$<>\\]")
+ACTION_RE = re.compile(r"\[\[sb:(\{.*?\})\]\]", re.DOTALL)
 HEALTH_RE = re.compile(r"^(?:服务器健康|健康状态|系统状态|查看服务器|服务器状态)[。！!？?\s]*$")
 UI_RULES = (
     (re.compile(r"打开语音设置"), "setVoicePanelCollapsed", {"collapsed": False}),
@@ -38,75 +43,14 @@ UI_ARGS = {
     "stopCapture": {},
     "getServerHealth": {},
 }
-_BLOCKED_NAMES = {
-    "localhost",
-    "metadata.google.internal",
-}
-
-
-def allowlist_from_env(raw):
-    if not raw:
-        return ()
-    return tuple(item.strip() for item in str(raw).split(",") if item.strip())
-
-
-def _origin(parsed):
-    host = parsed.hostname or ""
-    if parsed.port:
-        return "https://%s:%s" % (host, parsed.port)
-    return "https://" + host
-
-
-def _blocked_host(host):
-    name = (host or "").lower().rstrip(".")
-    if not name or name in _BLOCKED_NAMES or name.endswith(".localhost") or name.endswith(".local"):
-        return True
-    try:
-        ip = ipaddress.ip_address(name)
-    except ValueError:
-        return False
-    return bool(
-        ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast
-        or ip.is_reserved or ip.is_unspecified
-    )
-
-
-def check_base_url(url, allowlist):
-    """只做地址校验。不连接，不跟随跳转。"""
-    parsed = urlparse(str(url or "").strip())
-    if parsed.scheme != "https":
-        return "reject-scheme"
-    if parsed.username or parsed.password or parsed.query or parsed.fragment:
-        return "reject-secret-or-query"
-    host = parsed.hostname or ""
-    if _blocked_host(host):
-        return "reject-internal"
-    origin = _origin(parsed)
-    allowed = {item.rstrip("/") for item in allowlist or ()}
-    if origin not in allowed:
-        return "reject-not-allowlisted"
-    return "ok"
-
-
 def redirects_are_not_followed():
     return False
 
 
 def public_status(allowlist=()):
-    return {
-        "ok": True,
-        "mock": True,
-        "mode": MODE,
-        "real_connected": False,
-        "label": "模拟流",
-        "reason": "未接通真实流式文本接口。当前只有模拟流，不能当作真实对话。",
-        "allowlist_size": len(tuple(allowlist or ())),
-        "model_id": "",
-        "base_url": "",
-        "live_listen": False,
-        "fields": ["base_url", "model_id", "protocol", "budget", "timeout_s"],
-        "price": None,
-    }
+    view = assistant_deepseek.public_view()
+    view["allowlist_size"] = 1 if view.get("base_url") else 0
+    return view
 
 
 def split_sentences(text):
@@ -124,12 +68,6 @@ def split_sentences(text):
     if tail:
         parts.append(tail)
     return [part for part in parts if part]
-
-
-def _deltas(sentence):
-    step = 4
-    for i in range(0, len(sentence), step):
-        yield sentence[i:i + step]
 
 
 def validate_action(name, args):
@@ -171,10 +109,22 @@ class SessionBook:
         self.spoken = {}
         self.spoken_parts = {}
         self.receipts = {}
+        self.cancels = {}
 
     def begin(self, device, turn_id):
+        old = self.cancels.get(device)
+        if old is not None:
+            old.set()
+        self.cancels[device] = threading.Event()
         self.active[device] = turn_id
         return turn_id
+
+    def cancel_flag(self, device):
+        flag = self.cancels.get(device)
+        if flag is None:
+            flag = threading.Event()
+            self.cancels[device] = flag
+        return flag
 
     def current(self, device):
         return self.active.get(device)
@@ -191,111 +141,240 @@ class SessionBook:
         return len(self.memory.get(device) or [])
 
 
-def _mock_sentences(user_text):
-    clipped = re.sub(r"\s+", " ", str(user_text or "")).strip()[:40]
-    return split_sentences("【模拟流】这不是真实模型。收到：" + clipped + "。")
-
-
 def _ui_action(text):
     raw = str(text or "").strip()
     for pattern, name, args in UI_RULES:
         if pattern.search(raw):
             if not validate_action(name, args):
                 return None
-            return {"name": name, "args": dict(args), "mock": True}
+            return {"name": name, "args": dict(args)}
     return None
 
 
-def plan_turn(book, device, turn_id, text, source="", uncertain=False, budget=80, timeout_s=8, poster=None):
-    """返回事件列表。每条都带 mock=true。不调用网络。"""
-    events = []
-    if book.current(device) != turn_id:
-        events.append({"event": "error", "mock": True, "code": "superseded", "stop_tts": True, "stop_mic": False,
-                       "message": "【模拟流】旧轮次已丢弃，不拼接旧句。"})
-        return events
-    if is_echo(text, book.spoken.get(device), source, book.spoken_parts.get(device)):
-        events.append({"event": "ignored", "mock": True, "code": "echo", "stop_tts": False, "stop_mic": False,
-                       "message": "【模拟流】这是刚才的朗读，不当成新指令。"})
-        return events
-    if timeout_s is not None and float(timeout_s) <= 0:
-        events.append({"event": "error", "mock": True, "code": "timeout", "stop_tts": True, "stop_mic": False,
-                       "message": "【模拟流】超时，失败关闭。已播内容可打断。采集保持。"})
-        return events
-    events.append({"event": "context", "mock": True, "role_core": True, "role_chars": len(ROLE_CORE),
-                   "role_core_text": ROLE_CORE, "memory_items": book.context_size(device), "uncertain_stored": False})
-    if uncertain:
-        events.append({"event": "sentence", "mock": True, "text": "【模拟流】这句听不准，我先不问第二遍。误词不写入记忆。"})
-        events.append({"event": "done", "mock": True, "usage": {"chars": 0}, "stop_mic": False})
-        return events
-    if HEALTH_RE.match(str(text or "").strip()):
-        action = {"name": "getServerHealth", "args": {}, "mock": True}
-        events.append({"event": "action", "mock": True, "name": action["name"], "args": action["args"]})
-        events.append({"event": "sentence", "mock": True, "text": "【模拟流】健康查询在本地办理，不进幕僚长。"})
-        events.append({"event": "done", "mock": True, "usage": {"chars": 16}, "stop_mic": False})
-        book.remember(device, "user", text, uncertain=False)
-        return events
-    match = DELEGATE_RE.search(str(text or ""))
-    if match:
-        key = delegate_key(text)
-        prior = book.receipts.get((device, key))
-        if prior:
-            events.append({"event": "delegate", "mock": True, "duplicate": True, "receipt": prior,
-                           "text": "【模拟流】这件已经转过。回执仍是 %s。" % prior.get("msg_id")})
-            events.append({"event": "done", "mock": True, "usage": {"chars": 8}, "stop_mic": False})
-            return events
-        receipt = {"ok": False}
-        if poster:
-            receipt = poster(text, key) or {"ok": False}
-        if receipt.get("ok") and receipt.get("msg_id"):
-            stored = {"ok": True, "msg_id": receipt.get("msg_id")}
-            book.receipts[(device, key)] = stored
-            events.append({"event": "delegate", "mock": True, "duplicate": False, "receipt": stored,
-                           "text": "【模拟流】已转交。回执是 %s。" % stored["msg_id"]})
-        else:
-            events.append({"event": "delegate", "mock": True, "duplicate": False, "receipt": None,
-                           "text": "【模拟流】没有回执，不能称为已转交。"})
-        events.append({"event": "done", "mock": True, "usage": {"chars": 12}, "stop_mic": False})
-        book.remember(device, "user", text, uncertain=False)
-        return events
-    action = _ui_action(text)
-    sentences = []
-    if action:
-        events.append({"event": "action", "mock": True, "name": action["name"], "args": action["args"]})
-        sentences = ["【模拟流】界面动作已交给程序。"]
+def _mark(event, **fields):
+    item = {"mock": False, "stop_mic": False}
+    item.update(event)
+    item.update(fields)
+    item["mock"] = False
+    return item
+
+
+def _err(code, message):
+    return _mark({"event": "error", "code": code, "stop_tts": True, "message": message})
+
+
+def messages_for(book, device, user_text):
+    prior = []
+    for item in book.memory.get(device) or []:
+        role = item.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        prior.append({"role": role, "content": item.get("text") or ""})
+    return [{"role": "system", "content": ROLE_CORE}] + prior + [{"role": "user", "content": user_text}]
+
+
+def peel_actions(text):
+    actions = []
+
+    def take(match):
+        try:
+            obj = json.loads(match.group(1))
+        except ValueError:
+            return ""
+        if isinstance(obj, dict) and obj.get("name"):
+            actions.append(obj)
+        return ""
+
+    visible = ACTION_RE.sub(take, text)
+    return visible, actions
+
+
+def accept_proposal(user_text, proposal):
+    """模型提议不能单独授权。C 类直接拒绝。界面动作必须和用户原话一致。"""
+    if SENSITIVE_RE.search(user_text or ""):
+        return False
+    name = proposal.get("name")
+    args = proposal.get("args") if isinstance(proposal.get("args"), dict) else {}
+    if name == "handoff":
+        goal = args.get("goal")
+        if not isinstance(goal, str) or not goal.strip() or len(goal) > 120:
+            return False
+        return bool(DELEGATE_RE.search(user_text or "") or GENUINE_RE.search(user_text or ""))
+    local = _ui_action(user_text)
+    if not local or local["name"] != name:
+        return False
+    return validate_action(name, args) and args == local["args"]
+
+
+def _finish_local(book, device, text, spoken):
+    if spoken:
+        book.spoken[device] = spoken
+        book.spoken_parts[device] = split_sentences(spoken)
+    book.remember(device, "user", text, uncertain=False)
+    if spoken:
+        book.remember(device, "assistant", spoken, uncertain=False)
+
+
+def _delegate(book, device, text, poster, key_text=None, spoken=""):
+    key = delegate_key(key_text or text)
+    prior = book.receipts.get((device, key))
+    if prior:
+        sentence = "这件已经转过。回执仍是 %s。" % prior.get("msg_id")
+        yield _mark({"event": "delegate", "duplicate": True, "receipt": prior, "text": sentence})
+        yield _mark({"event": "done", "usage": {"chars": len(sentence)}})
+        return
+    receipt = poster(text, key) if poster else {"ok": False}
+    receipt = receipt or {"ok": False}
+    if receipt.get("ok") and receipt.get("msg_id"):
+        stored = {"ok": True, "msg_id": receipt.get("msg_id")}
+        book.receipts[(device, key)] = stored
+        sentence = "已转交。回执是 %s。" % stored["msg_id"]
+        yield _mark({"event": "delegate", "duplicate": False, "receipt": stored, "text": sentence})
+        _finish_local(book, device, key_text or text, spoken or sentence)
     else:
-        sentences = _mock_sentences(text)
-    used = 0
-    limit = int(budget if budget is not None else 80)
-    assembled = []
-    for sentence in sentences:
-        if book.current(device) != turn_id:
-            events.append({"event": "error", "mock": True, "code": "superseded", "stop_tts": True, "stop_mic": False,
-                           "message": "【模拟流】新一轮已到，旧句丢弃。"})
-            return events
-        piece = ""
-        for delta in _deltas(sentence):
-            if used + len(delta) > limit:
-                events.append({"event": "error", "mock": True, "code": "budget", "stop_tts": True, "stop_mic": False,
-                               "message": "【模拟流】预算已满，失败关闭。", "usage": {"chars": used}})
-                return events
-            used += len(delta)
-            piece += delta
-            events.append({"event": "delta", "mock": True, "text": delta})
-        if piece != sentence:
-            events.append({"event": "error", "mock": True, "code": "stale-join", "stop_tts": True, "stop_mic": False,
-                           "message": "【模拟流】拼装不一致，已关闭。"})
-            return events
-        events.append({"event": "sentence", "mock": True, "text": sentence})
-        assembled.append(sentence)
+        sentence = "没有回执，不能称为已转交。"
+        yield _mark({"event": "delegate", "duplicate": False, "receipt": None, "text": sentence})
+    yield _mark({"event": "done", "usage": {"chars": len(sentence)}})
+
+
+def iter_turn(book, device, turn_id, text, source="", uncertain=False, budget=None, timeout_s=None, poster=None, transport=None):
+    """逐条产出事件。日常回答只来自传入的上游；失败不另造一句模拟回答。"""
     if book.current(device) != turn_id:
-        events.append({"event": "error", "mock": True, "code": "superseded", "stop_tts": True, "stop_mic": False,
-                       "message": "【模拟流】新一轮已到，旧句不写入。"})
-        return events
+        yield _err("superseded", "旧轮次已丢弃，不拼接旧句。")
+        return
+    if is_echo(text, book.spoken.get(device), source, book.spoken_parts.get(device)):
+        yield _mark({"event": "ignored", "code": "echo", "stop_tts": False, "message": "这是刚才的朗读，不当成新指令。"})
+        return
+    if timeout_s is not None and float(timeout_s) <= 0:
+        yield _err("timeout", "超时，失败关闭。已播内容可打断。采集保持。")
+        return
+    limits = assistant_deepseek.limits_from_env()
+    cap = limits["max_chars"] if budget is None else min(int(budget), limits["max_chars"])
+    yield _mark({"event": "context", "role_core": True, "role_chars": len(ROLE_CORE), "role_core_text": ROLE_CORE,
+                 "memory_items": book.context_size(device), "uncertain_stored": False, "model_id": assistant_deepseek.OFFICIAL_MODEL})
+    if uncertain:
+        sentence = "这句听不准，没有写入记忆，也没有发给模型。"
+        yield _mark({"event": "sentence", "text": sentence})
+        yield _mark({"event": "done", "usage": {"chars": len(sentence)}})
+        return
+    if SENSITIVE_RE.search(str(text or "")):
+        yield _err("confirm", "这句需要你本人确认。语音不会执行，也不会转交幕僚长代批。")
+        return
+    if HEALTH_RE.match(str(text or "").strip()):
+        yield _mark({"event": "action", "name": "getServerHealth", "args": {}})
+        sentence = "健康查询在本地办理，不进幕僚长。"
+        yield _mark({"event": "sentence", "text": sentence})
+        yield _mark({"event": "done", "usage": {"chars": len(sentence)}})
+        _finish_local(book, device, text, sentence)
+        return
+    if DELEGATE_RE.search(str(text or "")):
+        for item in _delegate(book, device, text, poster):
+            yield item
+        return
+    action = _ui_action(text)
+    if action:
+        yield _mark({"event": "action", "name": action["name"], "args": action["args"]})
+        sentence = "界面动作已在本地执行。"
+        yield _mark({"event": "sentence", "text": sentence})
+        yield _mark({"event": "done", "usage": {"chars": len(sentence)}})
+        _finish_local(book, device, text, sentence)
+        return
+    upstream = transport or assistant_deepseek.stream_events
+    cancel = book.cancel_flag(device)
+    visible = ""
+    pending = ""
+    assembled = []
+    handoff = None
+    calls = 0
+    for piece in upstream(messages_for(book, device, str(text or "")[:2000]), cancel, timeout_s=limits["timeout_s"], max_tokens=limits["max_tokens"]):
+        calls += 1
+        if calls > 1 and piece.get("type") == "error" and piece.get("code") == "insufficient_balance":
+            pass
+        if book.current(device) != turn_id or cancel.is_set() and piece.get("type") != "cancelled":
+            yield _err("superseded", "新一轮已到，旧句丢弃。")
+            cancel.set()
+            return
+        kind = piece.get("type")
+        if kind == "error":
+            yield _err(piece.get("code") or "upstream", piece.get("message") or "官方接口没有完成。没有改用模拟回答。")
+            return
+        if kind == "cancelled":
+            yield _err("cancelled", "已取消。采集保持。")
+            return
+        if kind == "delta":
+            pending += piece.get("text") or ""
+            speakable, proposals = peel_actions(pending)
+            # 半截标记先留着，避免把 [[sb: 念出去。
+            hold = ""
+            cut = speakable.rfind("[[sb:")
+            if cut >= 0 and "]]" not in speakable[cut:]:
+                hold = speakable[cut:]
+                speakable = speakable[:cut]
+            pending = hold
+            for proposal in proposals:
+                if not accept_proposal(str(text or ""), proposal):
+                    continue
+                if proposal.get("name") == "handoff":
+                    handoff = proposal
+                    continue
+                yield _mark({"event": "action", "name": proposal["name"], "args": proposal.get("args") or {}})
+            if not speakable:
+                continue
+            if len(visible) + len(speakable) > cap:
+                cancel.set()
+                yield _err("budget", "输出已到上限，后面没有继续生成。")
+                return
+            visible += speakable
+            yield _mark({"event": "delta", "text": speakable})
+            sentences = split_sentences(speakable)
+            if speakable and speakable[-1] not in "。！？!?":
+                carry = sentences.pop() if sentences else ""
+            else:
+                carry = ""
+            # split_sentences on a fragment that continues a previous clause needs the buffer.
+            # Re-split the whole visible tail instead of the fragment alone when we already emitted.
+            # The fragment split above can repeat earlier sentences. Emit only the new complete ones.
+            whole = split_sentences(visible)
+            new_count = len(whole) - (0 if visible[-1] in "。！？!?" else 1)
+            already = len(assembled)
+            for sentence in whole[already:new_count]:
+                assembled.append(sentence)
+                yield _mark({"event": "sentence", "text": sentence})
+            del carry
+        if kind == "done":
+            if piece.get("finish") == "length":
+                yield _err("budget", "已到输出上限，后面没有继续生成。")
+                return
+            break
+    if pending.strip() and "[[sb:" not in pending:
+        if len(visible) + len(pending) <= cap:
+            visible += pending
+            yield _mark({"event": "delta", "text": pending})
+    if visible and (not assembled or "".join(assembled) != visible):
+        tail = visible[len("".join(assembled)):].strip()
+        if tail:
+            assembled.append(tail)
+            yield _mark({"event": "sentence", "text": tail})
+    if not assembled and handoff is None:
+        yield _err("empty", "官方接口没有返回可见文字。没有改用模拟回答。")
+        return
+    if handoff is not None:
+        goal = str((handoff.get("args") or {}).get("goal") or "")
+        body = (str(text or "") + " 目标：" + goal).strip()
+        for item in _delegate(book, device, body, poster, key_text=str(text or ""), spoken="".join(assembled)):
+            yield item
+        return
+    if book.current(device) != turn_id:
+        yield _err("superseded", "新一轮已到，旧句不写入。")
+        return
     spoken = "".join(assembled)
     book.spoken[device] = spoken
     book.spoken_parts[device] = list(assembled)
     book.remember(device, "user", text, uncertain=False)
-    book.remember(device, "assistant", spoken, uncertain=False)
-    events.append({"event": "done", "mock": True, "usage": {"chars": used}, "stop_tts": False, "stop_mic": False,
-                   "label": "模拟流"})
-    return events
+    if spoken:
+        book.remember(device, "assistant", spoken, uncertain=False)
+    yield _mark({"event": "done", "usage": {"chars": len(spoken)}, "stop_tts": False, "label": assistant_deepseek.OFFICIAL_MODEL})
+
+
+def plan_turn(*args, **kwargs):
+    return list(iter_turn(*args, **kwargs))

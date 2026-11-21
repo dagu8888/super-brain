@@ -1912,8 +1912,7 @@
     speakCtls = [];
     list.forEach((ctl) => { try { ctl.abort(); } catch (e) { /* 已结束 */ } });
   }
-  function stopSpeaking() {
-    cancelAssistantPlayback();
+  function stopPlaybackOnly() {
     speakSession.cancel();
     abortSpeakFetches();
     stopPcmSources();
@@ -1923,6 +1922,10 @@
     voiceTurns.setSpeaking(false, typeof performance !== "undefined" ? performance.now() : 0);
     bgmDuck = false;
     bgmApplyVolume();
+  }
+  function stopSpeaking() {
+    cancelAssistantPlayback();
+    stopPlaybackOnly();
   }
   function sayLocal(text, plan, sessionGen) {
     if (!("speechSynthesis" in window) || !plan || plan.mode !== "local-speech") return false;
@@ -2137,7 +2140,7 @@
       if (!ticket.queued || !voiceTurns.takeAudio(speakGen).item) return;
     }
     if (!opts.explicit && !voiceTurns.isCurrent(speakGen)) return;
-    stopSpeaking();
+    stopPlaybackOnly();
     const begun = speakSession.begin(raw);
     const sessionGen = begun.gen;
     const parts = begun.parts;
@@ -2202,11 +2205,11 @@
       return;
     }
     if (assistantSpoken && t === assistantSpoken) {
-      showVoiceLive("【模拟流】这是刚才的朗读，不当成新指令。");
+      showVoiceLive("这是刚才的朗读，不当成新指令。");
       return;
     }
     if (assistantSentences.indexOf(t) >= 0) {
-      showVoiceLive("【模拟流】这是刚才的朗读，不当成新指令。");
+      showVoiceLive("这是刚才的朗读，不当成新指令。");
       return;
     }
     const routed = window.SBVoiceTurn.voiceTurnRoute(t);
@@ -2218,8 +2221,8 @@
       await sendChat({ voiceGen: sttGen });
       return;
     }
-    if (routed.mock) {
-      await runMockAssistant(t, sttGen, routed);
+    if (routed.channel === "assistant" || routed.channel === "delegate") {
+      await runAssistantTurn(t, sttGen, routed);
       return;
     }
   }
@@ -2256,25 +2259,47 @@
       stopCapture: () => stopCaptureExplicit(),
       getServerHealth: () => fetchServerHealth().then((payload) => {
         if (payload && payload.ok && payload.data) showHealthResult(window.SBVoiceTurn.formatHealth(payload));
-        else showAssistantState("【模拟流】健康查询没有成功。没有改走幕僚长。");
+        else showAssistantState("健康查询没有成功。没有改走幕僚长。");
       })
     };
     return stream.applyAction(name, args || {}, fns).ok === true;
   }
-  async function runMockAssistant(text, sttGen, routed) {
+  let assistantSpeakGen = 0;
+  let assistantSpeakChain = Promise.resolve();
+  function armAssistantSpeech() {
+    stopPlaybackOnly();
+    assistantSpeakGen = speakSession.begin("").gen;
+    assistantSpeakChain = Promise.resolve();
+  }
+  function enqueueAssistantSpeech(sentence, turnGen) {
+    if (!shouldSpeakReply()) return;
+    const gen = assistantSpeakGen;
+    assistantSpeakChain = assistantSpeakChain.then(async () => {
+      if (assistantGen !== turnGen || speakSession.generation() !== gen) return;
+      const plan = voiceTurns.ttsPlan({ deepgramConfigured: !!(voiceStatus && voiceStatus.deepgram), voices: speakVoices(), explicit: false });
+      if (!plan.speak) return;
+      if (plan.mode === "server-wenjing") {
+        const resp = await openSpeak(sentence, voiceTurns.generation());
+        if (assistantGen !== turnGen || speakSession.generation() !== gen) return;
+        await playFlux(resp, gen);
+        return;
+      }
+      if (plan.mode === "local-speech") sayLocal(sentence, plan, gen);
+    }).catch(() => { /* 朗读失败不另造回答 */ });
+  }
+  async function runAssistantTurn(text, sttGen, routed) {
     if (!window.SBAssistantStream) {
-      showAssistantState("【模拟流】拼装模块没加载，失败关闭。未接通真实模型。");
+      showAssistantState("语音拼装模块没加载。没有改用模拟回答。");
       return;
     }
     cancelAssistantPlayback();
+    armAssistantSpeech();
     const box = $("#chat-input");
     if (box && box.value.trim() === text) { box.value = ""; autoGrow(box); }
     const mine = assistantGen;
     if (sttGen != null && !voiceTurns.isCurrent(sttGen)) return;
     assistantPlaying = true;
-    showAssistantState(routed && routed.channel === "delegate"
-      ? "思考 · 模拟流。明确委托才会转交。未接通真实模型。"
-      : "思考 · 模拟流。未接通真实模型。");
+    showAssistantState(routed && routed.channel === "delegate" ? "思考。明确委托才会转交。" : "思考。官方 deepseek-flash。");
     const asm = window.SBAssistantStream.createAssembler();
     const asmGen = asm.begin();
     const ctl = assistantCtl = new AbortController();
@@ -2284,24 +2309,24 @@
       response = await fetch(API + "/api/owner/assistant/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + ((o && o.token) || "") },
-        body: JSON.stringify({ text: text, turn_id: "voice-" + mine, source: "voice", budget: 80, timeout_s: 8 }),
+        body: JSON.stringify({ text: text, turn_id: "voice-" + mine, source: "voice" }),
         signal: ctl.signal, cache: "no-store", credentials: "same-origin"
       });
     } catch (e) {
       assistantPlaying = false;
       if (assistantGen !== mine) return;
-      showAssistantState(e && e.name === "AbortError" ? "【模拟流】已取消。采集保持。" : "【模拟流】失败关闭。采集保持。");
+      showAssistantState(e && e.name === "AbortError" ? "已取消。采集保持。" : "这一轮没有连上。没有改用模拟回答。采集保持。");
       return;
     }
     if (assistantGen !== mine) return;
     if (!response || response.status === 401) {
       assistantPlaying = false;
-      showAssistantState("【模拟流】没有主人会话，失败关闭。");
+      showAssistantState("没有主人会话，失败关闭。");
       return;
     }
     if (!response.ok) {
       assistantPlaying = false;
-      showAssistantState("【模拟流】失败关闭。未接通真实模型。");
+      showAssistantState("这一轮失败关闭。没有改用模拟回答。");
       return;
     }
     const decoder = new TextDecoder();
@@ -2325,36 +2350,38 @@
         const parsed = window.SBAssistantStream.parseSse(buf);
         buf = parsed.rest;
         parsed.events.forEach((ev) => {
-          if (failed || assistantGen !== mine || !ev.data || ev.data.mock !== true) return;
+          if (failed || assistantGen !== mine || !ev.data || ev.data.mock !== false) return;
           if (ev.event === "delta") asm.pushDelta(asmGen, ev.data.text || "");
           if (ev.event === "sentence" || ev.event === "delegate") {
             const sentence = ev.data.text || "";
             const joined = asm.pushSentence(asmGen, sentence);
             if (!joined.accepted) return;
-            const play = assistantPlayer.enqueue(mine, mine, sentence);
-            if (play.played && play.network !== true) {
-              assistantSentences.push(sentence);
-              spoken += sentence;
-              showAssistantState("朗读 · 模拟流（静音夹具，未调用文静）：" + sentence);
-            }
+            assistantSentences.push(sentence);
+            spoken += sentence;
+            showAssistantState("助手：" + sentence);
+            enqueueAssistantSpeech(sentence, mine);
           }
           if (ev.event === "action") applyAssistantUi(ev.data.name, ev.data.args || {});
-          if (ev.event === "error") {
-            failed = true;
-            assistantPlayer.stop();
-            showAssistantState(ev.data.message || "【模拟流】失败关闭。采集保持。");
+          if (ev.event === "error" || ev.event === "ignored") {
+            failed = ev.event === "error";
+            if (failed) stopPlaybackOnly();
+            showAssistantState(ev.data.message || "这一轮失败关闭。没有改用模拟回答。采集保持。");
           }
         });
         if (!reader) break;
       }
     } catch (e) {
       assistantPlaying = false;
-      if (assistantGen === mine) showAssistantState("【模拟流】已取消。采集保持。");
+      if (assistantGen === mine) showAssistantState("已取消。采集保持。");
       return;
     }
     if (spoken) assistantSpoken = spoken;
-    assistantPlaying = false;
-    if (assistantGen === mine && !failed) showAssistantState(spoken ? ("模拟流：" + spoken) : "模拟流已结束。未接通真实模型。");
+    const finish = () => {
+      if (assistantGen !== mine) return;
+      assistantPlaying = false;
+      if (!failed) showAssistantState(spoken ? ("助手：" + spoken) : "这一轮没有可见回复。没有改用模拟回答。");
+    };
+    assistantSpeakChain.then(finish, finish);
   }
   function pcm16(chunks, rate) {
     let n = 0; for (const c of chunks) n += c.length;
@@ -3314,6 +3341,21 @@
         if (label) label.textContent = "未认证，语音状态未读取";
       }
     }
+    loadAssistantStatus();
+  }
+  async function loadAssistantStatus() {
+    const o = own();
+    if (!o) return;
+    try {
+      const r = await fetch(API + "/api/owner/assistant/status", { headers: { Authorization: "Bearer " + o.token }, cache: "no-store", credentials: "same-origin" });
+      if (!r.ok) return;
+      const j = await r.json();
+      const el = $("#assistant-state");
+      if (!el || !j || j.mock !== false) return;
+      el.textContent = j.configured
+        ? "语音助手：官方 deepseek-flash（api.deepseek.com）。朗读默认关。失败时不会改用模拟回答。"
+        : (j.reason || "语音助手：未接通官方 DeepSeek。不会用模拟回答代替。");
+    } catch (e) { /* 读不到状态就保留页面上的说明 */ }
   }
   async function onVoiceMode(mode) {
     const prev = voiceMode();

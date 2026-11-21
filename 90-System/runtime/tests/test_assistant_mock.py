@@ -19,6 +19,7 @@ os.environ["SB_QUICK_REPLY_ENGINE"] = "rules"
 os.environ.pop("SB_ASSISTANT_BASE_ALLOWLIST", None)
 sys.path.insert(0, str(RT))
 
+import assistant_deepseek  # noqa: E402
 import assistant_http  # noqa: E402
 import assistant_session  # noqa: E402
 import migrate_v2  # noqa: E402
@@ -91,36 +92,41 @@ def chief_count(path):
         conn.close()
 
 
-def test_policy_and_plan():
-    status = assistant_session.public_status(())
-    check("真实流未接通且没有默认模型", status["real_connected"] is False and status["mock"] is True and status["model_id"] == "" and status["base_url"] == "" and status["price"] is None and "未接通" in status["reason"])
-    check("不跟随跳转", assistant_session.redirects_are_not_followed() is False)
-    allow = ("https://api.example.com",)
-    check("允许名单内的 HTTPS 通过", assistant_session.check_base_url("https://api.example.com/v1", allow) == "ok")
-    rejected = {
-        "http://api.example.com": "reject-scheme",
-        "https://user:pw@api.example.com": "reject-secret-or-query",
-        "https://api.example.com/?k=v": "reject-secret-or-query",
-        "https://127.0.0.1": "reject-internal",
-        "https://localhost": "reject-internal",
-        "https://10.1.2.3": "reject-internal",
-        "https://192.168.1.9": "reject-internal",
-        "https://169.254.169.254": "reject-internal",
-        "https://metadata.google.internal": "reject-internal",
-        "https://evil.example": "reject-not-allowlisted",
-    }
-    check("非预期地址全部拒绝", all(assistant_session.check_base_url(url, allow) == why for url, why in rejected.items()), assistant_session.check_base_url("https://127.0.0.1", allow))
-    src = (RT / "assistant_session.py").read_text(encoding="utf-8") + (RT / "assistant_http.py").read_text(encoding="utf-8")
-    check("生产代码不写回环默认、口述模型或价格", "3425" not in src and "deepseek" not in src.lower() and "magpie" not in src.lower() and "workbuddy" not in src.lower() and "urlopen" not in src)
+def fake_reply(chunks):
+    calls = {"n": 0}
 
+    def transport(messages, cancel, timeout_s=None, max_tokens=None, opener=None):
+        calls["n"] += 1
+        calls["messages"] = messages
+        if cancel.is_set():
+            yield {"type": "cancelled"}
+            return
+        for piece in chunks:
+            yield piece
+
+    transport.calls = calls
+    return transport
+
+
+def test_policy_and_plan():
+    os.environ.pop("SB_DEEPSEEK_API_KEY", None)
+    os.environ.pop("SB_ASSISTANT_BASE_URL", None)
+    os.environ.pop("SB_ASSISTANT_MODEL", None)
+    assistant_deepseek.reset_for_tests()
+    status = assistant_session.public_status()
+    check("未配置官方接口且不走模拟", status["mock"] is False and status["configured"] is False and status["model_id"] == "deepseek-flash" and status["base_url"] == "https://api.deepseek.com" and status["fallback"] == "none" and "模拟回答" in status["reason"])
+    check("不跟随跳转", assistant_session.redirects_are_not_followed() is False)
+    src = (RT / "assistant_session.py").read_text(encoding="utf-8") + (RT / "assistant_http.py").read_text(encoding="utf-8")
+    check("会话层不写回环端口或 Magpie 别名", "3425" not in src and "deepseek/deepseek-flash" not in src and "magpie" not in src.lower())
+    talk = fake_reply([{"type": "delta", "text": "你好。"}, {"type": "done", "finish": "stop"}])
     book = assistant_session.SessionBook()
     book.begin("d", "t1")
-    ev = assistant_session.plan_turn(book, "d", "t1", "你好", budget=80, timeout_s=8, poster=lambda text, key: {"ok": True, "msg_id": "should-not"})
+    ev = assistant_session.plan_turn(book, "d", "t1", "你好", poster=lambda text, key: {"ok": True, "msg_id": "should-not"}, transport=talk)
     deltas = [item["text"] for item in ev if item["event"] == "delta"]
     sentences = [item["text"] for item in ev if item["event"] == "sentence"]
-    joined = "".join(deltas)
-    check("模拟流按句拼装", ev[0]["event"] == "context" and ev[0]["mock"] is True and "私人助手" in ev[0]["role_core_text"] and sentences and joined == "".join(sentences) and all(item["mock"] is True for item in ev) and "【模拟流】" in joined)
+    check("上游增量按句拼装且不是模拟", ev[0]["event"] == "context" and ev[0]["mock"] is False and "私人助手" in ev[0]["role_core_text"] and sentences == ["你好。"] and "".join(deltas) == "你好。" and "模拟" not in "".join(deltas) and talk.calls["n"] == 1)
     check("普通闲聊不调用转交", all(item["event"] != "delegate" for item in ev) and book.context_size("d") == 2)
+    check("上下文带上角色卡", talk.calls["messages"][0]["role"] == "system" and "私人助手" in talk.calls["messages"][0]["content"])
 
     before = book.context_size("d")
     echo = assistant_session.plan_turn(book, "d", "t1", sentences[0], budget=80, timeout_s=8)
@@ -133,7 +139,7 @@ def test_policy_and_plan():
     check("听写误词不进记忆", any(item["event"] == "sentence" for item in unsure) and book.context_size("d") == before and all(item.get("code") != "echo" for item in unsure))
 
     book.begin("d", "t3")
-    limited = assistant_session.plan_turn(book, "d", "t3", "预算", budget=3, timeout_s=8)
+    limited = assistant_session.plan_turn(book, "d", "t3", "预算", budget=3, transport=fake_reply([{"type": "delta", "text": "一二三四五六。"}, {"type": "done", "finish": "stop"}]))
     check("预算打满失败关闭且不关麦", any(item.get("code") == "budget" and item.get("stop_mic") is False and item.get("stop_tts") is True for item in limited) and not any(item["event"] == "done" for item in limited))
     book.begin("d", "t4")
     late = assistant_session.plan_turn(book, "d", "t4", "超时", budget=80, timeout_s=0)
@@ -157,6 +163,35 @@ def test_policy_and_plan():
     book.begin("d", "t8")
     health = assistant_session.plan_turn(book, "d", "t8", "服务器健康", poster=poster)
     check("健康查询是本地动作", any(item["event"] == "action" and item["name"] == "getServerHealth" for item in health) and all(item["event"] != "delegate" for item in health))
+    sensitive = fake_reply([{"type": "delta", "text": "好的，我来下单。"}])
+    book.begin("d", "c1")
+    held = assistant_session.plan_turn(book, "d", "c1", "帮我下单", transport=sensitive, poster=poster)
+    check("敏感句不执行也不转交代批", any(item.get("code") == "confirm" for item in held) and sensitive.calls["n"] == 0 and all(item["event"] != "delegate" for item in held))
+    sneak = fake_reply([{"type": "delta", "text": '好。[[sb:{"name":"setTab","args":{"tab":"groups"}}]]'}, {"type": "done", "finish": "stop"}])
+    book.begin("d", "ui")
+    ignored = assistant_session.plan_turn(book, "d", "ui", "你好呀", transport=sneak)
+    check("闲聊里的界面提议被程序拒绝", all(item["event"] != "action" for item in ignored) and any(item.get("text") == "好。" for item in ignored))
+    handed = {"n": 0}
+
+    def hand_poster(text, key):
+        handed["n"] += 1
+        return {"ok": True, "msg_id": "h-1"}
+
+    def hand_transport(messages, cancel, timeout_s=None, max_tokens=None, opener=None):
+        yield {"type": "delta", "text": '好的。[[sb:{"name":"handoff","args":{"goal":"核对进度"}}]]'}
+        yield {"type": "done", "finish": "stop"}
+
+    book.begin("d", "h1")
+    assistant_session.plan_turn(book, "d", "h1", "你好呀", transport=hand_transport, poster=hand_poster)
+    book.begin("d", "h2")
+    helped = assistant_session.plan_turn(book, "d", "h2", "请做跨项目核对", transport=hand_transport, poster=hand_poster)
+    book.begin("d", "h3")
+    again = assistant_session.plan_turn(book, "d", "h3", "请做跨项目核对", transport=hand_transport, poster=hand_poster)
+    check("确需协助才转交一次", handed["n"] == 1 and any(item["event"] == "delegate" and item.get("receipt", {}).get("msg_id") == "h-1" for item in helped) and any(item.get("duplicate") for item in again))
+    bare = assistant_session.SessionBook()
+    bare.begin("d", "n1")
+    missing_key = assistant_session.plan_turn(bare, "d", "n1", "你好")
+    check("没密钥就可见失败且不模拟", any(item.get("code") == "not_configured" and "模拟回答" in item.get("message", "") for item in missing_key) and all(item["event"] != "sentence" for item in missing_key))
     check("白名单动作可过、任意脚本不过", assistant_session.validate_action("setTab", {"tab": "chat"}) and assistant_session.validate_action("scrollChat", {}) and not assistant_session.validate_action("eval", {}) and not assistant_session.validate_action("setTab", {"tab": "chat", "code": "1"}))
 
     class Flip(assistant_session.SessionBook):
@@ -172,11 +207,12 @@ def test_policy_and_plan():
 
     flip = Flip()
     flip.begin("d", "old")
-    dropped = assistant_session.plan_turn(flip, "d", "old", "新的一轮来了")
+    dropped = assistant_session.plan_turn(flip, "d", "old", "新的一轮来了", transport=fake_reply([{"type": "delta", "text": "第一句。"}, {"type": "delta", "text": "第二句。"}, {"type": "done", "finish": "stop"}]))
     check("新一轮丢弃旧流且不写旧句", any(item.get("code") == "superseded" for item in dropped) and flip.context_size("d") == 0 and sum(1 for item in dropped if item["event"] == "sentence") == 1)
 
 
 def test_http():
+    real_stream = assistant_deepseek.stream_events
     assistant_http._BOOK = assistant_session.SessionBook()
     path = fresh()
     conn = sqlite3.connect(str(path))
@@ -189,11 +225,21 @@ def test_http():
         check("无主人会话 401 且没有流内容", code == 401 and b"mock" in body and "你好" not in body.decode("utf-8", "replace"))
         code, ctype, mode, body = req(port, "GET", "/api/owner/assistant/status", headers={"Authorization": "Bearer " + token})
         status = json.loads(body.decode())
-        check("状态写明模拟流未接通", code == 200 and status.get("mock") is True and status.get("real_connected") is False and "未接通" in status.get("reason", "") and mode == "mock")
+        check("状态写明官方接口未配置", code == 200 and status.get("mock") is False and status.get("configured") is False and status.get("model_id") == "deepseek-flash" and status.get("base_url") == "https://api.deepseek.com" and mode == "unconfigured")
+        code, ctype, mode, body = req(port, "POST", "/api/owner/assistant/stream", {"text": "今天天气怎么样", "turn_id": "bare"}, {"Authorization": "Bearer " + token})
+        bare_ev = events_of(body)
+        check("没密钥时可见失败且不模拟", any(item.get("code") == "not_configured" for _n, item in bare_ev) and "模拟回答" in body.decode() and "【模拟流】" not in body.decode())
+        real_stream = assistant_deepseek.stream_events
+
+        def patched(messages, cancel, timeout_s=None, max_tokens=None, opener=None):
+            yield {"type": "delta", "text": "在的。"}
+            yield {"type": "done", "finish": "stop"}
+
+        assistant_deepseek.stream_events = patched
         before = chief_count(path)
-        code, ctype, mode, body = req(port, "POST", "/api/owner/assistant/stream", {"text": "今天天气怎么样", "turn_id": "b1", "budget": 80, "timeout_s": 8}, {"Authorization": "Bearer " + token})
+        code, ctype, mode, body = req(port, "POST", "/api/owner/assistant/stream", {"text": "今天天气怎么样", "turn_id": "b1"}, {"Authorization": "Bearer " + token})
         ev = events_of(body)
-        check("已鉴权模拟流拆包并标记", code == 200 and "text/event-stream" in ctype and mode == "mock" and any(name == "delta" and item.get("mock") is True for name, item in ev) and any(name == "sentence" and "【模拟流】" in item.get("text", "") for name, item in ev))
+        check("已鉴权官方流拆包且不是模拟", code == 200 and "text/event-stream" in ctype and any(name == "delta" and item.get("mock") is False and item.get("text") == "在的。" for name, item in ev) and any(name == "sentence" and item.get("text") == "在的。" for name, item in ev))
         check("普通语音闲聊没有幕僚长消息", chief_count(path) == before)
         code, _ctype, _mode, body = req(port, "POST", "/api/owner/assistant/stream", {"text": "再聊一句", "turn_id": "b2"}, {"Authorization": "Bearer " + token})
         code, _ctype, _mode, body = req(port, "POST", "/api/owner/assistant/stream", {"text": "第三句", "turn_id": "b3"}, {"Authorization": "Bearer " + token})
@@ -213,15 +259,18 @@ def test_http():
         check("HTTP 超时失败关闭", any(item.get("code") == "timeout" and "失败关闭" in item.get("message", "") for _n, item in late))
         code, _ctype, _mode, body = req(port, "POST", "/api/owner/assistant/cancel", {"turn_id": "b3"}, {"Authorization": "Bearer " + token})
         cancelled = json.loads(body.decode())
-        check("取消只停播放并保持采集", code == 200 and cancelled.get("stop_tts") is True and cancelled.get("stop_mic") is False and cancelled.get("mock") is True)
+        check("取消只停播放并保持采集", code == 200 and cancelled.get("stop_tts") is True and cancelled.get("stop_mic") is False and cancelled.get("mock") is False)
     finally:
+        assistant_deepseek.stream_events = real_stream
         httpd.shutdown()
 
 
 def test_page_and_node():
     js = (ROOT / "70-Console/design/prototype/v2/app.js").read_text(encoding="utf-8")
-    fn = js.split("async function runMockAssistant", 1)[1].split("function pcm16", 1)[0]
-    check("模拟朗读不调用文静", "/api/owner/voice/speak" not in fn and "openSpeak" not in fn and "speechSynthesis" not in fn and "静音夹具" in fn)
+    fn = js.split("async function runAssistantTurn", 1)[1].split("function pcm16", 1)[0]
+    speech = js.split("function enqueueAssistantSpeech", 1)[1].split("async function runAssistantTurn", 1)[0]
+    check("失败不造模拟回答", "没有改用模拟回答" in fn and "deepseek-flash" in fn)
+    check("朗读沿用现有文静开关", "shouldSpeakReply()" in speech and "openSpeak(sentence" in speech and "if (!plan.speak) return" in speech)
     cancel = js.split("function cancelAssistantPlayback", 1)[1].split("function stopCaptureExplicit", 1)[0]
     check("取消播放不释放音轨", "stopConversation" not in cancel and "releaseStream" not in cancel and "assistantPlayer.stop" in cancel)
     mic = js.split("function stopCaptureExplicit", 1)[1].split("function applyAssistantUi", 1)[0]

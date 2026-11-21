@@ -92,7 +92,7 @@
 
   function chiefHint(playing) {
     if (playing) {
-      return { speak: false, beep: false, hint: "【模拟流】幕僚长有结果，需要时再读。当前播放不打断。" };
+      return { speak: false, beep: false, hint: "幕僚长有结果，需要时再读。当前播放不打断。" };
     }
     return { speak: true, beep: true, hint: "" };
   }

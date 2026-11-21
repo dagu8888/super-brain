@@ -36,7 +36,7 @@ const raw = "event: delta\ndata: {\"mock\":true,\"text\":\"甲\"}\n\nevent: sent
 const parsed = S.parseSse(raw);
 check("SSE 拆包保留模拟标记", parsed.events.length === 2 && parsed.events[0].data.mock === true && parsed.events[1].data.text === "甲。");
 check("界面白名单拒绝任意脚本", S.validateAction("setTab", { tab: "chat" }) && S.validateAction("go", { target: "chat" }) && S.validateAction("scrollChat", {}) && S.validateAction("setVoicePanelCollapsed", { collapsed: true }) && !S.validateAction("eval", {}) && !S.validateAction("setTab", { tab: "chat", js: "1" }));
-check("回包不抢当前播放", S.shouldStealPlayback() === false && S.chiefHint(true).speak === false && S.chiefHint(true).beep === false && S.chiefHint(true).hint.indexOf("模拟流") >= 0 && S.chiefHint(false).speak === true);
+check("回包不抢当前播放", S.shouldStealPlayback() === false && S.chiefHint(true).speak === false && S.chiefHint(true).beep === false && S.chiefHint(true).hint.indexOf("不打断") >= 0 && S.chiefHint(false).speak === true);
 const fns = { setTab(args) { fns.seen = args.tab; } };
 check("只调用已登记的界面函数", S.applyAction("setTab", { tab: "groups" }, fns).ok === true && fns.seen === "groups" && S.applyAction("document.querySelector", {}, fns).ok === false);
 
