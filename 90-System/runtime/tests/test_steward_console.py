@@ -216,6 +216,8 @@ def test_http_pack():
         html = (ROOT / "70-Console/design/prototype/index.html").read_text(encoding="utf-8")
         js = (ROOT / "70-Console/design/prototype/v2/app.js").read_text(encoding="utf-8")
         check("页面把管家和幕僚长分开", 'id="steward-log"' in html and 'id="chat"' in html and "交给幕僚长：打包本段" in html and 'id="steward-card-text"' in html and 'id="steward-card-locked"' in html and 'id="steward-more"' in html and 'id="assistant-state"' in html and "hidden" in html.split('id="assistant-state"', 1)[1][:80] and 'id="voice-speak-state"' in html)
+        css = (ROOT / "70-Console/design/prototype/v2/app.css").read_text(encoding="utf-8")
+        check("展开回看时面板可滚动且长回执可换行", "#steward-talk:has(#steward-more[open])" in css and 'html[data-tab="chat"] #sec-chat #steward-talk:has(#steward-more[open])' in css and "overflow-wrap: anywhere" in css)
         check("打包不会在离开页面时自动发", "pagehide" in js and "packSteward()" not in js.split("pagehide", 1)[1].split("function ", 1)[0])
     finally:
         httpd.shutdown()

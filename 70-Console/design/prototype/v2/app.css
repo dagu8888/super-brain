@@ -459,15 +459,18 @@ button.pill { cursor: pointer; }
 .mic-status { margin: 6px 2px 0; font-size: 12.5px; color: var(--ink2); }
 .assistant-state, .voice-live, .voice-speak-state, .voice-result { margin: 6px 2px 0; font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; }
 .assistant-state { color: var(--gold, #d7b56d); }
-#steward-talk { margin: 8px 0 10px; flex: 0 0 auto; max-height: 220px; overflow: hidden; }
-#steward-talk .sec-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; flex-wrap: wrap; }
+#steward-talk { margin: 8px 0 10px; flex: 0 0 auto; max-height: 220px; overflow: hidden; min-width: 0; }
+#steward-talk .sec-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; flex-wrap: wrap; min-width: 0; max-width: 100%; }
 #steward-talk h2 { margin: 0; font-size: 15px; }
-.steward-more { margin: 0 0 0 auto; }
-.steward-more summary { cursor: pointer; font-size: 12.5px; color: var(--gold, #d7b56d); }
-.steward-more-body { display: grid; gap: 6px; margin-top: 6px; }
+.steward-more { margin: 0 0 0 auto; min-width: 0; max-width: 100%; }
+#steward-more[open] { flex: 1 1 100%; }
+.steward-more summary { cursor: pointer; font-size: 12.5px; color: var(--gold, #d7b56d); overflow-wrap: anywhere; }
+.steward-more-body { display: grid; gap: 6px; margin-top: 6px; min-width: 0; max-width: 100%; }
+#steward-pack-status, #steward-session-note, #btn-steward-pack { max-width: 100%; overflow-wrap: anywhere; }
 .steward-session-label { font-size: 12px; color: var(--ink3); }
 #assistant-state[hidden], #voice-live[hidden], #voice-speak-state[hidden] { display: none !important; }
-#steward-session { max-width: 46%; height: 32px; border-radius: 8px; border: 1px solid var(--line2); background: rgba(0, 0, 0, .28); color: var(--ink); }
+#steward-session { width: 100%; max-width: 100%; box-sizing: border-box; height: 32px; border-radius: 8px; border: 1px solid var(--line2); background: rgba(0, 0, 0, .28); color: var(--ink); }
+#steward-talk:has(#steward-more[open]) { max-height: min(52vh, 420px); overflow: auto; }
 #steward-log { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; max-height: 132px; overflow: auto; }
 #steward-log li { padding: 6px 8px; border-radius: 10px; background: rgba(255,255,255,.04); }
 #steward-log .who { display: block; font-size: 12px; color: var(--gold, #d7b56d); }
@@ -820,6 +823,7 @@ html.gal-fs .galaxy-card { position: fixed; z-index: 29; }
   html[data-tab="chat"] .wrap { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 8px 10px calc(78px + var(--safe-b) + var(--kb)); }
   html[data-tab="chat"] #sec-chat { flex: 1 1 auto; min-height: 0; height: auto; max-height: none; margin: 0; overflow: hidden; display: flex; flex-direction: column; }
   html[data-tab="chat"] #sec-chat #steward-talk { flex: 0 0 auto; max-height: 210px; overflow: hidden; }
+  html[data-tab="chat"] #sec-chat #steward-talk:has(#steward-more[open]) { max-height: min(52vh, 420px); overflow: auto; }
   html[data-tab="chat"] #sec-chat #steward-log { max-height: 88px; }
   html[data-tab="chat"] #sec-chat .sec-head,
   html[data-tab="chat"] #sec-chat .chat-form,
