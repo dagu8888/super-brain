@@ -158,14 +158,14 @@ def _err(code, message):
     return _mark({"event": "error", "code": code, "stop_tts": True, "message": message})
 
 
-def messages_for(book, device, user_text, card_text=None):
+def messages_for(book, device, user_text, card_text=None, slots=None):
     prior = []
     for item in book.memory.get(device) or []:
         role = item.get("role")
         if role not in ("user", "assistant"):
             continue
         prior.append({"role": role, "content": item.get("text") or ""})
-    return [{"role": "system", "content": assistant_store.compose_system(card_text)}] + prior + [{"role": "user", "content": user_text}]
+    return [{"role": "system", "content": assistant_store.compose_system(card_text, slots)}] + prior + [{"role": "user", "content": user_text}]
 
 
 def peel_actions(text):
@@ -215,6 +215,8 @@ def _delegate(book, device, text, poster, key_text=None, spoken=""):
     prior = book.receipts.get((device, key))
     if prior:
         sentence = "这件已经转过。回执仍是 %s。" % prior.get("msg_id")
+        if prior.get("task_id"):
+            sentence += "任务号 %s。" % prior.get("task_id")
         yield _mark({"event": "delegate", "duplicate": True, "receipt": prior, "text": sentence})
         yield _mark({"event": "done", "usage": {"chars": len(sentence)}})
         return
@@ -222,8 +224,12 @@ def _delegate(book, device, text, poster, key_text=None, spoken=""):
     receipt = receipt or {"ok": False}
     if receipt.get("ok") and receipt.get("msg_id"):
         stored = {"ok": True, "msg_id": receipt.get("msg_id")}
+        if receipt.get("task_id"):
+            stored["task_id"] = receipt.get("task_id")
         book.receipts[(device, key)] = stored
         sentence = "已转交。回执是 %s。" % stored["msg_id"]
+        if stored.get("task_id"):
+            sentence += "任务号 %s。没有执行记录。" % stored["task_id"]
         yield _mark({"event": "delegate", "duplicate": False, "receipt": stored, "text": sentence})
         _finish_local(book, device, key_text or text, spoken or sentence)
     else:
@@ -232,7 +238,7 @@ def _delegate(book, device, text, poster, key_text=None, spoken=""):
     yield _mark({"event": "done", "usage": {"chars": len(sentence)}})
 
 
-def iter_turn(book, device, turn_id, text, source="", uncertain=False, budget=None, timeout_s=None, poster=None, transport=None, card_text=None):
+def iter_turn(book, device, turn_id, text, source="", uncertain=False, budget=None, timeout_s=None, poster=None, transport=None, card_text=None, slots=None, utterance=None):
     """逐条产出事件。日常回答只来自传入的上游；失败不另造一句模拟回答。"""
     if book.current(device) != turn_id:
         yield _err("superseded", "旧轮次已丢弃，不拼接旧句。")
@@ -245,7 +251,7 @@ def iter_turn(book, device, turn_id, text, source="", uncertain=False, budget=No
         return
     limits = assistant_deepseek.limits_from_env()
     cap = limits["max_chars"] if budget is None else min(int(budget), limits["max_chars"])
-    system = assistant_store.compose_system(card_text)
+    system = assistant_store.compose_system(card_text, slots)
     yield _mark({"event": "context", "role_core": True, "role_chars": len(system), "role_core_text": system,
                  "memory_items": book.context_size(device), "uncertain_stored": False, "model_id": assistant_deepseek.OFFICIAL_MODEL})
     if uncertain:
@@ -275,6 +281,10 @@ def iter_turn(book, device, turn_id, text, source="", uncertain=False, budget=No
         yield _mark({"event": "done", "usage": {"chars": len(sentence)}})
         _finish_local(book, device, text, sentence)
         return
+    if utterance and utterance.get("confirm"):
+        yield _err("confirm", "这句按词表会改成另一种意思，没有改写原话，也没有交给模型。")
+        return
+    model_user = utterance.get("model_text") if utterance and utterance.get("model_text") else str(text or "")[:2000]
     upstream = transport or assistant_deepseek.stream_events
     cancel = book.cancel_flag(device)
     visible = ""
@@ -282,7 +292,7 @@ def iter_turn(book, device, turn_id, text, source="", uncertain=False, budget=No
     assembled = []
     handoff = None
     calls = 0
-    for piece in upstream(messages_for(book, device, str(text or "")[:2000], card_text), cancel, timeout_s=limits["timeout_s"], max_tokens=limits["max_tokens"]):
+    for piece in upstream(messages_for(book, device, model_user, card_text, slots), cancel, timeout_s=limits["timeout_s"], max_tokens=limits["max_tokens"]):
         calls += 1
         if calls > 1 and piece.get("type") == "error" and piece.get("code") == "insufficient_balance":
             pass
