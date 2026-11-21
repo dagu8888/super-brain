@@ -2381,7 +2381,7 @@
       assistantPlaying = false;
       if (!failed) showAssistantState(spoken ? ("助手：" + spoken) : "这一轮没有可见回复。没有改用模拟回答。");
     };
-    assistantSpeakChain.then(finish, finish);
+    assistantSpeakChain.then(() => { finish(); loadStewardHistory(); }, () => { finish(); loadStewardHistory(); });
   }
   function pcm16(chunks, rate) {
     let n = 0; for (const c of chunks) n += c.length;
@@ -3356,6 +3356,123 @@
         ? "语音助手：官方 deepseek-flash（api.deepseek.com）。朗读默认关。失败时不会改用模拟回答。"
         : (j.reason || "语音助手：未接通官方 DeepSeek。不会用模拟回答代替。");
     } catch (e) { /* 读不到状态就保留页面上的说明 */ }
+    loadStewardCard();
+    loadStewardHistory();
+  }
+  let stewardSessionId = "";
+  function renderStewardLog(data) {
+    const ol = $("#steward-log");
+    if (!ol) return;
+    stewardSessionId = (data && data.session_id) || "";
+    const select = $("#steward-session");
+    if (select) {
+      const sessions = (data && data.sessions) || [];
+      select.replaceChildren();
+      if (!sessions.length) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "本段";
+        select.appendChild(opt);
+      }
+      sessions.forEach((item) => {
+        const opt = document.createElement("option");
+        opt.value = item.session_id;
+        const when = item.opened_at ? new Date(item.opened_at * 1000).toLocaleString() : "";
+        opt.textContent = (item.closed ? "已打包" : "本段") + (when ? " · " + when : "");
+        select.appendChild(opt);
+      });
+      if (data && data.session_id) select.value = data.session_id;
+    }
+    const sessionNote = $("#steward-session-note");
+    if (sessionNote && data && data.note) sessionNote.textContent = data.note;
+    const packNote = $("#steward-pack-status");
+    if (packNote && data && data.pack_msg_id) packNote.textContent = "已交给幕僚长。回执 " + data.pack_msg_id;
+    const turns = (data && data.turns) || [];
+    ol.replaceChildren();
+    if (!turns.length) {
+      const empty = document.createElement("li");
+      empty.className = "empty";
+      empty.textContent = "这段还没有定稿。";
+      ol.appendChild(empty);
+      return;
+    }
+    turns.forEach((turn) => {
+      const li = document.createElement("li");
+      li.dataset.role = turn.role || "";
+      const who = document.createElement("b");
+      who.className = "who";
+      who.textContent = turn.speaker || (turn.role === "dagu" ? "大古" : "操作台管家");
+      const time = document.createElement("time");
+      const stamp = Number(turn.created_at || 0) * 1000;
+      if (stamp) time.dateTime = new Date(stamp).toISOString();
+      time.textContent = stamp ? new Date(stamp).toLocaleString() : "";
+      who.appendChild(time);
+      const body = document.createElement("p");
+      body.textContent = turn.text || "";
+      li.appendChild(who);
+      li.appendChild(body);
+      ol.appendChild(li);
+    });
+  }
+  async function loadStewardCard() {
+    const o = own();
+    if (!o) return;
+    try {
+      const r = await fetch(API + "/api/owner/assistant/card", { headers: { Authorization: "Bearer " + o.token }, cache: "no-store", credentials: "same-origin" });
+      if (!r.ok) return;
+      const j = await r.json();
+      const box = $("#steward-card-text");
+      const locked = $("#steward-card-locked");
+      if (box && document.activeElement !== box) box.value = j.text || "";
+      if (locked) locked.textContent = j.locked || "";
+    } catch (e) { /* 设置没打开时也不打断聊天 */ }
+  }
+  async function saveStewardCard() {
+    if (!own() && !(await askUnlock())) return;
+    const o = own();
+    const box = $("#steward-card-text");
+    const note = $("#steward-card-status");
+    const text = box ? box.value : "";
+    const r = await fetch(API + "/api/owner/assistant/card", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + ((o && o.token) || "") },
+      body: JSON.stringify({ text: text }),
+      cache: "no-store",
+      credentials: "same-origin"
+    });
+    let j = {};
+    try { j = await r.json(); } catch (e) { j = { ok: false }; }
+    if (box && j.text) box.value = j.text;
+    if (note) note.textContent = j.ok ? "已保存，回读一致。后续管家对话使用这段。" : (j.error || "没有保存。");
+  }
+  async function loadStewardHistory(sessionId) {
+    const o = own();
+    if (!o) return;
+    try {
+      const q = sessionId ? ("?session_id=" + encodeURIComponent(sessionId)) : "";
+      const r = await fetch(API + "/api/owner/assistant/history" + q, { headers: { Authorization: "Bearer " + o.token }, cache: "no-store", credentials: "same-origin" });
+      if (!r.ok) return;
+      renderStewardLog(await r.json());
+    } catch (e) { /* 刷新失败时保留已显示的记录 */ }
+  }
+  async function packSteward() {
+    if (!own() && !(await askUnlock())) return;
+    const o = own();
+    const note = $("#steward-pack-status");
+    const r = await fetch(API + "/api/owner/assistant/pack", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + ((o && o.token) || "") },
+      body: JSON.stringify({ session_id: stewardSessionId }),
+      cache: "no-store",
+      credentials: "same-origin"
+    });
+    let j = {};
+    try { j = await r.json(); } catch (e) { j = { ok: false }; }
+    if (note) {
+      if (j.handed && j.msg_id) note.textContent = (j.duplicate ? "已经交给幕僚长。回执仍是 " : "已交给幕僚长。回执 ") + j.msg_id;
+      else note.textContent = j.error || "没有回执，不能称为已交。";
+    }
+    loadStewardHistory();
   }
   async function onVoiceMode(mode) {
     const prev = voiceMode();
@@ -3395,6 +3512,7 @@
       if (closed) {
         const close = $("#btn-voice-collapse");
         if (close) close.focus();
+        loadStewardCard();
       }
     });
     const collapse = $("#btn-voice-collapse");
@@ -3408,6 +3526,12 @@
       if (e.key === "Escape" && panel && !panel.hidden) setVoicePanelCollapsed(true);
     });
     loadVoiceStatus();
+    const saveCard = $("#steward-card-save");
+    if (saveCard) saveCard.addEventListener("click", () => saveStewardCard());
+    const pack = $("#btn-steward-pack");
+    if (pack) pack.addEventListener("click", () => packSteward());
+    const sessionPick = $("#steward-session");
+    if (sessionPick) sessionPick.addEventListener("change", () => loadStewardHistory(sessionPick.value));
   }
   function bindExtras() {
     $("#chat-form").addEventListener("submit", (e) => { e.preventDefault(); sendChat(); });

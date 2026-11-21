@@ -10,15 +10,10 @@ import re
 import threading
 
 import assistant_deepseek
+import assistant_store
 
 CHIEF_ID = "grok-chief"
 MODE = "deepseek"
-ROLE_CORE = (
-    "你是大古的操作台常驻私人助手，不是幕僚长。"
-    "这是未生效的核心短卡，只放进模拟上下文，不授予权限。"
-    "普通问答不转交。只有明确委托才用最少内容转一次。"
-    "不要把听写误词写入永久记忆。不要生成任意脚本。"
-)
 DELEGATE_RE = re.compile(r"告诉幕僚长|让幕僚长办")
 GENUINE_RE = re.compile(r"跨项目|多步骤|需要幕僚长协助|交给幕僚长")
 SENSITIVE_RE = re.compile(r"删除|删掉|重启|关机|下单|买入|卖出|转账|付款|支付|改配置|改设定|改设置|执行命令|运行命令|sudo|\brm\b|\bcurl\b|\bwget\b|\bbash\b|\bsh\b|\beval\b|powershell|drop\s+table|[|&;`$<>\\]")
@@ -163,14 +158,14 @@ def _err(code, message):
     return _mark({"event": "error", "code": code, "stop_tts": True, "message": message})
 
 
-def messages_for(book, device, user_text):
+def messages_for(book, device, user_text, card_text=None):
     prior = []
     for item in book.memory.get(device) or []:
         role = item.get("role")
         if role not in ("user", "assistant"):
             continue
         prior.append({"role": role, "content": item.get("text") or ""})
-    return [{"role": "system", "content": ROLE_CORE}] + prior + [{"role": "user", "content": user_text}]
+    return [{"role": "system", "content": assistant_store.compose_system(card_text)}] + prior + [{"role": "user", "content": user_text}]
 
 
 def peel_actions(text):
@@ -237,7 +232,7 @@ def _delegate(book, device, text, poster, key_text=None, spoken=""):
     yield _mark({"event": "done", "usage": {"chars": len(sentence)}})
 
 
-def iter_turn(book, device, turn_id, text, source="", uncertain=False, budget=None, timeout_s=None, poster=None, transport=None):
+def iter_turn(book, device, turn_id, text, source="", uncertain=False, budget=None, timeout_s=None, poster=None, transport=None, card_text=None):
     """逐条产出事件。日常回答只来自传入的上游；失败不另造一句模拟回答。"""
     if book.current(device) != turn_id:
         yield _err("superseded", "旧轮次已丢弃，不拼接旧句。")
@@ -250,7 +245,8 @@ def iter_turn(book, device, turn_id, text, source="", uncertain=False, budget=No
         return
     limits = assistant_deepseek.limits_from_env()
     cap = limits["max_chars"] if budget is None else min(int(budget), limits["max_chars"])
-    yield _mark({"event": "context", "role_core": True, "role_chars": len(ROLE_CORE), "role_core_text": ROLE_CORE,
+    system = assistant_store.compose_system(card_text)
+    yield _mark({"event": "context", "role_core": True, "role_chars": len(system), "role_core_text": system,
                  "memory_items": book.context_size(device), "uncertain_stored": False, "model_id": assistant_deepseek.OFFICIAL_MODEL})
     if uncertain:
         sentence = "这句听不准，没有写入记忆，也没有发给模型。"
@@ -286,7 +282,7 @@ def iter_turn(book, device, turn_id, text, source="", uncertain=False, budget=No
     assembled = []
     handoff = None
     calls = 0
-    for piece in upstream(messages_for(book, device, str(text or "")[:2000]), cancel, timeout_s=limits["timeout_s"], max_tokens=limits["max_tokens"]):
+    for piece in upstream(messages_for(book, device, str(text or "")[:2000], card_text), cancel, timeout_s=limits["timeout_s"], max_tokens=limits["max_tokens"]):
         calls += 1
         if calls > 1 and piece.get("type") == "error" and piece.get("code") == "insufficient_balance":
             pass

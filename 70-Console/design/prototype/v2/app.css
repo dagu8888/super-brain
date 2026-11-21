@@ -459,6 +459,17 @@ button.pill { cursor: pointer; }
 .mic-status { margin: 6px 2px 0; font-size: 12.5px; color: var(--ink2); }
 .assistant-state, .voice-live, .voice-speak-state, .voice-result { margin: 6px 2px 0; font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; }
 .assistant-state { color: var(--gold, #d7b56d); }
+#steward-talk { margin: 8px 0 10px; flex: 0 0 auto; max-height: 220px; overflow: hidden; }
+#steward-talk .sec-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; flex-wrap: wrap; }
+#steward-talk h2 { margin: 0; font-size: 15px; }
+.steward-session-label { font-size: 12px; color: var(--ink3); }
+#steward-session { max-width: 46%; height: 32px; border-radius: 8px; border: 1px solid var(--line2); background: rgba(0, 0, 0, .28); color: var(--ink); }
+#steward-log { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; max-height: 132px; overflow: auto; }
+#steward-log li { padding: 6px 8px; border-radius: 10px; background: rgba(255,255,255,.04); }
+#steward-log .who { display: block; font-size: 12px; color: var(--gold, #d7b56d); }
+#steward-log time { font-weight: 400; color: var(--ink3, #8b93a7); margin-left: 6px; }
+#steward-card textarea, #steward-card-locked { width: 100%; box-sizing: border-box; }
+#steward-card-locked { white-space: pre-wrap; margin: 0; padding: 8px; border: 1px dashed var(--line, #334); color: var(--ink3, #8b93a7); font: inherit; }
 .voice-live { color: var(--ink); }
 .voice-speak-state { color: var(--ink3); }
 .voice-result { color: var(--ink2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: rgba(8, 12, 20, .35); }
@@ -675,8 +686,9 @@ html.grp-fs #sec-groups {
   #sec-hero { display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
   #sec-hero .kpis { flex: 0 0 auto; height: auto; }
   #sec-hero .stage { flex: 1 1 auto; height: auto; min-height: 0; max-height: none; }
-  #sec-chat { overflow: hidden; padding: 12px 12px 10px; }
-  #sec-chat .chat-list { flex: 1 1 auto; min-height: 0; max-height: none; }
+  #sec-chat { overflow: hidden; padding: 12px 12px 10px; display: flex; flex-direction: column; }
+  #sec-chat .chat-list { flex: 1 1 auto; min-height: 120px; max-height: none; }
+  #sec-chat .chat-form { flex: 0 0 auto; }
   html.deck { scroll-padding-top: var(--deck-top, 58px); }
   html.deck .wrap > .sec {
     height: calc(100dvh - var(--deck-top, 58px));
@@ -802,7 +814,9 @@ html.gal-fs .galaxy-card { position: fixed; z-index: 29; }
   html[data-tab="chat"] body { height: 100dvh; overflow: hidden; padding-bottom: 0; display: flex; flex-direction: column; }
   html[data-tab="chat"] .top { flex: 0 0 auto; }
   html[data-tab="chat"] .wrap { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 8px 10px calc(78px + var(--safe-b) + var(--kb)); }
-  html[data-tab="chat"] #sec-chat { flex: 1 1 auto; min-height: 0; height: auto; max-height: none; margin: 0; overflow: hidden; display: flex; }
+  html[data-tab="chat"] #sec-chat { flex: 1 1 auto; min-height: 0; height: auto; max-height: none; margin: 0; overflow: hidden; display: flex; flex-direction: column; }
+  html[data-tab="chat"] #sec-chat #steward-talk { flex: 0 0 auto; max-height: 210px; overflow: hidden; }
+  html[data-tab="chat"] #sec-chat #steward-log { max-height: 88px; }
   html[data-tab="chat"] #sec-chat .sec-head,
   html[data-tab="chat"] #sec-chat .chat-form,
   html[data-tab="chat"] #sec-chat .chat-foot,
@@ -811,7 +825,7 @@ html.gal-fs .galaxy-card { position: fixed; z-index: 29; }
   html[data-tab="chat"] #sec-chat .voice-live,
   html[data-tab="chat"] #sec-chat .voice-speak-state,
   html[data-tab="chat"] #sec-chat .voice-result { flex: 0 0 auto; }
-  html[data-tab="chat"] #sec-chat .chat-list { flex: 1 1 auto; min-height: 0; max-height: none; overflow: auto; }
+  html[data-tab="chat"] #sec-chat .chat-list { flex: 1 1 auto; min-height: 96px; max-height: none; overflow: auto; }
   .tabbar { bottom: calc(8px + var(--safe-b) + var(--kb)); }
 }
 

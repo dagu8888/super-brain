@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """受控会话 HTTP。日常语音流式转发给官方 DeepSeek，密钥不进响应。"""
 import json
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import assistant_session
+import assistant_store
 import message_bus
 
 CORS = (
@@ -103,6 +104,16 @@ def _stream(handler, db_fn, log_event):
             timeout_s = float(req.get("timeout_s"))
         except (TypeError, ValueError):
             timeout_s = None
+    source = str(req.get("source") or "")
+    if source == "partial":
+        _json_send(handler, 400, {"ok": False, "stored": False, "error": "部分识别不存档", "mock": False})
+        return True
+    card_text = None
+    conn = db_fn()
+    try:
+        card_text = assistant_store.load_card(conn)["text"]
+    finally:
+        conn.close()
     mode = assistant_session.public_status().get("mode") or "unconfigured"
     handler.send_response(200)
     handler.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -111,12 +122,17 @@ def _stream(handler, db_fn, log_event):
     for key, value in CORS:
         handler.send_header(key, value)
     handler.end_headers()
+    spoken = []
+    ignored = False
+    error_text = ""
+    uncertain = bool(req.get("uncertain"))
     for item in assistant_session.iter_turn(
             _BOOK, device, turn_id, req.get("text") or "",
-            source=str(req.get("source") or ""),
-            uncertain=bool(req.get("uncertain")),
+            source=source,
+            uncertain=uncertain,
             budget=budget, timeout_s=timeout_s,
-            poster=_poster(db_fn, device)):
+            poster=_poster(db_fn, device),
+            card_text=card_text):
         if _BOOK.current(device) != turn_id and item.get("event") != "error":
             item = {"event": "error", "mock": False, "code": "superseded", "stop_tts": True, "stop_mic": False,
                     "message": "新一轮已到，旧流关闭。"}
@@ -126,9 +142,110 @@ def _stream(handler, db_fn, log_event):
         blob = json.dumps(payload, ensure_ascii=False)
         handler.wfile.write(("event: %s\ndata: %s\n\n" % (name, blob)).encode("utf-8"))
         handler.wfile.flush()
+        if name == "ignored":
+            ignored = True
+        if name in ("sentence", "delegate") and payload.get("text"):
+            spoken.append(payload["text"])
+        if name == "error" and payload.get("message"):
+            error_text = payload["message"]
         if name == "error" and payload.get("code") in ("superseded", "cancelled", "timeout", "budget", "insufficient_balance"):
             break
+    if not uncertain and not ignored:
+        _remember(db_fn, device, turn_id, req.get("text") or "", "".join(spoken) or error_text)
     log_event("assistant_turn", ok=True, chars=len(str(req.get("text") or "")), mode=mode)
+    return True
+
+
+def _remember(db_fn, device, turn_id, user_text, steward_text):
+    conn = db_fn()
+    try:
+        session_id = assistant_store.open_session(conn, device)
+        assistant_store.append_turn(conn, session_id, "dagu", user_text, "dagu:" + turn_id, source="final")
+        if steward_text:
+            assistant_store.append_turn(conn, session_id, "steward", steward_text, "steward:" + turn_id, source="final")
+    finally:
+        conn.close()
+
+
+def _card_get(handler, db_fn, log_event):
+    if not _require(handler, db_fn, log_event):
+        return True
+    conn = db_fn()
+    try:
+        card = assistant_store.load_card(conn)
+    finally:
+        conn.close()
+    card["ok"] = True
+    card["mock"] = False
+    _json_send(handler, 200, card)
+    return True
+
+
+def _card_post(handler, db_fn, log_event):
+    if not _require(handler, db_fn, log_event):
+        return True
+    try:
+        req = handler._read_json()
+    except Exception:
+        _json_send(handler, 400, {"ok": False, "error": "请求无效", "mock": False})
+        return True
+    conn = db_fn()
+    try:
+        saved = assistant_store.save_card(conn, req.get("text"))
+    finally:
+        conn.close()
+    log_event("steward_card", ok=bool(saved.get("ok")), chars=len(str(req.get("text") or "")))
+    _json_send(handler, 200 if saved.get("ok") else 400, saved)
+    return True
+
+
+def _history(handler, db_fn, log_event):
+    who = _require(handler, db_fn, log_event)
+    if not who:
+        return True
+    wanted = (parse_qs(urlparse(handler.path).query).get("session_id") or [""])[0]
+    conn = db_fn()
+    try:
+        payload = assistant_store.history(conn, _device(who), wanted or None)
+    finally:
+        conn.close()
+    payload["mock"] = False
+    _json_send(handler, 200, payload)
+    return True
+
+
+def _pack(handler, db_fn, log_event):
+    who = _require(handler, db_fn, log_event)
+    if not who:
+        return True
+    try:
+        req = handler._read_json()
+    except Exception:
+        req = {}
+    device = _device(who)
+    conn = db_fn()
+    try:
+        session_id = str(req.get("session_id") or "")
+        if not session_id:
+            current = assistant_store.latest_session(conn, device)
+            session_id = current["session_id"] if current else ""
+        if not session_id:
+            _json_send(handler, 400, {"ok": False, "handed": False, "error": "没有可打包的管家会话", "mock": False})
+            return True
+
+        def poster(text):
+            bus = db_fn()
+            try:
+                return message_bus.post_message(bus, "dagu-owner", text, to=assistant_session.CHIEF_ID, kind="chat")
+            finally:
+                bus.close()
+
+        result = assistant_store.pack_session(conn, device, session_id, poster)
+    finally:
+        conn.close()
+    result["mock"] = False
+    log_event("steward_pack", ok=bool(result.get("ok")), handed=bool(result.get("handed")), duplicate=bool(result.get("duplicate")))
+    _json_send(handler, 200 if result.get("ok") else 400, result)
     return True
 
 
@@ -147,10 +264,16 @@ def _cancel(handler, db_fn, log_event):
     return True
 
 
-_GET = {"/api/owner/assistant/status": _status}
+_GET = {
+    "/api/owner/assistant/status": _status,
+    "/api/owner/assistant/card": _card_get,
+    "/api/owner/assistant/history": _history,
+}
 _POST = {
     "/api/owner/assistant/stream": _stream,
     "/api/owner/assistant/cancel": _cancel,
+    "/api/owner/assistant/card": _card_post,
+    "/api/owner/assistant/pack": _pack,
 }
 
 
