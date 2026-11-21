@@ -1883,12 +1883,14 @@
       else if (plan.mode === "local-speech") b.title = "朗读开，使用已确认的本地音色 " + (plan.voiceName || "");
       else b.title = plan.reason || "朗读不可用";
     }
-    const el = $("#voice-speak-state");
-    if (!el) return;
-    if (!pref("tts") || plan.mode === "off") el.textContent = "朗读关。对话语音不会播放，也不会把文字交给浏览器语音。";
-    else if (plan.mode === "server-wenjing") el.textContent = "朗读开：已配置的文静，走服务器已有接口（flux-wenjing-zh）。未改默认音色。";
-    else if (plan.mode === "local-speech") el.textContent = "朗读开：本地音色「" + (plan.voiceName || "中文") + "」（localService=true）。";
-    else el.textContent = plan.reason || "朗读不可用。";
+    const detail = $("#voice-speak-detail");
+    const chatLine = $("#voice-speak-state");
+    if (chatLine) { chatLine.hidden = true; chatLine.textContent = ""; }
+    if (!detail) return;
+    if (!pref("tts") || plan.mode === "off") detail.textContent = "朗读关。对话语音不会播放，也不会把文字交给浏览器语音。";
+    else if (plan.mode === "server-wenjing") detail.textContent = "朗读开：已配置的文静，走服务器已有接口（flux-wenjing-zh）。未改默认音色。";
+    else if (plan.mode === "local-speech") detail.textContent = "朗读开：本地音色「" + (plan.voiceName || "中文") + "」（localService=true）。";
+    else detail.textContent = plan.reason || "朗读不可用。";
   }
   function renderCaptureBtn() {
     const b = $("#btn-capture");
@@ -2226,10 +2228,36 @@
       return;
     }
   }
+  function applyTurnPresence(phase, text) {
+    const stream = window.SBAssistantStream;
+    const view = stream && stream.presentTurn ? stream.presentTurn(phase, text) : { transient: "", sticky: phase === "error" ? String(text || "") : "" };
+    const live = $("#voice-live");
+    const sticky = $("#assistant-state");
+    if (live) { live.hidden = !view.transient; live.textContent = view.transient || ""; }
+    if (sticky) { sticky.hidden = !view.sticky; sticky.textContent = view.sticky || ""; }
+  }
   function showAssistantState(text) {
-    const el = $("#assistant-state");
-    if (el) el.textContent = text;
-    showVoiceLive(text);
+    applyTurnPresence("error", text);
+  }
+  function rememberStewardLine(role, text) {
+    const ol = $("#steward-log");
+    const body = String(text || "").trim();
+    if (!ol || !body) return;
+    const empty = ol.querySelector(".empty");
+    if (empty) empty.remove();
+    const last = ol.lastElementChild;
+    const lastText = last && last.querySelector("p") ? last.querySelector("p").textContent : "";
+    if (last && last.dataset.role === role && lastText === body) return;
+    const li = document.createElement("li");
+    li.dataset.role = role;
+    const who = document.createElement("b");
+    who.className = "who";
+    who.textContent = role === "dagu" ? "大古" : "操作台管家";
+    const p = document.createElement("p");
+    p.textContent = body;
+    li.appendChild(who);
+    li.appendChild(p);
+    ol.appendChild(li);
   }
   function cancelAssistantPlayback() {
     assistantGen += 1;
@@ -2299,7 +2327,7 @@
     const mine = assistantGen;
     if (sttGen != null && !voiceTurns.isCurrent(sttGen)) return;
     assistantPlaying = true;
-    showAssistantState(routed && routed.channel === "delegate" ? "思考。明确委托才会转交。" : "思考。官方 deepseek-flash。");
+    applyTurnPresence("token", routed && routed.channel === "delegate" ? "正在整理委托" : "正在回复");
     const asm = window.SBAssistantStream.createAssembler();
     const asmGen = asm.begin();
     const ctl = assistantCtl = new AbortController();
@@ -2332,6 +2360,7 @@
     const decoder = new TextDecoder();
     let buf = "";
     let spoken = "";
+    let draft = "";
     let failed = false;
     const reader = response.body && response.body.getReader ? response.body.getReader() : null;
     const take = async () => {
@@ -2351,14 +2380,20 @@
         buf = parsed.rest;
         parsed.events.forEach((ev) => {
           if (failed || assistantGen !== mine || !ev.data || ev.data.mock !== false) return;
-          if (ev.event === "delta") asm.pushDelta(asmGen, ev.data.text || "");
+          if (ev.event === "delta") {
+            asm.pushDelta(asmGen, ev.data.text || "");
+            draft += ev.data.text || "";
+            applyTurnPresence("token", draft);
+          }
           if (ev.event === "sentence" || ev.event === "delegate") {
             const sentence = ev.data.text || "";
             const joined = asm.pushSentence(asmGen, sentence);
             if (!joined.accepted) return;
             assistantSentences.push(sentence);
             spoken += sentence;
-            showAssistantState("助手：" + sentence);
+            draft = "";
+            rememberStewardLine("steward", sentence);
+            applyTurnPresence("token", "");
             enqueueAssistantSpeech(sentence, mine);
           }
           if (ev.event === "action") applyAssistantUi(ev.data.name, ev.data.args || {});
@@ -2379,7 +2414,9 @@
     const finish = () => {
       if (assistantGen !== mine) return;
       assistantPlaying = false;
-      if (!failed) showAssistantState(spoken ? ("助手：" + spoken) : "这一轮没有可见回复。没有改用模拟回答。");
+      if (failed) return;
+      if (!spoken) showAssistantState("这一轮没有可见回复。没有改用模拟回答。");
+      else applyTurnPresence("end");
     };
     assistantSpeakChain.then(() => { finish(); loadStewardHistory(); }, () => { finish(); loadStewardHistory(); });
   }
@@ -2482,7 +2519,8 @@
               const fin = voiceTurns.noteTranscript(t.finalGen, t.finalSeq, said, "final");
               if (fin.accepted) {
                 t.text = ""; t.chunks = []; t.pending = []; t.quiet = 0;
-                showVoiceLive("最终转写：" + said);
+                rememberStewardLine("dagu", said);
+                showVoiceLive("");
                 await commitUtterance(said, fin.generation);
               }
             }
@@ -3350,7 +3388,7 @@
       const r = await fetch(API + "/api/owner/assistant/status", { headers: { Authorization: "Bearer " + o.token }, cache: "no-store", credentials: "same-origin" });
       if (!r.ok) return;
       const j = await r.json();
-      const el = $("#assistant-state");
+      const el = $("#assistant-config-note");
       if (!el || !j || j.mock !== false) return;
       el.textContent = j.configured
         ? "语音助手：官方 deepseek-flash（api.deepseek.com）。朗读默认关。失败时不会改用模拟回答。"
@@ -3386,7 +3424,9 @@
     const sessionNote = $("#steward-session-note");
     if (sessionNote && data && data.note) sessionNote.textContent = data.note;
     const packNote = $("#steward-pack-status");
+    const summary = $("#steward-more-summary");
     if (packNote && data && data.pack_msg_id) packNote.textContent = "已交给幕僚长。回执 " + data.pack_msg_id;
+    if (summary) summary.textContent = data && data.pack_msg_id ? ("回看与交办 · 回执 " + data.pack_msg_id) : "回看与交办";
     const turns = (data && data.turns) || [];
     ol.replaceChildren();
     if (!turns.length) {
@@ -3424,7 +3464,7 @@
       const box = $("#steward-card-text");
       const locked = $("#steward-card-locked");
       if (box && document.activeElement !== box) box.value = j.text || "";
-      if (locked) locked.textContent = j.locked || "";
+      if (locked) locked.textContent = [j.locked, j.facts].filter(Boolean).join("\n\n");
     } catch (e) { /* 设置没打开时也不打断聊天 */ }
   }
   async function saveStewardCard() {

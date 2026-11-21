@@ -124,9 +124,9 @@ def test_policy_and_plan():
     ev = assistant_session.plan_turn(book, "d", "t1", "你好", poster=lambda text, key: {"ok": True, "msg_id": "should-not"}, transport=talk)
     deltas = [item["text"] for item in ev if item["event"] == "delta"]
     sentences = [item["text"] for item in ev if item["event"] == "sentence"]
-    check("上游增量按句拼装且不是模拟", ev[0]["event"] == "context" and ev[0]["mock"] is False and "操作台管家" in ev[0]["role_core_text"] and "模拟上下文" not in ev[0]["role_core_text"] and sentences == ["你好。"] and "".join(deltas) == "你好。" and "模拟" not in "".join(deltas) and talk.calls["n"] == 1)
+    check("上游增量按句拼装且不是模拟", ev[0]["event"] == "context" and ev[0]["mock"] is False and "你叫 ALS" in ev[0]["role_core_text"] and "模拟上下文" not in ev[0]["role_core_text"] and sentences == ["你好。"] and "".join(deltas) == "你好。" and "模拟" not in "".join(deltas) and talk.calls["n"] == 1)
     check("普通闲聊不调用转交", all(item["event"] != "delegate" for item in ev) and book.context_size("d") == 2)
-    check("上下文带上角色卡", talk.calls["messages"][0]["role"] == "system" and "操作台管家" in talk.calls["messages"][0]["content"] and "模拟上下文" not in talk.calls["messages"][0]["content"])
+    check("上下文带上角色卡", talk.calls["messages"][0]["role"] == "system" and "你叫 ALS" in talk.calls["messages"][0]["content"] and "模拟上下文" not in talk.calls["messages"][0]["content"] and "不能当成已经知道" in talk.calls["messages"][0]["content"])
 
     before = book.context_size("d")
     echo = assistant_session.plan_turn(book, "d", "t1", sentences[0], budget=80, timeout_s=8)
@@ -269,7 +269,7 @@ def test_page_and_node():
     js = (ROOT / "70-Console/design/prototype/v2/app.js").read_text(encoding="utf-8")
     fn = js.split("async function runAssistantTurn", 1)[1].split("function pcm16", 1)[0]
     speech = js.split("function enqueueAssistantSpeech", 1)[1].split("async function runAssistantTurn", 1)[0]
-    check("失败不造模拟回答", "没有改用模拟回答" in fn and "deepseek-flash" in fn)
+    check("失败不造模拟回答", "没有改用模拟回答" in fn and "applyTurnPresence(\"end\")" in fn and "showAssistantState(\"助手：" not in fn)
     check("朗读沿用现有文静开关", "shouldSpeakReply()" in speech and "openSpeak(sentence" in speech and "if (!plan.speak) return" in speech)
     cancel = js.split("function cancelAssistantPlayback", 1)[1].split("function stopCaptureExplicit", 1)[0]
     check("取消播放不释放音轨", "stopConversation" not in cancel and "releaseStream" not in cancel and "assistantPlayer.stop" in cancel)

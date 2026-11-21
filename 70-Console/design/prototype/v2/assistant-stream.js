@@ -90,6 +90,14 @@
     return false;
   }
 
+  /* 完成的回复只进管家记录。临时识别/流式可收起。失败留下可见说明。 */
+  function presentTurn(phase, text) {
+    var body = String(text || "");
+    if (phase === "partial" || phase === "token") return { transient: body, sticky: "" };
+    if (phase === "error") return { transient: "", sticky: body || "这一轮失败。" };
+    return { transient: "", sticky: "" };
+  }
+
   function chiefHint(playing) {
     if (playing) {
       return { speak: false, beep: false, hint: "幕僚长有结果，需要时再读。当前播放不打断。" };
@@ -127,6 +135,7 @@
     createSilentPlayer: createSilentPlayer,
     validateAction: validateAction,
     shouldStealPlayback: shouldStealPlayback,
+    presentTurn: presentTurn,
     chiefHint: chiefHint,
     applyAction: applyAction,
     parseSse: parseSse

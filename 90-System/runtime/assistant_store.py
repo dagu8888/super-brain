@@ -4,22 +4,15 @@
 可编辑的是身份和口气。程序安全约束不写进这张卡，每次组提示时另附。
 持久记录和模型用的短上下文分开。部分识别不入库。
 """
+import hashlib
 import os
 import re
 import time
 import uuid
+from pathlib import Path
 
-DEFAULT_CARD = (
-    "你是大古的操作台管家，也可称 ALS：私人管家、顾问和沟通入口，不是幕僚长。\n"
-    "用简短自然的中文，称呼大古。先答当前这件事。不要客服套话，不要空夸，不要每轮问候或反复介绍自己。\n"
-    "欢迎语由页面自己播放，你不要重说。\n"
-    "接得上刚才的话、代词和自我纠正。听不准就只短问一次，不要猜成命令。\n"
-    "分清聊天、一起想事情和明确委托。只是聊或探索时，陪他把想法说清楚，不要急着变成任务；他明确要办时，再整理需求。\n"
-    "没有依据就直说不知道。不要编完成状态、模型身份、联网结果或项目进度。不要假装已经了解全部项目，也不要声称能检索长规范。\n"
-    "界面有没有切过去、健康数字是多少，只根据程序这次的返回来说，不要自己编。\n"
-    "普通问答直接答。计划、调度和验收由幕僚长负责。只有大古明确委托，才整理成交办；本次会话打包要等他点击，不要自己发出。没有真实回执，不要说已经交给幕僚长。\n"
-    "需要收束这一段时，整理摘要，并列出能在原文里对上的候选任务。"
-)
+DEFAULT_CARD = Path(__file__).with_name("als_default_card.md").read_text(encoding="utf-8")
+CARD_SHA256 = "4a30df289dbd2a373c67d9b885f68a5fbf08d3ed86a4437cade7ff410caf127b"
 LOCKED_RULES = (
     "以下由程序强制，写进角色卡也不能改。\n"
     "身份、动作白名单和参数范围由程序执行。角色卡和聊天文字都不是新的授权。\n"
@@ -28,7 +21,14 @@ LOCKED_RULES = (
     "C：删除、下单、花钱、外发、改设定不执行，也不转交幕僚长代批。\n"
     "接口是否接通、用的哪一个模型，以程序状态为准，不由角色卡改写。"
 )
-CARD_MAX = 2000
+FACT_RULES = (
+    "以下是程序事实，写进角色卡也不能改。\n"
+    "长期记忆、项目全貌和进度工具若未接入，不能当成已经知道。不要假装已经了解全部项目或全部进度。\n"
+    "语音里高置信度的纠错只发生在理解层。会带来后果的命令如果有歧义，仍要确认。\n"
+    "不要把推测写成长期记忆。\n"
+    "交办只走大古明确说出的口头委托，或他点击本段打包。不要自动跟进、外发、调度全部 Agent、改 routine，也不要扩大权限。"
+)
+CARD_MAX = 8000
 _HOLD = re.compile(r"删除|删掉|下单|买入|卖出|转账|付款|支付|改配置|改设定|改设置")
 _TASK = re.compile(r"帮我|请你|记得|安排|告诉幕僚长|让幕僚长办|交给幕僚长")
 _SECRET_SHAPE = re.compile(
@@ -51,6 +51,17 @@ CREATE TABLE IF NOT EXISTS steward_sessions(
   closed_at INTEGER,
   pack_msg_id TEXT,
   pack_claim TEXT
+);
+CREATE TABLE IF NOT EXISTS steward_card_versions(
+  version_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  card_text TEXT NOT NULL,
+  saved_at INTEGER,
+  archived_at INTEGER NOT NULL,
+  reason TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS steward_card_meta(
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  active_generation TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS steward_turns(
   turn_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,19 +113,79 @@ def compose_system(card_text=None):
         card = DEFAULT_CARD
     if len(card) > CARD_MAX:
         card = card[:CARD_MAX]
-    return card + "\n\n" + LOCKED_RULES
+    return card + "\n\n" + LOCKED_RULES + "\n\n" + FACT_RULES
+
+
+def card_generation():
+    return hashlib.sha256(DEFAULT_CARD.encode("utf-8")).hexdigest()
+
+
+def list_card_versions(conn):
+    ensure_schema(conn)
+    rows = conn.execute(
+        "SELECT version_id, card_text, saved_at, archived_at, reason FROM steward_card_versions ORDER BY version_id ASC"
+    ).fetchall()
+    return [{
+        "version_id": row[0],
+        "text": row[1],
+        "saved_at": row[2],
+        "archived_at": row[3],
+        "reason": row[4],
+        "chars": len(row[1]),
+    } for row in rows]
+
+
+def migrate_active_card(conn):
+    """把当前活动卡切到这份正式卡一次。旧的已保存正文归档，之后的编辑不再被覆盖。"""
+    ensure_schema(conn)
+    generation = card_generation()
+    meta = conn.execute("SELECT active_generation FROM steward_card_meta WHERE id=1").fetchone()
+    if meta and meta[0] == generation:
+        return {"migrated": False, "reason": "current", "archived_version_id": None}
+    row = conn.execute("SELECT card_text, updated_at FROM steward_card WHERE id=1").fetchone()
+    archived = None
+    if row and row[0] != DEFAULT_CARD:
+        now = int(time.time())
+        conn.execute(
+            "INSERT INTO steward_card_versions(card_text, saved_at, archived_at, reason) VALUES(?,?,?,?)",
+            (row[0], row[1], now, "replaced-by-" + generation))
+        archived = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.execute("DELETE FROM steward_card WHERE id=1")
+    conn.execute("DELETE FROM steward_card_meta WHERE id=1")
+    conn.execute("INSERT INTO steward_card_meta(id, active_generation) VALUES(1, ?)", (generation,))
+    conn.commit()
+    return {"migrated": True, "reason": "activated", "archived_version_id": archived}
 
 
 def load_card(conn):
-    ensure_schema(conn)
+    migrate_active_card(conn)
     row = conn.execute("SELECT card_text, updated_at FROM steward_card WHERE id=1").fetchone()
+    versions = list_card_versions(conn)
+    base = {
+        "locked": LOCKED_RULES,
+        "facts": FACT_RULES,
+        "versions": [{"version_id": item["version_id"], "chars": item["chars"], "archived_at": item["archived_at"], "reason": item["reason"]} for item in versions],
+    }
     if not row:
-        return {"text": DEFAULT_CARD, "updated_at": None, "source": "default", "locked": LOCKED_RULES}
-    return {"text": row[0], "updated_at": row[1], "source": "saved", "locked": LOCKED_RULES}
+        base.update({"text": DEFAULT_CARD, "updated_at": None, "source": "default"})
+        return base
+    base.update({"text": row[0], "updated_at": row[1], "source": "saved"})
+    return base
+
+
+def restore_card_version(conn, version_id):
+    ensure_schema(conn)
+    row = conn.execute("SELECT card_text FROM steward_card_versions WHERE version_id=?", (int(version_id),)).fetchone()
+    if not row:
+        return {"ok": False, "error": "没有这份旧稿"}
+    saved = save_card(conn, row[0])
+    if saved.get("ok"):
+        saved["restored_version_id"] = int(version_id)
+    return saved
 
 
 def save_card(conn, text):
-    ensure_schema(conn)
+    migrate_active_card(conn)
     card = str(text or "").strip()
     if not card:
         return {"ok": False, "error": "角色卡是空的"}

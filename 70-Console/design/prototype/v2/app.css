@@ -462,7 +462,11 @@ button.pill { cursor: pointer; }
 #steward-talk { margin: 8px 0 10px; flex: 0 0 auto; max-height: 220px; overflow: hidden; }
 #steward-talk .sec-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; flex-wrap: wrap; }
 #steward-talk h2 { margin: 0; font-size: 15px; }
+.steward-more { margin: 0 0 0 auto; }
+.steward-more summary { cursor: pointer; font-size: 12.5px; color: var(--gold, #d7b56d); }
+.steward-more-body { display: grid; gap: 6px; margin-top: 6px; }
 .steward-session-label { font-size: 12px; color: var(--ink3); }
+#assistant-state[hidden], #voice-live[hidden], #voice-speak-state[hidden] { display: none !important; }
 #steward-session { max-width: 46%; height: 32px; border-radius: 8px; border: 1px solid var(--line2); background: rgba(0, 0, 0, .28); color: var(--ink); }
 #steward-log { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; max-height: 132px; overflow: auto; }
 #steward-log li { padding: 6px 8px; border-radius: 10px; background: rgba(255,255,255,.04); }

@@ -448,7 +448,7 @@
   }
 
   root.SBVoiceTurn = {
-    VERSION: "2.8.9",
+    VERSION: "2.8.10",
     slotBadgeText: slotBadgeText,
     authPills: authPills,
     ECHO_RMS: ECHO_RMS,
