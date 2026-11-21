@@ -457,7 +457,8 @@ button.pill { cursor: pointer; }
 .mic.busy { border-color: var(--gold, #e8c46a); background: rgba(232, 196, 106, .14); animation: micBusy 1s ease-in-out infinite alternate; }
 @keyframes micBusy { from { box-shadow: 0 0 0 2px rgba(232, 196, 106, .10); } to { box-shadow: 0 0 0 7px rgba(232, 196, 106, .22); } }
 .mic-status { margin: 6px 2px 0; font-size: 12.5px; color: var(--ink2); }
-.voice-live, .voice-speak-state, .voice-result { margin: 6px 2px 0; font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; }
+.assistant-state, .voice-live, .voice-speak-state, .voice-result { margin: 6px 2px 0; font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; }
+.assistant-state { color: var(--gold, #d7b56d); }
 .voice-live { color: var(--ink); }
 .voice-speak-state { color: var(--ink3); }
 .voice-result { color: var(--ink2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: rgba(8, 12, 20, .35); }

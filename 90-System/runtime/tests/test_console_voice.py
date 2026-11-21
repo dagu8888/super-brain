@@ -424,7 +424,7 @@ def test_pages():
     err = js.split("function micErrorText", 1)[1].split("async function micStart", 1)[0]
     check("拒绝麦克风时提示改地址栏并覆盖 iPhone", "NotAllowedError" in err and "SecurityError" in err and "地址栏" in err and "锁" in err and "麦克风图标" in err and "实时通话" in err and "设置 › Safari › 麦克风" in err and "键盘输入不受影响" in err)
     check("页面缓存仍是 no-store", 'Cache-Control" content="no-store' in html)
-    check("静态脚本样式版本是 2.8.6", "v2/app.js?v=2.8.6" in html and "v2/app.css?v=2.8.6" in html and "v2/voice-turn.js?v=2.8.5" in html and "v2/voice-entry.js?v=2.8.4" in html and "v2/speak-queue.js?v=2.8.4" in html and "v2/roster.js?v=2.8.4" in html)
+    check("静态脚本样式版本是 2.8.8", "v2/app.js?v=2.8.8" in html and "v2/app.css?v=2.8.8" in html and "v2/voice-turn.js?v=2.8.8" in html and "v2/assistant-stream.js?v=2.8.8" in html and "v2/voice-entry.js?v=2.8.4" in html and "v2/speak-queue.js?v=2.8.4" in html and "v2/roster.js?v=2.8.4" in html)
     check("按住说话仍是默认选中", 'name="voice-mode" value="hold" checked' in html and 'value="live" checked' not in html)
     check("语音设置默认关闭且可关", 'id="voice-panel" aria-label="语音设置" hidden' in html and 'id="btn-voice-collapse"' in html and ">关闭<" in html and 'aria-controls="voice-panel"' in html)
     mobile_css = css.split("@media (max-width: 760px)", 1)[1]
@@ -445,13 +445,15 @@ def test_pages():
     check("朗读路径不再截 500 字", "slice(0, 500)" not in voice)
     say = js.split("async function say", 1)[1].split("async function commitUtterance", 1)[0]
     say_head = say.split("await ", 1)[0]
-    check("按句排队且新朗读会先停掉上一段", "splitSpeakText" in queue and "createSession" in js and "stopSpeaking()" in say_head and "speakSession.begin" in say_head)
+    check("按句排队且新朗读会先停掉上一段", "splitSpeakText" in queue and "createSession" in js and "stopPlaybackOnly()" in say_head and "speakSession.begin" in say_head)
     check("快速回复念正文，正式回复仍走 say", "say(chatBody(m), S.voiceGen)" in js and "say(m.text, S.voiceGen)" in js)
     live = js.split("if (rms > 0.02)", 1)[1].split("else t.quiet", 1)[0]
     check("开口仍打断当前播放", "stopSpeaking()" in live)
     call = js.split("function startConversation", 1)[1].split("if (!canRecord", 1)[0]
     check("进入实时通话会先停朗读", "stopSpeaking()" in call)
-    check("实时定稿仍走 sendChat", "await sendChat({ voiceGen: sttGen })" in js.split("async function commitUtterance", 1)[1].split("function pcm16", 1)[0])
+    uttered = js.split("async function commitUtterance", 1)[1].split("function pcm16", 1)[0]
+    check("语音健康仍走 sendChat，普通语音走官方助手且本函数不 act", 'routed.channel === "health"' in uttered and "await sendChat({ voiceGen: sttGen })" in uttered and "runAssistantTurn" in uttered and 'act("msg"' not in uttered)
+    check("页面标明官方模型且失败不改用模拟", 'id="assistant-state"' in html and "deepseek-flash" in html and "api.deepseek.com" in html and "不会用模拟回答" in html)
     send_fn = js.split("async function sendChat", 1)[1].split("function autoGrow", 1)[0]
     health_arm = send_fn.split('route.kind === "health"', 1)[1].split('act("msg"', 1)[0]
     check("白名单整句在发给幕僚长之前返回", "fetchServerHealth" in health_arm and "\n      return;" in health_arm and 'act("msg"' not in health_arm)

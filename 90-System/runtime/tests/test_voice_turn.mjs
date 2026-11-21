@@ -43,6 +43,10 @@ check("五句白名单都不发给幕僚长", phrases.every((p) => {
 }));
 check("带标点的白名单仍只查健康", T.chatRoute("服务器健康。").chief === false && T.chatRoute("系统状态？").kind === "health");
 check("普通文字仍发给幕僚长", T.chatRoute("你好").kind === "chat" && T.chatRoute("你好").chief === true && T.chatRoute("今天怎么样").chief === true);
+check("普通语音不发给幕僚长", T.voiceTurnRoute("你好").channel === "assistant" && T.voiceTurnRoute("你好").chief === false && T.voiceTurnRoute("你好").clientAct === false && T.voiceTurnRoute("你好").mock === false);
+check("语音健康不进幕僚长", T.voiceTurnRoute("服务器健康").channel === "health" && T.voiceTurnRoute("服务器健康").chief === false && T.voiceTurnRoute("服务器健康").mock === false);
+check("语音委托不由浏览器 act", T.voiceTurnRoute("告诉幕僚长，整理回执").channel === "delegate" && T.voiceTurnRoute("告诉幕僚长，整理回执").clientAct === false && T.voiceTurnRoute("让幕僚长办一下").serverMayPost === true && T.voiceTurnRoute("让幕僚长办一下").once === true);
+check("敏感语音仍不自动发送", T.voiceTurnRoute("删除服务器").channel === "hold" && T.voiceTurnRoute("删除服务器").clientAct === false);
 check("敏感句不自动执行也不查健康", T.chatRoute("删除服务器").auto === false && T.chatRoute("删除服务器").chief === false && T.voiceAutoAction("删除服务器").send === false);
 const nasty = T.classifyText("服务器健康; rm -rf /");
 check("带命令的句子不执行", nasty.execute === false && nasty.shell === false && nasty.kind === "sensitive", JSON.stringify(nasty));

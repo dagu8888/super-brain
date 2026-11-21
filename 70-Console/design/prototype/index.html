@@ -16,7 +16,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="v2/icons/favicon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="v2/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="v2/app.css?v=2.8.6">
+<link rel="stylesheet" href="v2/app.css?v=2.8.8">
 <script>
 try {
   var root = document.documentElement;
@@ -232,6 +232,7 @@ try {
       <button class="btn" id="chat-send" type="submit">发送</button>
     </form>
     <div class="mic-status" id="mic-status" role="status" aria-live="polite" hidden></div>
+    <p id="assistant-state" class="assistant-state" role="status">语音助手：官方 deepseek-flash（api.deepseek.com）。未配置密钥时会直接提示，不会用模拟回答代替。朗读默认关。</p>
     <p id="voice-live" class="voice-live" role="status" aria-live="polite" hidden></p>
     <p id="voice-speak-state" class="voice-speak-state">朗读关。对话语音不会播放，也不会把文字交给浏览器语音。</p>
     <div id="voice-result" class="voice-result" role="status" hidden></div>
@@ -330,8 +331,9 @@ try {
 
 <script src="v2/voice-entry.js?v=2.8.4" defer></script>
 <script src="v2/speak-queue.js?v=2.8.4" defer></script>
-<script src="v2/voice-turn.js?v=2.8.5" defer></script>
+<script src="v2/voice-turn.js?v=2.8.8" defer></script>
+<script src="v2/assistant-stream.js?v=2.8.8" defer></script>
 <script src="v2/roster.js?v=2.8.4" defer></script>
-<script src="v2/app.js?v=2.8.6" defer></script>
+<script src="v2/app.js?v=2.8.8" defer></script>
 </body>
 </html>

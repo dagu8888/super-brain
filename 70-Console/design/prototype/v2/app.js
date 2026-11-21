@@ -1631,14 +1631,20 @@
   function onChiefReply(m) {
     const onChat = document.documentElement.dataset.tab === "chat" || !mobile.matches;
     if (!onChat || document.visibilityState !== "visible") { S.chatUnread += 1; renderChatBadge(); }
-    if (pref("sound")) beep(880);
-    if (S.voiceGen && voiceTurns.isCurrent(S.voiceGen) && (m.created_at || 0) >= (S.voiceSendAt || 0) - 5 && shouldSpeakReply()) say(m.text, S.voiceGen);
+    const hint = window.SBAssistantStream ? SBAssistantStream.chiefHint(assistantPlaying) : { speak: !assistantPlaying, beep: !assistantPlaying, hint: "" };
+    if (!hint.speak) showAssistantState(hint.hint);
+    else {
+      if (pref("sound")) beep(880);
+      if (S.voiceGen && voiceTurns.isCurrent(S.voiceGen) && (m.created_at || 0) >= (S.voiceSendAt || 0) - 5 && shouldSpeakReply()) say(m.text, S.voiceGen);
+    }
     localNotify("幕僚长回复", m.text, "chat");
   }
   function onQuickReply(m) {
     const onChat = document.documentElement.dataset.tab === "chat" || !mobile.matches;
     if (!onChat || document.visibilityState !== "visible") { S.chatUnread += 1; renderChatBadge(); }
-    if (S.voiceGen && voiceTurns.isCurrent(S.voiceGen) && (m.created_at || 0) >= (S.voiceSendAt || 0) - 5 && shouldSpeakReply()) say(chatBody(m), S.voiceGen);
+    const hint = window.SBAssistantStream ? SBAssistantStream.chiefHint(assistantPlaying) : { speak: !assistantPlaying };
+    if (!hint.speak) showAssistantState(hint.hint);
+    else if (S.voiceGen && voiceTurns.isCurrent(S.voiceGen) && (m.created_at || 0) >= (S.voiceSendAt || 0) - 5 && shouldSpeakReply()) say(chatBody(m), S.voiceGen);
     localNotify(QUICK_LABEL, chatBody(m), "quick");
   }
 
@@ -1843,6 +1849,14 @@
         generation() { return this.g || 0; }
       };
   let lastCommitted = "";
+  let assistantCtl = null;
+  let assistantGen = 0;
+  let assistantPlaying = false;
+  let assistantSpoken = "";
+  const assistantSentences = [];
+  const assistantPlayer = window.SBAssistantStream
+    ? window.SBAssistantStream.createSilentPlayer()
+    : { enqueue() { return { played: false, network: false, fixture: "silent" }; }, stop() { return { stopMic: false }; }, resume() {}, played() { return []; } };
   function voiceMode() {
     return window.SBVoiceEntry ? SBVoiceEntry.readMode(localStorage) : "hold";
   }
@@ -1898,7 +1912,7 @@
     speakCtls = [];
     list.forEach((ctl) => { try { ctl.abort(); } catch (e) { /* 已结束 */ } });
   }
-  function stopSpeaking() {
+  function stopPlaybackOnly() {
     speakSession.cancel();
     abortSpeakFetches();
     stopPcmSources();
@@ -1908,6 +1922,10 @@
     voiceTurns.setSpeaking(false, typeof performance !== "undefined" ? performance.now() : 0);
     bgmDuck = false;
     bgmApplyVolume();
+  }
+  function stopSpeaking() {
+    cancelAssistantPlayback();
+    stopPlaybackOnly();
   }
   function sayLocal(text, plan, sessionGen) {
     if (!("speechSynthesis" in window) || !plan || plan.mode !== "local-speech") return false;
@@ -2122,7 +2140,7 @@
       if (!ticket.queued || !voiceTurns.takeAudio(speakGen).item) return;
     }
     if (!opts.explicit && !voiceTurns.isCurrent(speakGen)) return;
-    stopSpeaking();
+    stopPlaybackOnly();
     const begun = speakSession.begin(raw);
     const sessionGen = begun.gen;
     const parts = begun.parts;
@@ -2186,11 +2204,184 @@
       toast("已放入输入框。敏感内容不会由语音直接执行。");
       return;
     }
+    if (assistantSpoken && t === assistantSpoken) {
+      showVoiceLive("这是刚才的朗读，不当成新指令。");
+      return;
+    }
+    if (assistantSentences.indexOf(t) >= 0) {
+      showVoiceLive("这是刚才的朗读，不当成新指令。");
+      return;
+    }
+    const routed = window.SBVoiceTurn.voiceTurnRoute(t);
     if (sttGen != null && !voiceTurns.isCurrent(sttGen)) return;
     lastCommitted = t;
     const ta = $("#chat-input");
     if (ta) { ta.value = t; autoGrow(ta); }
-    await sendChat({ voiceGen: sttGen });
+    if (routed.channel === "health") {
+      await sendChat({ voiceGen: sttGen });
+      return;
+    }
+    if (routed.channel === "assistant" || routed.channel === "delegate") {
+      await runAssistantTurn(t, sttGen, routed);
+      return;
+    }
+  }
+  function showAssistantState(text) {
+    const el = $("#assistant-state");
+    if (el) el.textContent = text;
+    showVoiceLive(text);
+  }
+  function cancelAssistantPlayback() {
+    assistantGen += 1;
+    assistantPlaying = false;
+    if (assistantCtl) {
+      try { assistantCtl.abort(); } catch (e) { /* 已结束 */ }
+      assistantCtl = null;
+    }
+    assistantPlayer.stop();
+    assistantPlayer.resume();
+  }
+  function stopCaptureExplicit() {
+    if (mic) { const held = mic; held.released = true; micCleanup(held); }
+    stopConversation();
+    stopSpeaking();
+    showVoiceLive("语音采集已关闭，麦克风已释放。");
+  }
+  function applyAssistantUi(name, args) {
+    const stream = window.SBAssistantStream;
+    if (!stream || !stream.validateAction(name, args || {})) return false;
+    const fns = {
+      setTab: (a) => setTab(a.tab),
+      go: (a) => go(a.target),
+      scrollChat: () => scrollChat(),
+      setVoicePanelCollapsed: (a) => setVoicePanelCollapsed(!!a.collapsed),
+      stopSpeaking: () => stopSpeaking(),
+      stopCapture: () => stopCaptureExplicit(),
+      getServerHealth: () => fetchServerHealth().then((payload) => {
+        if (payload && payload.ok && payload.data) showHealthResult(window.SBVoiceTurn.formatHealth(payload));
+        else showAssistantState("健康查询没有成功。没有改走幕僚长。");
+      })
+    };
+    return stream.applyAction(name, args || {}, fns).ok === true;
+  }
+  let assistantSpeakGen = 0;
+  let assistantSpeakChain = Promise.resolve();
+  function armAssistantSpeech() {
+    stopPlaybackOnly();
+    assistantSpeakGen = speakSession.begin("").gen;
+    assistantSpeakChain = Promise.resolve();
+  }
+  function enqueueAssistantSpeech(sentence, turnGen) {
+    if (!shouldSpeakReply()) return;
+    const gen = assistantSpeakGen;
+    assistantSpeakChain = assistantSpeakChain.then(async () => {
+      if (assistantGen !== turnGen || speakSession.generation() !== gen) return;
+      const plan = voiceTurns.ttsPlan({ deepgramConfigured: !!(voiceStatus && voiceStatus.deepgram), voices: speakVoices(), explicit: false });
+      if (!plan.speak) return;
+      if (plan.mode === "server-wenjing") {
+        const resp = await openSpeak(sentence, voiceTurns.generation());
+        if (assistantGen !== turnGen || speakSession.generation() !== gen) return;
+        await playFlux(resp, gen);
+        return;
+      }
+      if (plan.mode === "local-speech") sayLocal(sentence, plan, gen);
+    }).catch(() => { /* 朗读失败不另造回答 */ });
+  }
+  async function runAssistantTurn(text, sttGen, routed) {
+    if (!window.SBAssistantStream) {
+      showAssistantState("语音拼装模块没加载。没有改用模拟回答。");
+      return;
+    }
+    cancelAssistantPlayback();
+    armAssistantSpeech();
+    const box = $("#chat-input");
+    if (box && box.value.trim() === text) { box.value = ""; autoGrow(box); }
+    const mine = assistantGen;
+    if (sttGen != null && !voiceTurns.isCurrent(sttGen)) return;
+    assistantPlaying = true;
+    showAssistantState(routed && routed.channel === "delegate" ? "思考。明确委托才会转交。" : "思考。官方 deepseek-flash。");
+    const asm = window.SBAssistantStream.createAssembler();
+    const asmGen = asm.begin();
+    const ctl = assistantCtl = new AbortController();
+    const o = own();
+    let response = null;
+    try {
+      response = await fetch(API + "/api/owner/assistant/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + ((o && o.token) || "") },
+        body: JSON.stringify({ text: text, turn_id: "voice-" + mine, source: "voice" }),
+        signal: ctl.signal, cache: "no-store", credentials: "same-origin"
+      });
+    } catch (e) {
+      assistantPlaying = false;
+      if (assistantGen !== mine) return;
+      showAssistantState(e && e.name === "AbortError" ? "已取消。采集保持。" : "这一轮没有连上。没有改用模拟回答。采集保持。");
+      return;
+    }
+    if (assistantGen !== mine) return;
+    if (!response || response.status === 401) {
+      assistantPlaying = false;
+      showAssistantState("没有主人会话，失败关闭。");
+      return;
+    }
+    if (!response.ok) {
+      assistantPlaying = false;
+      showAssistantState("这一轮失败关闭。没有改用模拟回答。");
+      return;
+    }
+    const decoder = new TextDecoder();
+    let buf = "";
+    let spoken = "";
+    let failed = false;
+    const reader = response.body && response.body.getReader ? response.body.getReader() : null;
+    const take = async () => {
+      if (!reader) return { done: false, text: await response.text(), last: true };
+      const chunk = await reader.read();
+      if (chunk.done) return { done: true, text: "" };
+      return { done: false, text: decoder.decode(chunk.value, { stream: true }) };
+    };
+    try {
+      let last = false;
+      while (assistantGen === mine && !last && !failed) {
+        const piece = await take();
+        if (piece.done) break;
+        last = !!piece.last;
+        buf += piece.text || "";
+        const parsed = window.SBAssistantStream.parseSse(buf);
+        buf = parsed.rest;
+        parsed.events.forEach((ev) => {
+          if (failed || assistantGen !== mine || !ev.data || ev.data.mock !== false) return;
+          if (ev.event === "delta") asm.pushDelta(asmGen, ev.data.text || "");
+          if (ev.event === "sentence" || ev.event === "delegate") {
+            const sentence = ev.data.text || "";
+            const joined = asm.pushSentence(asmGen, sentence);
+            if (!joined.accepted) return;
+            assistantSentences.push(sentence);
+            spoken += sentence;
+            showAssistantState("助手：" + sentence);
+            enqueueAssistantSpeech(sentence, mine);
+          }
+          if (ev.event === "action") applyAssistantUi(ev.data.name, ev.data.args || {});
+          if (ev.event === "error" || ev.event === "ignored") {
+            failed = ev.event === "error";
+            if (failed) stopPlaybackOnly();
+            showAssistantState(ev.data.message || "这一轮失败关闭。没有改用模拟回答。采集保持。");
+          }
+        });
+        if (!reader) break;
+      }
+    } catch (e) {
+      assistantPlaying = false;
+      if (assistantGen === mine) showAssistantState("已取消。采集保持。");
+      return;
+    }
+    if (spoken) assistantSpoken = spoken;
+    const finish = () => {
+      if (assistantGen !== mine) return;
+      assistantPlaying = false;
+      if (!failed) showAssistantState(spoken ? ("助手：" + spoken) : "这一轮没有可见回复。没有改用模拟回答。");
+    };
+    assistantSpeakChain.then(finish, finish);
   }
   function pcm16(chunks, rate) {
     let n = 0; for (const c of chunks) n += c.length;
@@ -3150,6 +3341,21 @@
         if (label) label.textContent = "未认证，语音状态未读取";
       }
     }
+    loadAssistantStatus();
+  }
+  async function loadAssistantStatus() {
+    const o = own();
+    if (!o) return;
+    try {
+      const r = await fetch(API + "/api/owner/assistant/status", { headers: { Authorization: "Bearer " + o.token }, cache: "no-store", credentials: "same-origin" });
+      if (!r.ok) return;
+      const j = await r.json();
+      const el = $("#assistant-state");
+      if (!el || !j || j.mock !== false) return;
+      el.textContent = j.configured
+        ? "语音助手：官方 deepseek-flash（api.deepseek.com）。朗读默认关。失败时不会改用模拟回答。"
+        : (j.reason || "语音助手：未接通官方 DeepSeek。不会用模拟回答代替。");
+    } catch (e) { /* 读不到状态就保留页面上的说明 */ }
   }
   async function onVoiceMode(mode) {
     const prev = voiceMode();
