@@ -18,6 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+import assistant_http
 import console_api
 import message_bus
 import owner_ops
@@ -589,6 +590,8 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
                 return
             if voice_http.try_handle(self, "GET", db_fn, log_event):
                 return
+            if assistant_http.try_handle(self, "GET", db_fn, log_event):
+                return
             gpath = path.rstrip("/") or "/"
             if gpath in ("/api/groupchat/inbox", "/api/groupchat/me"):
                 return self._groupchat("GET")
@@ -623,6 +626,8 @@ def _make_handler(db_fn, execute_fn, log_event, tokens, viewers=None, stop=None,
 
         def do_POST(self):
             if voice_http.try_handle(self, "POST", db_fn, log_event):
+                return
+            if assistant_http.try_handle(self, "POST", db_fn, log_event):
                 return
             if urlparse(self.path).path == "/api/owner/stt":
                 return self._owner_stt()

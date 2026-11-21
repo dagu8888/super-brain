@@ -394,8 +394,8 @@ def test_frontend_marks():
     check("前端认 local-quick", 'const QUICK_ID = "local-quick"' in js and "快速回复（本地小模型）" in js)
     check("气泡区分快速回复和正式回复", "who-tag quick" in js and "幕僚长 · 正式回复" in js and ".bub.quick" in css and ".who-tag.chief" in css)
     check("发送响应会立刻画上快速回复", "j.quick_reply" in js and "addChat(j.quick_reply, true)" in js)
-    check("语音定稿仍走 sendChat", "async function commitUtterance" in js and "await sendChat({ voiceGen: sttGen })" in js)
-    check("页面版本已抬到 2.8.6", "v2/app.js?v=2.8.6" in html and "v2/app.css?v=2.8.6" in html)
+    check("文字发送仍会带上快速回复，语音健康仍走 sendChat", "async function commitUtterance" in js and "await sendChat({ voiceGen: sttGen })" in js and "runMockAssistant" in js)
+    check("页面版本已抬到 2.8.7", "v2/app.js?v=2.8.7" in html and "v2/app.css?v=2.8.7" in html)
     check("前端没有把令牌写进查询", "token=" not in js and "?token" not in js)
 
 
