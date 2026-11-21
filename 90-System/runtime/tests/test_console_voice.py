@@ -424,7 +424,7 @@ def test_pages():
     err = js.split("function micErrorText", 1)[1].split("async function micStart", 1)[0]
     check("拒绝麦克风时提示改地址栏并覆盖 iPhone", "NotAllowedError" in err and "SecurityError" in err and "地址栏" in err and "锁" in err and "麦克风图标" in err and "实时通话" in err and "设置 › Safari › 麦克风" in err and "键盘输入不受影响" in err)
     check("页面缓存仍是 no-store", 'Cache-Control" content="no-store' in html)
-    check("静态脚本样式版本是 2.8.8", "v2/app.js?v=2.8.8" in html and "v2/app.css?v=2.8.8" in html and "v2/voice-turn.js?v=2.8.8" in html and "v2/assistant-stream.js?v=2.8.8" in html and "v2/voice-entry.js?v=2.8.4" in html and "v2/speak-queue.js?v=2.8.4" in html and "v2/roster.js?v=2.8.4" in html)
+    check("静态脚本样式版本是 2.8.9", "v2/app.js?v=2.8.9" in html and "v2/app.css?v=2.8.9" in html and "v2/voice-turn.js?v=2.8.9" in html and "v2/assistant-stream.js?v=2.8.9" in html and "v2/voice-entry.js?v=2.8.4" in html and "v2/speak-queue.js?v=2.8.4" in html and "v2/roster.js?v=2.8.4" in html)
     check("按住说话仍是默认选中", 'name="voice-mode" value="hold" checked' in html and 'value="live" checked' not in html)
     check("语音设置默认关闭且可关", 'id="voice-panel" aria-label="语音设置" hidden' in html and 'id="btn-voice-collapse"' in html and ">关闭<" in html and 'aria-controls="voice-panel"' in html)
     mobile_css = css.split("@media (max-width: 760px)", 1)[1]

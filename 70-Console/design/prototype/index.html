@@ -16,7 +16,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="v2/icons/favicon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="v2/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="v2/app.css?v=2.8.8">
+<link rel="stylesheet" href="v2/app.css?v=2.8.9">
 <script>
 try {
   var root = document.documentElement;
@@ -186,6 +186,17 @@ try {
         <p id="voice-voice-label">音色 文静 · flux-wenjing-zh</p>
       </div>
       <div id="voice-panel-body">
+      <section id="steward-card" aria-label="操作台管家角色卡">
+        <h3>操作台管家角色卡</h3>
+        <p class="note">这一段可以改。保存后再读出来应与保存的一致，并用于后续管家对话。</p>
+        <label class="sr" for="steward-card-text">可编辑的角色卡</label>
+        <textarea id="steward-card-text" rows="8" maxlength="2000" aria-label="可编辑的操作台管家角色卡"></textarea>
+        <button class="chip" id="steward-card-save" type="button">保存角色卡</button>
+        <p id="steward-card-status" class="note" role="status"></p>
+        <h3>程序安全约束（不可编辑）</h3>
+        <p class="note">下面这段由程序附在每次请求后面。改角色卡不会改掉它，也不能用它提高权限。</p>
+        <pre id="steward-card-locked" aria-readonly="true"></pre>
+      </section>
       <div class="voice-modes" role="radiogroup" aria-label="语音模式">
         <label class="voice-mode"><input type="radio" name="voice-mode" value="hold" checked><span><b>按住说话</b><small>先打开「语音采集」。松手只把文字填进输入框，不自动发送。</small></span></label>
         <label class="voice-mode"><input type="radio" name="voice-mode" value="stream"><span><b>流式（本地小模型）</b><small>本地 Moonshine 滚动识别。部分转写就地更新，停顿后定稿。可打断。朗读要单独打开。</small></span></label>
@@ -222,6 +233,15 @@ try {
       <p class="note" id="voice-flow-note">声音只在「语音采集」打开后进入麦克风，经本机接口交给已有的 Moonshine，不打开 Nova-3。文字回复是整段到达：快速回复不是幕僚长正式回复，也不是逐字流。朗读默认关。打开后，已配置的文静仍走服务器原来的接口；浏览器语音只有确认 localService=true 的中文本地音色才使用。不能确认就显示不可用，不把文字送去外部合成。</p>
       <p class="note">查看不用口令。切换模式和保存密钥需要今日口令。页面上看不到已保存的密钥。</p>
       </div>
+    </section>
+    <section id="steward-talk" aria-label="操作台管家对话">
+      <div class="sec-head">
+        <h2>操作台管家</h2>
+        <button class="chip" id="btn-steward-pack" type="button">交给幕僚长：打包本段</button>
+      </div>
+      <p class="note">这里只记大古和管家的定稿。部分识别不存。下面的列表仍是给幕僚长的文字直聊。</p>
+      <ol id="steward-log"><li class="empty">这段还没有定稿。</li></ol>
+      <p id="steward-pack-status" class="note" role="status"></p>
     </section>
     <ol class="chat-list" id="chat" aria-live="polite" aria-relevant="additions"><li class="empty">读取中…</li></ol>
     <div class="chat-reply" id="chat-reply" hidden></div>
@@ -331,9 +351,9 @@ try {
 
 <script src="v2/voice-entry.js?v=2.8.4" defer></script>
 <script src="v2/speak-queue.js?v=2.8.4" defer></script>
-<script src="v2/voice-turn.js?v=2.8.8" defer></script>
-<script src="v2/assistant-stream.js?v=2.8.8" defer></script>
+<script src="v2/voice-turn.js?v=2.8.9" defer></script>
+<script src="v2/assistant-stream.js?v=2.8.9" defer></script>
 <script src="v2/roster.js?v=2.8.4" defer></script>
-<script src="v2/app.js?v=2.8.8" defer></script>
+<script src="v2/app.js?v=2.8.9" defer></script>
 </body>
 </html>

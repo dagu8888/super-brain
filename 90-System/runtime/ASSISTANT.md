@@ -4,6 +4,12 @@
 
 香港侧已有一次只读探测：HTTP 200，8 个可见块，首个可见块 0.3378 秒，整段 0.4892 秒。这里的自动化测试不再访问官方接口，也不把那次探测写成新的计费调用。
 
+## 操作台管家角色卡
+
+可编辑正文存在服务端表 `steward_card`，默认文本在 `90-System/runtime/assistant_store.py` 的 `DEFAULT_CARD`。每次请求由 `compose_system` 在正文后附上 `LOCKED_RULES`。改角色卡不会改掉这段约束，也不会改变 A/B/C 的程序判断。
+
+管家对话记在 `steward_turns`，和给幕僚长的 `messages` 分开。模型短上下文仍只留最近 6 条。部分识别不入库。只有点击「交给幕僚长：打包本段」才把本段草稿发给幕僚长，并要有 `msg_id`。
+
 ## 环境变量
 
 只放在运行 `api_server` 的进程环境里（现有 `super-brain.service` 所在进程）。不要写进仓库、前端或日志。
