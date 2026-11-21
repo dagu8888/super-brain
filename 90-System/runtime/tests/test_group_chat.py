@@ -443,7 +443,7 @@ def test_pages_exist():
     check("操作台有群聊板块", 'data-tab="groups"' in html and "以你自己的身份说点什么" in html)
     check("前端走现有口令解锁和群接口", "group_send" in js and "/api/groupchat/roster" in js and "askUnlock" in js)
     check("前端不写死令牌", "token=" not in js and "?token" not in js)
-    check("静态资源版本已抬到 2.8.5", "v2/app.js?v=2.8.5" in html and "v2/app.css?v=2.8.5" in html)
+    check("静态资源版本已抬到 2.8.6", "v2/app.js?v=2.8.6" in html and "v2/app.css?v=2.8.6" in html)
     css = (ROOT / "70-Console/design/prototype/v2/app.css").read_text(encoding="utf-8")
     meta = html.split('<div class="top-meta">', 1)[1].split("</header>", 1)[0]
     mobile = css.split("@media (max-width: 760px)", 1)[1].split("@media", 1)[0]
@@ -550,7 +550,7 @@ def test_console_270_visual_invariants():
     scene = (ROOT / "70-Console/design/prototype/v2/scene3d.js").read_text(encoding="utf-8")
     galaxy = (ROOT / "70-Console/design/prototype/v2/galaxy.js").read_text(encoding="utf-8")
     api = (ROOT / "90-System/runtime/console_api.py").read_text(encoding="utf-8")
-    check("版本号是 2.8.5，场景脚本仍是 4.0.0", "v2/app.js?v=2.8.5" in html and "v=2.7.0" not in html and 'version: "2.8.4"' in galaxy and 'version: "4.0.0"' in scene)
+    check("版本号是 2.8.6，场景脚本仍是 4.0.0", "v2/app.js?v=2.8.6" in html and "v=2.7.0" not in html and 'version: "2.8.4"' in galaxy and 'version: "4.0.0"' in scene)
     check("不写死火节点", "火" not in scene and "火" not in galaxy and "__fire__" not in js and "Fire" not in scene)
     check("中台仍是编排中心", "中台" in scene and "中台" in js and "photosphere" in scene)
     check("关系来自接口并可点开证据", "/api/relations" in js and "evidence" in js and "openRelation" in js and "onEdge" in scene)
@@ -563,7 +563,7 @@ def test_console_270_visual_invariants():
     check("桌面第一屏仍是总览加右侧对话", css.split("grid-template-areas:", 1)[1].split(";", 1)[0].strip().startswith('"hero hero chat"'))
     side = css.split("@media (min-width: 761px)", 1)[1].split("@media", 1)[0]
     check("第一屏两侧同高", "#sec-hero" in side and "#sec-chat" in side and side.count("calc(100dvh - var(--deck-top, 58px))") >= 1)
-    check("语音设置不撑满右侧对话", "#sec-chat .voice-panel" in side and "max-height" in side.split("#sec-chat .voice-panel", 1)[1].split("}", 1)[0])
+    check("语音设置不撑满右侧对话", "#voice-panel[hidden]" in css and "position: fixed" in css and "#sec-chat .chat-list" in side)
     fs = css.split("html.stage-fs .stage", 1)[1].split("html.stage-fs .stage-head", 1)[0]
     check("全屏协作网盖住窗口", "position: fixed" in fs and "z-index: 28" in fs and "top: 0" in fs and "background-color: var(--bg)" in fs)
     check("全屏时聊天不叠在全图上", "html.stage-fs #sec-chat" not in css and "html.stage-fs .chat" not in css)

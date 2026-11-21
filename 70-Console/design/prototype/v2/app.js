@@ -3114,11 +3114,10 @@
   function setVoicePanelCollapsed(collapsed) {
     const panel = $("#voice-panel");
     const btn = $("#btn-voice-collapse");
-    if (panel) panel.classList.toggle("is-collapsed", !!collapsed);
-    if (btn) {
-      btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
-      btn.textContent = collapsed ? "展开" : "收起";
-    }
+    const jump = $("#btn-voice");
+    if (panel) panel.hidden = !!collapsed;
+    if (btn) btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    if (jump) jump.setAttribute("aria-expanded", collapsed ? "false" : "true");
   }
   async function loadVoiceStatus() {
     try {
@@ -3184,16 +3183,23 @@
     });
     const jump = $("#btn-voice");
     if (jump) jump.addEventListener("click", () => {
-      if (mobile.matches) setTab("chat");
       const panel = $("#voice-panel");
-      const collapsed = !!(panel && panel.classList.contains("is-collapsed"));
-      setVoicePanelCollapsed(!collapsed && !!panel);
-      if (panel && collapsed && panel.scrollIntoView) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+      const closed = !panel || panel.hidden;
+      setVoicePanelCollapsed(!closed);
+      if (closed) {
+        const close = $("#btn-voice-collapse");
+        if (close) close.focus();
+      }
     });
     const collapse = $("#btn-voice-collapse");
     if (collapse) collapse.addEventListener("click", () => {
+      setVoicePanelCollapsed(true);
+      const opener = $("#btn-voice");
+      if (opener) opener.focus();
+    });
+    document.addEventListener("keydown", (e) => {
       const panel = $("#voice-panel");
-      setVoicePanelCollapsed(!(panel && panel.classList.contains("is-collapsed")));
+      if (e.key === "Escape" && panel && !panel.hidden) setVoicePanelCollapsed(true);
     });
     loadVoiceStatus();
   }
@@ -3243,6 +3249,16 @@
       speechSynthesis.addEventListener("voiceschanged", () => renderSpeakState());
     }
     voiceTurns.setReadAloud(pref("tts"));
+    const vv = window.visualViewport;
+    if (vv) {
+      const syncKb = () => {
+        const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+        document.documentElement.style.setProperty("--kb", kb + "px");
+      };
+      vv.addEventListener("resize", syncKb);
+      vv.addEventListener("scroll", syncKb);
+      syncKb();
+    }
     renderCaptureBtn();
     renderSpeakState();
     const liveBtn = $("#btn-live-call");
