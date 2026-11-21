@@ -424,12 +424,12 @@ def test_pages():
     err = js.split("function micErrorText", 1)[1].split("async function micStart", 1)[0]
     check("拒绝麦克风时提示改地址栏并覆盖 iPhone", "NotAllowedError" in err and "SecurityError" in err and "地址栏" in err and "锁" in err and "麦克风图标" in err and "实时通话" in err and "设置 › Safari › 麦克风" in err and "键盘输入不受影响" in err)
     check("页面缓存仍是 no-store", 'Cache-Control" content="no-store' in html)
-    check("静态脚本样式版本是 2.8.5", "v2/app.js?v=2.8.5" in html and "v2/app.css?v=2.8.5" in html and "v2/voice-turn.js?v=2.8.5" in html and "v2/voice-entry.js?v=2.8.4" in html and "v2/speak-queue.js?v=2.8.4" in html and "v2/roster.js?v=2.8.4" in html)
+    check("静态脚本样式版本是 2.8.6", "v2/app.js?v=2.8.6" in html and "v2/app.css?v=2.8.6" in html and "v2/voice-turn.js?v=2.8.5" in html and "v2/voice-entry.js?v=2.8.4" in html and "v2/speak-queue.js?v=2.8.4" in html and "v2/roster.js?v=2.8.4" in html)
     check("按住说话仍是默认选中", 'name="voice-mode" value="hold" checked' in html and 'value="live" checked' not in html)
-    check("语音面板有标题和收起", 'id="voice-panel-title"' in html and 'id="btn-voice-collapse"' in html and ">收起<" in html and 'id="voice-panel-body"' in html)
+    check("语音设置默认关闭且可关", 'id="voice-panel" aria-label="语音设置" hidden' in html and 'id="btn-voice-collapse"' in html and ">关闭<" in html and 'aria-controls="voice-panel"' in html)
     mobile_css = css.split("@media (max-width: 760px)", 1)[1]
-    check("手机语音面板可滚动且标题粘住", "#sec-chat .voice-panel" in mobile_css and "overflow: auto" in mobile_css and "max-height: min(46dvh, 420px)" in mobile_css and "#sec-chat .sec-head" in mobile_css and "position: sticky" in mobile_css)
-    check("收起只藏正文", ".voice-panel.is-collapsed #voice-panel-body" in css)
+    check("手机聊天优先且输入让出导航", 'html[data-tab="chat"] #sec-chat' in mobile_css and "min-height: 0" in mobile_css and "--kb" in css and ".tabbar { bottom:" in mobile_css)
+    check("关闭的语音设置不占聊天位", "#voice-panel[hidden]" in css and "display: none !important" in css and "#voice-panel:not([hidden])" in css and "position: fixed" in css)
     check("供应商占位不是未配置", html.count('data-state="pending">读取中<') == 4)
     check("401 时供应商改画未认证", 'paintVoiceSlots("unauthorized")' in js and "未认证，语音状态未读取" in js)
     check("手机上健康徽标不参与顶栏重复", "#health-pill { display: none" in mobile_css)
