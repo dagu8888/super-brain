@@ -16,7 +16,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="v2/icons/favicon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="v2/icons/apple-touch-icon.png">
-<link rel="stylesheet" href="v2/app.css?v=2.8.9">
+<link rel="stylesheet" href="v2/app.css?v=2.8.10">
 <script>
 try {
   var root = document.documentElement;
@@ -190,7 +190,7 @@ try {
         <h3>操作台管家角色卡</h3>
         <p class="note">这一段可以改。保存后再读出来应与保存的一致，并用于后续管家对话。</p>
         <label class="sr" for="steward-card-text">可编辑的角色卡</label>
-        <textarea id="steward-card-text" rows="8" maxlength="2000" aria-label="可编辑的操作台管家角色卡"></textarea>
+        <textarea id="steward-card-text" rows="12" maxlength="8000" aria-label="可编辑的操作台管家角色卡"></textarea>
         <button class="chip" id="steward-card-save" type="button">保存角色卡</button>
         <p id="steward-card-status" class="note" role="status"></p>
         <h3>程序安全约束（不可编辑）</h3>
@@ -231,19 +231,26 @@ try {
       </div>
       <p class="note" id="voice-entry-note">进入页面先由文静说「大古，欢迎回来」（本地音频，不现场调用）。说完再放背景音乐。文件还没放进目录、或浏览器拦住自动播放时，点一下页面任意处会按同样顺序补播；欢迎语播不了就只放音乐。</p>
       <p class="note" id="voice-flow-note">声音只在「语音采集」打开后进入麦克风，经本机接口交给已有的 Moonshine，不打开 Nova-3。文字回复是整段到达：快速回复不是幕僚长正式回复，也不是逐字流。朗读默认关。打开后，已配置的文静仍走服务器原来的接口；浏览器语音只有确认 localService=true 的中文本地音色才使用。不能确认就显示不可用，不把文字送去外部合成。</p>
+      <p class="note" id="assistant-config-note">语音助手：官方 deepseek-flash（api.deepseek.com）。未配置密钥时会直接提示，不会用模拟回答代替。朗读默认关。</p>
+      <p class="note" id="voice-speak-detail">朗读开关的说明在这里。对话页只保留「朗读 开/关」。</p>
       <p class="note">查看不用口令。切换模式和保存密钥需要今日口令。页面上看不到已保存的密钥。</p>
       </div>
     </section>
     <section id="steward-talk" aria-label="操作台管家对话">
       <div class="sec-head">
         <h2>操作台管家</h2>
-        <label class="steward-session-label" for="steward-session">回看</label>
-        <select id="steward-session" aria-label="回看管家会话"></select>
-        <button class="chip" id="btn-steward-pack" type="button">交给幕僚长：打包本段</button>
+        <details id="steward-more" class="steward-more">
+          <summary id="steward-more-summary">回看与交办</summary>
+          <div class="steward-more-body">
+            <label class="steward-session-label" for="steward-session">回看</label>
+            <select id="steward-session" aria-label="回看管家会话"></select>
+            <button class="chip" id="btn-steward-pack" type="button">交给幕僚长：打包本段</button>
+            <p class="note" id="steward-session-note">定稿记在这里。打包后，下一次定稿另开一段。下面仍是幕僚长直聊。</p>
+            <p id="steward-pack-status" class="note" role="status"></p>
+          </div>
+        </details>
       </div>
-      <p class="note" id="steward-session-note">定稿记在这里。打包后，下一次定稿另开一段。下面仍是幕僚长直聊。</p>
       <ol id="steward-log"><li class="empty">这段还没有定稿。</li></ol>
-      <p id="steward-pack-status" class="note" role="status"></p>
     </section>
     <ol class="chat-list" id="chat" aria-live="polite" aria-relevant="additions"><li class="empty">读取中…</li></ol>
     <div class="chat-reply" id="chat-reply" hidden></div>
@@ -254,9 +261,9 @@ try {
       <button class="btn" id="chat-send" type="submit">发送</button>
     </form>
     <div class="mic-status" id="mic-status" role="status" aria-live="polite" hidden></div>
-    <p id="assistant-state" class="assistant-state" role="status">语音助手：官方 deepseek-flash（api.deepseek.com）。未配置密钥时会直接提示，不会用模拟回答代替。朗读默认关。</p>
+    <p id="assistant-state" class="assistant-state" role="status" hidden></p>
     <p id="voice-live" class="voice-live" role="status" aria-live="polite" hidden></p>
-    <p id="voice-speak-state" class="voice-speak-state">朗读关。对话语音不会播放，也不会把文字交给浏览器语音。</p>
+    <p id="voice-speak-state" class="voice-speak-state" hidden></p>
     <div id="voice-result" class="voice-result" role="status" hidden></div>
     <div class="chat-foot" id="chat-foot"></div>
   </section>
@@ -353,9 +360,9 @@ try {
 
 <script src="v2/voice-entry.js?v=2.8.4" defer></script>
 <script src="v2/speak-queue.js?v=2.8.4" defer></script>
-<script src="v2/voice-turn.js?v=2.8.9" defer></script>
-<script src="v2/assistant-stream.js?v=2.8.9" defer></script>
+<script src="v2/voice-turn.js?v=2.8.10" defer></script>
+<script src="v2/assistant-stream.js?v=2.8.10" defer></script>
 <script src="v2/roster.js?v=2.8.4" defer></script>
-<script src="v2/app.js?v=2.8.9" defer></script>
+<script src="v2/app.js?v=2.8.10" defer></script>
 </body>
 </html>

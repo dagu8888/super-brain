@@ -37,6 +37,12 @@ const parsed = S.parseSse(raw);
 check("SSE 拆包保留模拟标记", parsed.events.length === 2 && parsed.events[0].data.mock === true && parsed.events[1].data.text === "甲。");
 check("界面白名单拒绝任意脚本", S.validateAction("setTab", { tab: "chat" }) && S.validateAction("go", { target: "chat" }) && S.validateAction("scrollChat", {}) && S.validateAction("setVoicePanelCollapsed", { collapsed: true }) && !S.validateAction("eval", {}) && !S.validateAction("setTab", { tab: "chat", js: "1" }));
 check("回包不抢当前播放", S.shouldStealPlayback() === false && S.chiefHint(true).speak === false && S.chiefHint(true).beep === false && S.chiefHint(true).hint.indexOf("不打断") >= 0 && S.chiefHint(false).speak === true);
+const partial = S.presentTurn("partial", "部分转写：你好");
+const token = S.presentTurn("token", "正在回复");
+const end = S.presentTurn("end", "助手：完整回复");
+const error = S.presentTurn("error", "官方接口没有连上。没有改用模拟回答。");
+check("临时状态可收起且完成不留下第二份回复", partial.transient === "部分转写：你好" && partial.sticky === "" && token.sticky === "" && end.transient === "" && end.sticky === "");
+check("失败说明保持可见", error.sticky.indexOf("没有改用模拟回答") >= 0 && error.transient === "");
 const fns = { setTab(args) { fns.seen = args.tab; } };
 check("只调用已登记的界面函数", S.applyAction("setTab", { tab: "groups" }, fns).ok === true && fns.seen === "groups" && S.applyAction("document.querySelector", {}, fns).ok === false);
 
