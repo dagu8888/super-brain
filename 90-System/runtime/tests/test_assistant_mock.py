@@ -124,9 +124,9 @@ def test_policy_and_plan():
     ev = assistant_session.plan_turn(book, "d", "t1", "你好", poster=lambda text, key: {"ok": True, "msg_id": "should-not"}, transport=talk)
     deltas = [item["text"] for item in ev if item["event"] == "delta"]
     sentences = [item["text"] for item in ev if item["event"] == "sentence"]
-    check("上游增量按句拼装且不是模拟", ev[0]["event"] == "context" and ev[0]["mock"] is False and "你叫 ALS" in ev[0]["role_core_text"] and "模拟上下文" not in ev[0]["role_core_text"] and sentences == ["你好。"] and "".join(deltas) == "你好。" and "模拟" not in "".join(deltas) and talk.calls["n"] == 1)
+    check("上游增量按句拼装且不是模拟", ev[0]["event"] == "context" and ev[0]["mock"] is False and "你是 ALS" in ev[0]["role_core_text"] and "模拟上下文" not in ev[0]["role_core_text"] and sentences == ["你好。"] and "".join(deltas) == "你好。" and "模拟" not in "".join(deltas) and talk.calls["n"] == 1)
     check("普通闲聊不调用转交", all(item["event"] != "delegate" for item in ev) and book.context_size("d") == 2)
-    check("上下文带上角色卡", talk.calls["messages"][0]["role"] == "system" and "你叫 ALS" in talk.calls["messages"][0]["content"] and "模拟上下文" not in talk.calls["messages"][0]["content"] and "不能当成已经知道" in talk.calls["messages"][0]["content"])
+    check("上下文带上角色卡", talk.calls["messages"][0]["role"] == "system" and "你是 ALS" in talk.calls["messages"][0]["content"] and "模拟上下文" not in talk.calls["messages"][0]["content"] and "不能当成已经知道" in talk.calls["messages"][0]["content"])
 
     before = book.context_size("d")
     echo = assistant_session.plan_turn(book, "d", "t1", sentences[0], budget=80, timeout_s=8)
