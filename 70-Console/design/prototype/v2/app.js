@@ -1584,19 +1584,30 @@
       showVoiceLive("旧转写已取消，没有发送，也没有执行只读查询。");
       return;
     }
-    const decision = window.SBVoiceTurn.classifyText(text);
+    const route = window.SBVoiceTurn.chatRoute(text);
     stopSpeaking();
     const sendTurn = voiceTurns.beginSend();
     const gen = sendTurn.generation;
     S.voiceGen = gen;
     S.voiceSendAt = now();
-    let healthCtl = null;
-    if (decision.execute && decision.method === "GET" && decision.path === "/api/server" && decision.id === "server_health") {
-      const armedRead = voiceTurns.armReadOnly(gen, decision.id);
-      if (armedRead.armed) {
-        healthCtl = new AbortController();
-        voiceTurns.trackAbort(gen, () => healthCtl.abort());
-      }
+    if (route.kind === "health") {
+      const btn = $("#chat-send"); btn.disabled = true;
+      const healthCtl = new AbortController();
+      const armedRead = voiceTurns.armReadOnly(gen, "server_health");
+      if (armedRead.armed) voiceTurns.trackAbort(gen, () => healthCtl.abort());
+      let payload = null;
+      try { payload = await fetchServerHealth(healthCtl.signal); }
+      catch (e) { payload = { ok: false, error: e && e.name === "AbortError" ? "aborted" : "failed" }; }
+      btn.disabled = false;
+      const settled = voiceTurns.settleReadOnly(gen, "server_health", payload);
+      if (!settled.applied) showVoiceLive("这一轮已取消，只读查询结果没有采用。已经显示的结果还在，不能当作已撤销。");
+      else if (payload && payload.ok && payload.data) {
+        ta.value = ""; autoGrow(ta); setChatReply(null);
+        const view = window.SBVoiceTurn.formatHealth(payload);
+        showHealthResult(view);
+        showVoiceLive(view.label);
+      } else showVoiceLive("只读健康查询没有成功（" + ((payload && (payload.error || payload._status)) || "需要主人会话") + "）。没有改走匿名接口。");
+      return;
     }
     const btn = $("#chat-send"); btn.disabled = true;
     const j = await act("msg", { to: CHAT_PEER, text, reply_to: S.chatReply || undefined });
@@ -1609,18 +1620,6 @@
       if (j.quick_reply && j.quick_reply.msg_id) addChat(j.quick_reply, true);
       renderChat(true);
       setTimeout(() => loadChat(), 2500);
-    }
-    if (healthCtl) {
-      let payload = null;
-      try { payload = await fetchServerHealth(healthCtl.signal); }
-      catch (e) { payload = { ok: false, error: e && e.name === "AbortError" ? "aborted" : "failed" }; }
-      const settled = voiceTurns.settleReadOnly(gen, "server_health", payload);
-      if (!settled.applied) showVoiceLive("这一轮已取消，只读查询结果没有采用。已经显示的结果还在，不能当作已撤销。");
-      else if (payload && payload.ok && payload.data) {
-        const view = window.SBVoiceTurn.formatHealth(payload);
-        showHealthResult(view);
-        showVoiceLive(view.label);
-      } else showVoiceLive("只读健康查询没有成功（" + ((payload && (payload.error || payload._status)) || "需要主人会话") + "）。没有改走匿名接口。");
     }
   }
   function autoGrow(ta) { ta.style.height = "auto"; ta.style.height = Math.min(140, ta.scrollHeight) + "px"; }

@@ -3,7 +3,7 @@
    麦克风 → 本机 Web Audio → 已鉴权的 /api/owner/stt 或 /api/owner/voice/partial
    → 127.0.0.1 上的 Moonshine。页面不打开 Nova-3。
    定稿后的普通文字仍走原来的 /api/owner/act。
-   白名单只读指令只允许 GET /api/server，不生成 shell。
+   白名单整句只走 GET /api/server，不发给幕僚长，也不生成 shell。
    朗读：用户打开后，已配置文静仍走已有 /api/owner/voice/speak；
    浏览器语音只有 localService===true 的中文音色才允许。不能确认就不可用，不外传。
    快速回复和幕僚长回复按整段描述，不把全量重绘当成逐字流。 */
@@ -32,6 +32,21 @@
       }
     }
     return { kind: "chat", execute: false, send: true, shell: false, confirm: false, id: null, method: null, path: null };
+  }
+
+  /* 已经进到发送函数时：白名单整句不发给幕僚长。敏感句不会自动进到发送函数。 */
+  function chatRoute(text) {
+    var decision = classifyText(text);
+    if (decision.kind === "readonly" && decision.method === "GET" && decision.path === "/api/server" && decision.id === "server_health") {
+      return { kind: "health", chief: false, auto: true, decision: decision };
+    }
+    if (decision.kind === "sensitive") {
+      return { kind: "sensitive", chief: false, auto: false, decision: decision };
+    }
+    if (decision.kind === "chat") {
+      return { kind: "chat", chief: true, auto: true, decision: decision };
+    }
+    return { kind: "empty", chief: false, auto: false, decision: decision };
   }
 
   function voiceAutoAction(text) {
@@ -429,6 +444,7 @@
     ECHO_TAIL_MS: ECHO_TAIL_MS,
     READONLY_PATH: "/api/server",
     classifyText: classifyText,
+    chatRoute: chatRoute,
     voiceAutoAction: voiceAutoAction,
     describeReply: describeReply,
     formatHealth: formatHealth,

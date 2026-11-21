@@ -36,6 +36,14 @@ const health = T.classifyText("服务器健康");
 check("服务器健康是 GET /api/server", health.kind === "readonly" && health.execute && health.method === "GET" && health.path === "/api/server" && health.shell === false, JSON.stringify(health));
 check("健康状态同样只读", T.classifyText("系统状态。").id === "server_health" && T.classifyText("查看服务器").path === "/api/server");
 check("普通聊天不执行", T.voiceAutoAction("你好").send === true && T.voiceAutoAction("你好").execute === false);
+const phrases = ["服务器健康", "健康状态", "系统状态", "查看服务器", "服务器状态"];
+check("五句白名单都不发给幕僚长", phrases.every((p) => {
+  const route = T.chatRoute(p);
+  return route.kind === "health" && route.chief === false && route.auto === true && route.decision.path === "/api/server" && route.decision.method === "GET";
+}));
+check("带标点的白名单仍只查健康", T.chatRoute("服务器健康。").chief === false && T.chatRoute("系统状态？").kind === "health");
+check("普通文字仍发给幕僚长", T.chatRoute("你好").kind === "chat" && T.chatRoute("你好").chief === true && T.chatRoute("今天怎么样").chief === true);
+check("敏感句不自动执行也不查健康", T.chatRoute("删除服务器").auto === false && T.chatRoute("删除服务器").chief === false && T.voiceAutoAction("删除服务器").send === false);
 const nasty = T.classifyText("服务器健康; rm -rf /");
 check("带命令的句子不执行", nasty.execute === false && nasty.shell === false && nasty.kind === "sensitive", JSON.stringify(nasty));
 check("替换和反引号不执行", T.classifyText("$(id)").execute === false && T.classifyText("`reboot`").execute === false);

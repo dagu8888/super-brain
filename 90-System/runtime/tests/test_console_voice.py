@@ -452,6 +452,10 @@ def test_pages():
     call = js.split("function startConversation", 1)[1].split("if (!canRecord", 1)[0]
     check("进入实时通话会先停朗读", "stopSpeaking()" in call)
     check("实时定稿仍走 sendChat", "await sendChat({ voiceGen: sttGen })" in js.split("async function commitUtterance", 1)[1].split("function pcm16", 1)[0])
+    send_fn = js.split("async function sendChat", 1)[1].split("function autoGrow", 1)[0]
+    health_arm = send_fn.split('route.kind === "health"', 1)[1].split('act("msg"', 1)[0]
+    check("白名单整句在发给幕僚长之前返回", "fetchServerHealth" in health_arm and "\n      return;" in health_arm and 'act("msg"' not in health_arm)
+    check("非白名单文字仍 act msg 给幕僚长", 'act("msg"' in send_fn and "CHAT_PEER" in send_fn)
     check("音色常量仍是文静", 'TTS_MODEL = "flux-wenjing-zh"' in proxy and "flux-wenjing-zh" in js)
     check("前端不出现 Deepgram 主机和密钥名", "api.deepgram.com" not in js and "DEEPGRAM_API_KEY" not in js and "token=" not in js)
     begin = js[js.index("async function beginEntry"):js.index("function bindBgm")]
