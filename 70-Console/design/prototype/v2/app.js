@@ -1,4 +1,4 @@
-/* Super-Brain 协作中枢 v2.8.4（查看走已有主人会话 cookie；写操作仍是每台设备每天第一次口令）
+/* Super-Brain 协作中枢 v2.8.5（查看走已有主人会话 cookie；写操作仍是每台设备每天第一次口令）
    数据源：/api/dashboard（KPI/异常/点名/消息）、/api/server（服务器健康）、/api/relations、
           /api/agents/{id}、/api/messages?agent=、/api/tasks/{id}、/api/knowledge、/api/stream（SSE）。
    纪律：健康在线 = 5 分钟内心跳且近期消息有回执；心跳在但超过约 60 秒无回执 = 降级（在场但回执失败），
@@ -36,7 +36,11 @@
     chat: [], chatIds: new Set(), chatNames: new Set([CHAT_PEER]), chatReply: null, chatUnread: 0, chatHook: null, chatQuick: true,
     projects: [], apPrev: null, galaxyDocs: null, galaxyTotal: 0,
     authDenied: false, authChecked: false,
+    voiceGen: 0, voiceSendAt: 0,
   };
+  const voiceTurns = window.SBVoiceTurn.createTurn({
+    now: () => (typeof performance !== "undefined" ? performance.now() : Date.now())
+  });
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -81,7 +85,7 @@
         }
       };
     }
-    setConn("down", code);
+    setConn("down", window.SBVoiceTurn.authPills().conn);
     const feed = $("#feed");
     if (feed && !S.feed.length) {
       feed.innerHTML = `<li class="empty" role="alert"><b>${esc(code)}</b>看不到消息不是因为没有风险，而是当前没有主人会话或令牌。</li>`;
@@ -273,7 +277,7 @@
 
   /* ---------- SSE 实时 ---------- */
   function startStream() {
-    if (S.authDenied) { setConn("down", "未授权"); return; }
+    if (S.authDenied) { setConn("down", window.SBVoiceTurn.authPills().conn); return; }
     if (!("EventSource" in window)) { startPolling(); return; }
     clearTimeout(S.esTimer);
     if (S.es) { try { S.es.close(); } catch (e) { /* noop */ } }
@@ -293,7 +297,7 @@
       clearTimeout(warnT);
       es.close();
       if (S.es !== es) return;
-      if (S.authDenied) { setConn("down", "未授权"); return; }
+      if (S.authDenied) { setConn("down", window.SBVoiceTurn.authPills().conn); return; }
       S.esFails += 1;
       // 服务端每 10 分钟主动断一次属正常；先静默快速重连，连续失败才亮黄/改轮询
       const wait = Math.min(30000, 1000 * Math.pow(2, Math.max(0, S.esFails - 1)));
@@ -314,7 +318,7 @@
         (e.data || []).slice().reverse().forEach(onLiveEvent);
         if (S.mode !== "live") setConn("warn", "轮询模式 · 8 秒");
       } catch (err) {
-        if (isAuthErr(err)) { setConn("down", "未授权"); return; }
+        if (isAuthErr(err)) { setConn("down", window.SBVoiceTurn.authPills().conn); return; }
         setConn("down", "离线 · 重试中");
       }
     };
@@ -1525,8 +1529,8 @@
       const chief = !me && !quick;
       const sys = me && /^【(审批|协助)/.test(m.text || "");
       const q = m.reply_to && byId.get(m.reply_to);
-      const who = quick ? `<span class="who-tag quick">${QUICK_LABEL}</span>` : chief ? `<span class="who-tag chief">幕僚长 · 正式回复</span>` : "";
-      return `<li class="bub${me ? " me" : ""}${quick ? " quick" : ""}${chief ? " chief" : ""}${sys ? " sys" : ""}${m._fresh && !reduced.matches ? " fresh" : ""}" data-mid="${esc(m.msg_id)}">${who}${q ? `<span class="quote">${esc((q.text || "").slice(0, 80))}</span>` : ""}${esc(chatBody(m))}<div class="meta"><time>${dtm(m.created_at)}</time>${hookTag(m)}<button type="button" data-chat-reply="${esc(m.msg_id)}">回复</button>${!me && "speechSynthesis" in window ? `<button type="button" data-chat-say="${esc(m.msg_id)}">朗读</button>` : ""}</div></li>`;
+      const who = quick ? `<span class="who-tag quick">${QUICK_LABEL} · 整段到达，不是逐字流，也不是正式任务完成</span>` : chief ? `<span class="who-tag chief">幕僚长 · 正式回复（整段到达）</span>` : "";
+      return `<li class="bub${me ? " me" : ""}${quick ? " quick" : ""}${chief ? " chief" : ""}${sys ? " sys" : ""}${m._fresh && !reduced.matches ? " fresh" : ""}" data-mid="${esc(m.msg_id)}">${who}${q ? `<span class="quote">${esc((q.text || "").slice(0, 80))}</span>` : ""}${esc(chatBody(m))}<div class="meta"><time>${dtm(m.created_at)}</time>${hookTag(m)}<button type="button" data-chat-reply="${esc(m.msg_id)}">回复</button>${!me ? `<button type="button" data-chat-say="${esc(m.msg_id)}">朗读</button>` : ""}</div></li>`;
     }).join("") : '<li class="empty"><b>还没有对话</b><br>在下面给幕僚长发第一条指令；回复会实时出现在这里</li>';
     S.chat.forEach((m) => { m._fresh = false; });
     if (stick || nearBottom) scrollChat();
@@ -1548,9 +1552,52 @@
     if (m) $("#chat-reply-x").onclick = () => setChatReply(null);
     $("#chat-input").focus();
   }
-  async function sendChat() {
+  function showVoiceLive(text) {
+    const el = $("#voice-live");
+    if (!el) return;
+    if (!text) { el.hidden = true; el.textContent = ""; return; }
+    el.hidden = false;
+    el.textContent = text;
+  }
+  function showHealthResult(view) {
+    const el = $("#voice-result");
+    if (!el || !view) return;
+    el.hidden = false;
+    el.textContent = view.label + "\n" + view.text;
+  }
+  async function fetchServerHealth(signal) {
+    const o = own();
+    const headers = {};
+    if (o && o.token) headers.Authorization = "Bearer " + o.token;
+    const r = await fetch(API + "/api/server", { method: "GET", headers: headers, signal: signal, cache: "no-store", credentials: "same-origin" });
+    let j = {};
+    try { j = await r.json(); } catch (e) { j = { ok: false, error: "HTTP " + r.status }; }
+    j._status = r.status;
+    if (r.status === 401 || r.status === 403) j.ok = false;
+    return j;
+  }
+  async function sendChat(opts) {
+    opts = opts || {};
     const ta = $("#chat-input"), text = ta.value.trim();
     if (!text) return;
+    if (opts.voiceGen != null && !voiceTurns.isCurrent(opts.voiceGen)) {
+      showVoiceLive("旧转写已取消，没有发送，也没有执行只读查询。");
+      return;
+    }
+    const decision = window.SBVoiceTurn.classifyText(text);
+    stopSpeaking();
+    const sendTurn = voiceTurns.beginSend();
+    const gen = sendTurn.generation;
+    S.voiceGen = gen;
+    S.voiceSendAt = now();
+    let healthCtl = null;
+    if (decision.execute && decision.method === "GET" && decision.path === "/api/server" && decision.id === "server_health") {
+      const armedRead = voiceTurns.armReadOnly(gen, decision.id);
+      if (armedRead.armed) {
+        healthCtl = new AbortController();
+        voiceTurns.trackAbort(gen, () => healthCtl.abort());
+      }
+    }
     const btn = $("#chat-send"); btn.disabled = true;
     const j = await act("msg", { to: CHAT_PEER, text, reply_to: S.chatReply || undefined });
     btn.disabled = false;
@@ -1563,6 +1610,18 @@
       renderChat(true);
       setTimeout(() => loadChat(), 2500);
     }
+    if (healthCtl) {
+      let payload = null;
+      try { payload = await fetchServerHealth(healthCtl.signal); }
+      catch (e) { payload = { ok: false, error: e && e.name === "AbortError" ? "aborted" : "failed" }; }
+      const settled = voiceTurns.settleReadOnly(gen, "server_health", payload);
+      if (!settled.applied) showVoiceLive("这一轮已取消，只读查询结果没有采用。已经显示的结果还在，不能当作已撤销。");
+      else if (payload && payload.ok && payload.data) {
+        const view = window.SBVoiceTurn.formatHealth(payload);
+        showHealthResult(view);
+        showVoiceLive(view.label);
+      } else showVoiceLive("只读健康查询没有成功（" + ((payload && (payload.error || payload._status)) || "需要主人会话") + "）。没有改走匿名接口。");
+    }
   }
   function autoGrow(ta) { ta.style.height = "auto"; ta.style.height = Math.min(140, ta.scrollHeight) + "px"; }
   function renderChatBadge() {
@@ -1574,13 +1633,13 @@
     const onChat = document.documentElement.dataset.tab === "chat" || !mobile.matches;
     if (!onChat || document.visibilityState !== "visible") { S.chatUnread += 1; renderChatBadge(); }
     if (pref("sound")) beep(880);
-    if (shouldSpeakReply()) say(m.text);
+    if (S.voiceGen && voiceTurns.isCurrent(S.voiceGen) && (m.created_at || 0) >= (S.voiceSendAt || 0) - 5 && shouldSpeakReply()) say(m.text, S.voiceGen);
     localNotify("幕僚长回复", m.text, "chat");
   }
   function onQuickReply(m) {
     const onChat = document.documentElement.dataset.tab === "chat" || !mobile.matches;
     if (!onChat || document.visibilityState !== "visible") { S.chatUnread += 1; renderChatBadge(); }
-    if (shouldSpeakReply()) say(chatBody(m));
+    if (S.voiceGen && voiceTurns.isCurrent(S.voiceGen) && (m.created_at || 0) >= (S.voiceSendAt || 0) - 5 && shouldSpeakReply()) say(chatBody(m), S.voiceGen);
     localNotify(QUICK_LABEL, chatBody(m), "quick");
   }
 
@@ -1589,7 +1648,14 @@
   const PREF_KEY = "sb.prefs.v1";
   const prefs = () => { try { return Object.assign({ sound: true, tts: false, notify: false }, JSON.parse(localStorage.getItem(PREF_KEY) || "{}")); } catch (e) { return { sound: true, tts: false, notify: false }; } };
   const pref = (k) => prefs()[k];
-  function setPref(k, v) { const p = prefs(); p[k] = v; localStorage.setItem(PREF_KEY, JSON.stringify(p)); renderTtsBtn(); }
+  function setPref(k, v) {
+    const p = prefs(); p[k] = v; localStorage.setItem(PREF_KEY, JSON.stringify(p));
+    if (k === "tts") {
+      voiceTurns.setReadAloud(!!v);
+      if (!v) stopSpeaking();
+    }
+    renderTtsBtn();
+  }
   let actx = null;
   function beep(freq) {
     try {
@@ -1621,7 +1687,7 @@
     const p = prefs();
     const row = (k, t, sub, dis) => `<label class="toggle-row"><span>${t}<small>${sub}</small></span><input type="checkbox" data-pref="${k}" ${p[k] ? "checked" : ""} ${dis ? "disabled" : ""}></label>`;
     return row("sound", "提示音", "新回复 / 新审批时响一声")
-      + row("tts", "朗读幕僚长回复", "按住说话时：Deepgram 已配置用文静，否则用浏览器语音", !("speechSynthesis" in window) && !voiceStatus.deepgram)
+      + row("tts", "朗读幕僚长回复", "默认关。打开后：已配置文静走服务器；否则只有 localService=true 的中文本地音色才出声。不能确认就不朗读、不外传。", false)
       + row("notify", "系统通知", "页面在后台但未关闭时弹通知；关掉页面后的推送（Web Push）尚未上线", !("Notification" in window));
   }
   function bindPrefs(dr) {
@@ -1633,10 +1699,12 @@
     }; });
   }
 
-  /* ---------- 语音（F）：按住说话 = 本机 Web Audio 录音 → 服务器 Moonshine（tiny-streaming-zh，MIT）识别 ----------
-     不再依赖浏览器 Web Speech（iPhone Safari / 主屏 App 下常报错）。iOS 要求：麦克风与 AudioContext 必须在按下手势里开启。
-     录音只在内存里：采集 → 16kHz 16-bit WAV → POST /api/owner/stt（需今日授权）→ 文字放进输入框，由大古确认后再点发送。
-     页面不把录音写进 Cache Storage / IndexedDB / localStorage；识别完立即丢弃。键盘输入始终可用。 */
+  /* ---------- 语音（F）：采集开关打开后，Web Audio → 已鉴权的 Moonshine（tiny-streaming-zh） ----------
+     按住说话：松手只把最终转写填进输入框，不自动发送。
+     流式 / 实时通话按钮：滚动 POST /api/owner/voice/partial，部分转写就地更新；停顿后定稿。
+     实时通话不打开 Nova-3。朗读默认关；文静只在用户打开朗读且服务器已配置时走原接口。
+     浏览器语音只在 localService===true 的中文音色上使用，不能确认就显示不可用。
+     关掉采集会 stop 音轨。取消轮次会丢掉未完成的转写、朗读和只读查询回调。 */
   const VOICE = { MAX_S: 30, MIN_S: 0.4, RATE: 16000 };
   const AC = window.AudioContext || window.webkitAudioContext;
   const canRecord = () => !!(AC && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
@@ -1657,6 +1725,7 @@
   }
   async function micStart(e) {
     if (e) { e.preventDefault(); if (e.pointerId != null && e.currentTarget.setPointerCapture) { try { e.currentTarget.setPointerCapture(e.pointerId); } catch (x) { /* noop */ } } }
+    if (!voiceTurns.armed()) { toast("语音采集是关的，不会打开麦克风。请先点「语音采集」。键盘不受影响。"); return; }
     if (voiceMode() !== "hold") { startConversation(e, voiceMode()); return; }
     if (mic || $("#btn-mic").classList.contains("busy")) return;
     if (!canRecord()) { toast(location.protocol === "https:" || location.hostname === "localhost" ? "这个浏览器不能录音，请用键盘输入" : "录音需要 https 地址打开，请用键盘输入"); return; }
@@ -1668,9 +1737,13 @@
     try {
       m.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     } catch (err) { micCleanup(m); micStatus(""); toast(micErrorText(err)); return; }
-    if (m.released) {   // 首次授权时手指已松开：不算一次录音
-      micCleanup(m); micStatus(""); toast("麦克风已就绪，请重新按住说话，说完松手"); return;
+    const held = voiceTurns.watchStream(m.stream);
+    if (!held.accepted || m.released || !voiceTurns.armed()) {
+      micCleanup(m); micStatus(""); toast(m.released ? "麦克风已就绪，请重新按住说话，说完松手" : "语音采集已关闭，麦克风已释放。"); return;
     }
+    const begun = voiceTurns.beginUtterance();
+    if (!begun.ok) { micCleanup(m); micStatus(""); toast("语音采集已关闭，不会开始录音。"); return; }
+    m.gen = begun.generation;
     const src = ctx.createMediaStreamSource(m.stream);
     const node = ctx.createScriptProcessor(4096, 1, 1);
     const sink = ctx.createGain(); sink.gain.value = 0;
@@ -1691,26 +1764,33 @@
     if (!m) return;
     clearTimeout(m.timer);
     try { if (m.node) { m.node.onaudioprocess = null; m.node.disconnect(); } if (m.src) m.src.disconnect(); if (m.sink) m.sink.disconnect(); } catch (x) { /* noop */ }
-    try { if (m.stream) m.stream.getTracks().forEach((t) => t.stop()); } catch (x) { /* noop */ }
+    try { if (m.stream) voiceTurns.releaseStream(m.stream); } catch (x) { /* noop */ }
     try { if (m.ctx && m.ctx.state !== "closed") m.ctx.close(); } catch (x) { /* noop */ }
     if (mic === m) mic = null;
+    renderCaptureBtn();
   }
   async function micStop() {
     const m = mic; if (!m) return;
     m.released = true;
     if (!m.ready) return;            // 还在等权限：micStart 里收尾
-    const secs = (performance.now() - m.t0) / 1000, chunks = m.chunks, rate = m.rate;
+    const secs = (performance.now() - m.t0) / 1000, chunks = m.chunks, rate = m.rate, gen = m.gen;
     m.chunks = null; micCleanup(m);
+    if (!voiceTurns.isCurrent(gen)) { micStatus("这轮采集已取消，转写没有填入。"); return; }
     if (secs < VOICE.MIN_S) { micStatus(""); toast("太短了：按住说完整句再松手"); return; }
     micStatus("识别中…（本机录音只发给我们自己的服务器，用完即删）", "busy");
     let wav = encodeWav16k(chunks, rate); chunks.length = 0;
+    const snap = voiceTurns.issueSeq();
+    const ctl = new AbortController();
+    voiceTurns.trackAbort(snap.generation, () => ctl.abort());
+    const to = setTimeout(() => ctl.abort(), 50000);
     try {
       const o = own();
-      const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 50000);
       let r;
       try { r = await fetch(API + "/api/owner/stt", { method: "POST", headers: { "Content-Type": "audio/wav", Authorization: "Bearer " + (o && o.token) }, body: wav, signal: ctl.signal, cache: "no-store", credentials: "same-origin" }); }
       finally { clearTimeout(to); wav = null; }
       let j = {}; try { j = await r.json(); } catch (x) { j = { ok: false, error: "HTTP " + r.status }; }
+      const noted = voiceTurns.noteTranscript(snap.generation, snap.seq, (j.text || "").trim(), "final");
+      if (!noted.accepted) { micStatus("这轮采集已取消，转写没有填入。"); return; }
       if (r.status === 401) { setOwn(null); micStatus(""); toast("今日授权已失效，请先输入口令再说话"); askUnlock(); return; }
       if (!j.ok) { micStatus(""); toast("没识别成功：" + (j.error || "服务器暂时不可用") + "，可以直接打字"); return; }
       const text = (j.text || "").trim();
@@ -1718,9 +1798,11 @@
       const ta = $("#chat-input");
       ta.value = (ta.value.trim() ? ta.value.replace(/\s+$/, "") + " " : "") + text;
       autoGrow(ta);
+      showVoiceLive("最终转写：" + text + "（按住说话不自动发送）");
       micStatus(`已识别 ${j.seconds || ""} 秒语音：请核对后再点「发送」`, "ok");
       setTimeout(() => { if ($("#mic-status").dataset.k === "ok") micStatus(""); }, 4000);
     } catch (err) {
+      if (!voiceTurns.isCurrent(snap.generation)) { micStatus("这轮采集已取消，转写没有填入。"); return; }
       micStatus(""); toast(err && err.name === "AbortError" ? "识别超时了，请再试一次或用键盘输入" : "网络不通，识别没完成，可以直接打字");
     }
   }
@@ -1766,9 +1848,46 @@
     return window.SBVoiceEntry ? SBVoiceEntry.readMode(localStorage) : "hold";
   }
   function shouldSpeakReply() {
-    const mode = voiceMode();
-    if (mode === "stream" || mode === "live") return true;
-    return pref("tts");
+    return !!(pref("tts") && voiceTurns.readAloud());
+  }
+  function speakVoices() {
+    try {
+      if (!("speechSynthesis" in window) || typeof speechSynthesis.getVoices !== "function") return [];
+      return speechSynthesis.getVoices() || [];
+    } catch (e) { return []; }
+  }
+  function renderSpeakState() {
+    const plan = voiceTurns.ttsPlan({ deepgramConfigured: !!(voiceStatus && voiceStatus.deepgram), voices: speakVoices() });
+    const b = $("#btn-tts");
+    if (b) {
+      const on = !!pref("tts");
+      b.textContent = on ? "朗读 开" : "朗读 关";
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+      b.classList.toggle("chip-gold", on);
+      b.disabled = false;
+      if (!on) b.title = "朗读关。不会把回复文字交给浏览器语音。";
+      else if (plan.mode === "server-wenjing") b.title = "朗读开，使用服务器已有文静。不更换默认音色。";
+      else if (plan.mode === "local-speech") b.title = "朗读开，使用已确认的本地音色 " + (plan.voiceName || "");
+      else b.title = plan.reason || "朗读不可用";
+    }
+    const el = $("#voice-speak-state");
+    if (!el) return;
+    if (!pref("tts") || plan.mode === "off") el.textContent = "朗读关。对话语音不会播放，也不会把文字交给浏览器语音。";
+    else if (plan.mode === "server-wenjing") el.textContent = "朗读开：已配置的文静，走服务器已有接口（flux-wenjing-zh）。未改默认音色。";
+    else if (plan.mode === "local-speech") el.textContent = "朗读开：本地音色「" + (plan.voiceName || "中文") + "」（localService=true）。";
+    else el.textContent = plan.reason || "朗读不可用。";
+  }
+  function renderCaptureBtn() {
+    const b = $("#btn-capture");
+    if (!b) return;
+    const on = voiceTurns.armed();
+    const live = voiceTurns.liveTracks() > 0;
+    b.textContent = on ? "语音采集 开" : "语音采集 关";
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+    b.classList.toggle("chip-gold", on);
+    b.title = on
+      ? (live ? "正在占用麦克风。再点一次停止采集并释放麦克风。" : "语音采集已打开。按住麦克风说话，或在流式模式下开始听写。再点一次关闭并释放麦克风。")
+      : "语音采集关闭。麦克风不会打开。";
   }
   function stopPcmSources() {
     const list = fluxSources;
@@ -1787,24 +1906,33 @@
     if (fluxAudio) { try { fluxAudio.pause(); } catch (e) { /* 已停 */ } fluxAudio = null; }
     if (fluxUrl) { try { URL.revokeObjectURL(fluxUrl); } catch (e) { /* 已释放 */ } fluxUrl = null; }
     if ("speechSynthesis" in window) { try { speechSynthesis.cancel(); } catch (e) { /* 忽略 */ } }
+    voiceTurns.setSpeaking(false, typeof performance !== "undefined" ? performance.now() : 0);
     bgmDuck = false;
     bgmApplyVolume();
   }
-  function sayBrowser(text) {
-    if (!("speechSynthesis" in window) || !text) return false;
+  function sayLocal(text, plan, sessionGen) {
+    if (!("speechSynthesis" in window) || !plan || plan.mode !== "local-speech") return false;
+    const voice = speakVoices().find((item) => item && item.localService === true && /zh/i.test(item.lang || "") && (!plan.voiceName || item.name === plan.voiceName));
+    if (!voice || voice.localService !== true) return false;
     const parts = window.SBSpeakQueue ? SBSpeakQueue.splitSpeakText(text) : [String(text).replace(/https?:\/\/\S+/g, "链接").trim()].filter(Boolean);
     if (!parts.length) return false;
-    const genAt = speakSession.generation();
     speechSynthesis.cancel();
     bgmDuck = true; bgmApplyVolume();
-    const voices = speechSynthesis.getVoices();
-    const voice = voices.find((x) => /zh[-_]CN/i.test(x.lang));
     parts.forEach((p, i) => {
       const u = new SpeechSynthesisUtterance(p);
-      u.lang = "zh-CN"; u.rate = 1.05;
-      if (voice) u.voice = voice;
-      if (i === 0) u.onstart = () => { if (speakSession.generation() === genAt) { bgmDuck = true; bgmApplyVolume(); } };
-      if (i === parts.length - 1) u.onend = u.onerror = () => { if (speakSession.generation() !== genAt) return; bgmDuck = false; bgmApplyVolume(); };
+      u.lang = voice.lang || "zh-CN";
+      u.rate = 1.05;
+      u.voice = voice;
+      if (i === 0) u.onstart = () => {
+        if (speakSession.generation() !== sessionGen) return;
+        voiceTurns.setSpeaking(true, performance.now());
+        bgmDuck = true; bgmApplyVolume();
+      };
+      if (i === parts.length - 1) u.onend = u.onerror = () => {
+        if (speakSession.generation() !== sessionGen) return;
+        voiceTurns.setSpeaking(false, performance.now());
+        bgmDuck = false; bgmApplyVolume();
+      };
       speechSynthesis.speak(u);
     });
     return true;
@@ -1956,11 +2084,12 @@
     if (speakSession.generation() !== gen) return false;
     return playBuffered(buf, ct, gen);
   }
-  function openSpeak(text) {
+  function openSpeak(text, gen) {
     const o = own();
     if (!o) return Promise.resolve(null);
     const ctl = new AbortController();
     speakCtls.push(ctl);
+    voiceTurns.trackAbort(gen == null ? voiceTurns.generation() : gen, () => ctl.abort());
     return fetch(API + "/api/owner/voice/speak", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + o.token },
@@ -1973,50 +2102,96 @@
     bgmDuck = false;
     bgmApplyVolume();
   }
-  async function say(text) {
+  async function say(text, gen, opts) {
     const raw = String(text || "").trim();
     if (!raw) return;
+    opts = opts || {};
+    const speakGen = gen == null ? voiceTurns.generation() : gen;
+    if (!opts.explicit && !voiceTurns.isCurrent(speakGen)) return;
+    const plan = voiceTurns.ttsPlan({
+      deepgramConfigured: !!(voiceStatus && voiceStatus.deepgram),
+      voices: speakVoices(),
+      explicit: !!opts.explicit
+    });
+    if (!plan.speak) {
+      renderSpeakState();
+      if (opts.explicit || voiceTurns.readAloud()) showVoiceLive(plan.reason || "朗读没有出声。未把文字交给浏览器语音。");
+      return;
+    }
+    if (!opts.explicit) {
+      const ticket = voiceTurns.enqueueAudio(speakGen, "reply");
+      if (!ticket.queued || !voiceTurns.takeAudio(speakGen).item) return;
+    }
+    if (!opts.explicit && !voiceTurns.isCurrent(speakGen)) return;
     stopSpeaking();
     const begun = speakSession.begin(raw);
-    const gen = begun.gen;
+    const sessionGen = begun.gen;
     const parts = begun.parts;
     if (!parts.length) return;
-    if (!(voiceStatus.deepgram && own())) {
-      if (!sayBrowser(raw)) releaseSpeakDuck(gen);
+    if (plan.mode === "local-speech") {
+      if (!sayLocal(raw, plan, sessionGen)) {
+        voiceTurns.setSpeaking(false, performance.now());
+        showVoiceLive("没有确认到 localService=true 的中文本地音色。不朗读，不外传。");
+        releaseSpeakDuck(sessionGen);
+      }
+      return;
+    }
+    if (plan.mode !== "server-wenjing") {
+      showVoiceLive(plan.reason || "朗读不可用。");
       return;
     }
     bgmDuck = true; bgmApplyVolume();
+    voiceTurns.setSpeaking(true, performance.now());
     const jobs = new Array(parts.length);
     const kick = (i) => {
       if (i < 0 || i >= parts.length || jobs[i]) return;
-      jobs[i] = openSpeak(parts[i]);
+      jobs[i] = openSpeak(parts[i], speakGen);
     };
     kick(0);
     for (let i = 0; i < parts.length; i++) {
-      if (speakSession.generation() !== gen) return;
+      if (speakSession.generation() !== sessionGen) return;
+      if (!opts.explicit && !voiceTurns.isCurrent(speakGen)) return;
       kick(i + 1);
       let resp = null;
       try { resp = await jobs[i]; }
       catch (e) { resp = null; }
-      if (speakSession.generation() !== gen) return;
-      const ok = resp ? await playFlux(resp, gen) : false;
-      if (speakSession.generation() !== gen) return;
+      if (speakSession.generation() !== sessionGen) return;
+      if (!opts.explicit && !voiceTurns.isCurrent(speakGen)) return;
+      const ok = resp ? await playFlux(resp, sessionGen) : false;
+      if (speakSession.generation() !== sessionGen) return;
       if (!ok) {
         abortSpeakFetches();
-        if (!sayBrowser(parts.slice(i).join(""))) releaseSpeakDuck(gen);
+        voiceTurns.setSpeaking(false, performance.now());
+        showVoiceLive("文静合成没有成功。没有改用浏览器语音。");
+        releaseSpeakDuck(sessionGen);
         return;
       }
     }
-    releaseSpeakDuck(gen);
+    voiceTurns.setSpeaking(false, performance.now());
+    releaseSpeakDuck(sessionGen);
   }
-  async function commitUtterance(text) {
-    // 流式 / 实时通话的定稿与右侧输入框同一条发送：服务端先叫醒幕僚长，响应里带回快速回复。
+  async function commitUtterance(text, sttGen) {
+    // 流式定稿与输入框同一条发送。敏感句只填字。健康白名单在 sendChat 里另走只读接口。
     const t = String(text || "").trim();
     if (!t || t === lastCommitted) return;
+    if (sttGen != null && !voiceTurns.isCurrent(sttGen)) {
+      showVoiceLive("旧转写已取消，没有发送，也没有执行只读查询。");
+      return;
+    }
+    const action = window.SBVoiceTurn.voiceAutoAction(t);
+    if (!action.send) {
+      lastCommitted = t;
+      const ta = $("#chat-input");
+      if (ta) { ta.value = t; autoGrow(ta); }
+      showVoiceLive("这句没有自动发送，也没有执行。请核对后点发送。语音不会绕过确认，也不会变成命令行。");
+      toast("已放入输入框。敏感内容不会由语音直接执行。");
+      return;
+    }
+    if (sttGen != null && !voiceTurns.isCurrent(sttGen)) return;
     lastCommitted = t;
     const ta = $("#chat-input");
     if (ta) { ta.value = t; autoGrow(ta); }
-    await sendChat();
+    await sendChat({ voiceGen: sttGen });
   }
   function pcm16(chunks, rate) {
     let n = 0; for (const c of chunks) n += c.length;
@@ -2036,91 +2211,98 @@
   function stopConversation() {
     const t = talking;
     talking = null;
-    if (!t) return;
-    t.stop = true;
+    if (t) t.stop = true;
+    if (t && t.partialCtl) { try { t.partialCtl.abort(); } catch (e) { /* 已结束 */ } }
+    voiceTurns.cancelTurn("stop");
+    if (!t) { micStatus(""); renderCaptureBtn(); renderLiveCall(); return; }
     clearTimeout(t.timer);
     try { if (t.node) { t.node.onaudioprocess = null; t.node.disconnect(); } if (t.src) t.src.disconnect(); if (t.sink) t.sink.disconnect(); } catch (e) { /* noop */ }
-    try { if (t.stream) t.stream.getTracks().forEach((tr) => tr.stop()); } catch (e) { /* noop */ }
+    try { if (t.stream) voiceTurns.releaseStream(t.stream); } catch (e) { /* noop */ }
     try { if (t.ctx && t.ctx.state !== "closed") t.ctx.close(); } catch (e) { /* noop */ }
-    if (t.session) fetch(API + "/api/owner/voice/live/close", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + ((own() || {}).token || "") }, body: JSON.stringify({ session: t.session }), cache: "no-store", credentials: "same-origin" }).catch(() => {});
     micStatus("");
     const b = $("#btn-mic"); if (b) { b.classList.remove("rec"); b.setAttribute("aria-pressed", "false"); }
+    renderCaptureBtn();
+    renderLiveCall();
   }
   function startConversation(e, mode, micPromise) {
     if (talking) { stopConversation(); dropMic(micPromise); return; }
     stopSpeaking();
+    if (!voiceTurns.armed()) { toast("语音采集是关的，不会打开麦克风。请先点「语音采集」。键盘不受影响。"); dropMic(micPromise); return; }
     if (!canRecord()) { toast("这个浏览器不能录音，请用键盘输入"); dropMic(micPromise, true); return; }
     if (!own()) { toast("语音要先完成今日授权（键盘随时可用）"); askUnlock(); dropMic(micPromise, true); return; }
     const ctx = new AC();
     try { ctx.resume(); } catch (x) { /* iOS 要在这次手势里恢复 */ }
-    const t = talking = { mode: mode, ctx: ctx, chunks: [], pending: [], rate: ctx.sampleRate, stop: false, text: "", quiet: 0, session: "" };
-    micStatus(mode === "live" ? "正在听，说完会发给幕僚长" : "流式听写中，说完一句就发给幕僚长", "rec");
+    const begun = voiceTurns.beginUtterance();
+    if (!begun.ok) { try { ctx.close(); } catch (x) { /* noop */ } dropMic(micPromise); toast("语音采集已关闭，不会开始录音。"); return; }
+    const t = talking = { mode: mode, ctx: ctx, chunks: [], pending: [], rate: ctx.sampleRate, stop: false, text: "", quiet: 0, session: "", partialCtl: null, finalGen: begun.generation, finalSeq: 0 };
+    micStatus(mode === "live" ? "实时通话走本地 Moonshine，不打开 Nova-3。部分转写会就地更新。" : "流式听写走本地 Moonshine。部分转写会就地更新，停顿后定稿。", "rec");
     const pending = micPromise || navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     pending.then(async (stream) => {
-      if (t.stop || talking !== t) { stream.getTracks().forEach((tr) => tr.stop()); return; }
+      if (t.stop || talking !== t || !voiceTurns.armed()) { voiceTurns.releaseStream(stream); return; }
+      const held = voiceTurns.watchStream(stream);
+      if (!held.accepted) { voiceTurns.releaseStream(stream); return; }
       t.stream = stream;
       const src = ctx.createMediaStreamSource(stream);
       const node = ctx.createScriptProcessor(4096, 1, 1);
       const sink = ctx.createGain(); sink.gain.value = 0;
       node.onaudioprocess = (ev) => {
-        if (t.stop) return;
+        if (t.stop || !voiceTurns.armed()) return;
         const data = new Float32Array(ev.inputBuffer.getChannelData(0));
-        t.chunks.push(data);
-        t.pending.push(data);
         let sum = 0;
         for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
         const rms = Math.sqrt(sum / data.length);
-        if (rms > 0.02) { t.quiet = 0; stopSpeaking(); }
+        const frame = voiceTurns.onFrame({ rms: rms, now: performance.now() });
+        if (rms > 0.02) { t.quiet = 0; if (frame.stopAudio) stopSpeaking(); }
         else t.quiet += data.length / ctx.sampleRate;
+        if (!frame.keep) {
+          if (frame.stopAudio) { t.chunks = []; t.pending = []; t.text = ""; t.quiet = 0; }
+          return;
+        }
+        t.chunks.push(data);
+        t.pending.push(data);
       };
       src.connect(node); node.connect(sink); sink.connect(ctx.destination);
       Object.assign(t, { src: src, node: node, sink: sink });
-      if (mode === "live" && voiceStatus.deepgram) {
-        const opened = await postJSON("/api/owner/voice/live/open", {}, (own() || {}).token);
-        if (opened && opened.ok && opened.session) t.session = opened.session;
-        else micStatus("Deepgram 还没配好，这段先走键盘", "busy");
-      }
+      renderCaptureBtn();
       const tick = async () => {
-        if (talking !== t || t.stop) return;
-        if (mode === "live" && t.session && t.pending.length) {
-          const pcm = pcm16(t.pending, t.rate);
-          t.pending = [];
-          const o = own();
-          fetch(API + "/api/owner/voice/live/audio?session=" + encodeURIComponent(t.session), {
-            method: "POST", headers: { "Content-Type": "application/octet-stream", Authorization: "Bearer " + (o && o.token) },
-            body: pcm, cache: "no-store", credentials: "same-origin"
-          }).catch(() => {});
-          const polled = await fetch(API + "/api/owner/voice/live/poll?session=" + encodeURIComponent(t.session) + "&cursor=" + (t.cursor || 0), {
-            headers: { Authorization: "Bearer " + ((own() || {}).token || "") }, cache: "no-store", credentials: "same-origin"
-          }).then((r) => r.json()).catch(() => null);
-          if (polled && polled.ok) {
-            t.cursor = polled.cursor || t.cursor || 0;
-            (polled.events || []).forEach((ev) => {
-              if (ev.text) micStatus(ev.text, "rec");
-              if (ev.kind === "final" && ev.speech_final) commitUtterance(ev.text);
-            });
-          }
-        } else if (mode === "stream" && t.chunks.length) {
-          const wav = encodeWav16k(t.chunks.slice(-24), t.rate);
-          const o = own();
-          try {
+        if (talking !== t || t.stop || !voiceTurns.armed()) return;
+        try {
+          if (t.chunks.length) {
+            if (t.partialCtl) t.partialCtl.abort();
+            const snap = voiceTurns.issueSeq();
+            const ctl = t.partialCtl = new AbortController();
+            voiceTurns.trackAbort(snap.generation, () => ctl.abort());
+            const wav = encodeWav16k(t.chunks.slice(-24), t.rate);
+            const o = own();
             const r = await fetch(API + "/api/owner/voice/partial", {
               method: "POST", headers: { "Content-Type": "audio/wav", Authorization: "Bearer " + (o && o.token) },
-              body: wav, cache: "no-store", credentials: "same-origin"
+              body: wav, signal: ctl.signal, cache: "no-store", credentials: "same-origin"
             });
             const j = await r.json();
-            if (j && j.text) { t.text = j.text; micStatus(j.text, "rec"); }
-          } catch (err) { /* 下一次再试 */ }
-          if (t.quiet > 0.8 && t.text) {
-            const said = t.text;
-            t.text = ""; t.chunks = []; t.quiet = 0;
-            commitUtterance(said);
+            const noted = voiceTurns.noteTranscript(snap.generation, snap.seq, (j && j.text) || "", "partial");
+            if (noted.accepted && noted.text) {
+              t.text = noted.text;
+              t.finalGen = snap.generation;
+              t.finalSeq = snap.seq;
+              showVoiceLive("部分转写：" + noted.text);
+              micStatus("部分转写：" + noted.text, "rec");
+            }
+            if (t.quiet > 0.8 && t.text && voiceTurns.canFinalize(t.finalGen, t.finalSeq)) {
+              const said = t.text;
+              const fin = voiceTurns.noteTranscript(t.finalGen, t.finalSeq, said, "final");
+              if (fin.accepted) {
+                t.text = ""; t.chunks = []; t.pending = []; t.quiet = 0;
+                showVoiceLive("最终转写：" + said);
+                await commitUtterance(said, fin.generation);
+              }
+            }
           }
-        }
-        t.timer = setTimeout(tick, mode === "live" ? 320 : 1100);
+        } catch (err) { /* 取消或下一次再试 */ }
+        if (talking !== t || t.stop) return;
+        t.timer = setTimeout(tick, 1100);
       };
       tick();
-    }).catch((err) => { if (talking === t) talking = null; micStatus(""); toast(micErrorText(err)); });
+    }).catch((err) => { if (talking === t) talking = null; micStatus(""); renderCaptureBtn(); toast(micErrorText(err)); });
   }
   function renderLiveCall() {
     const b = $("#btn-live-call");
@@ -2129,7 +2311,7 @@
     b.textContent = on ? "结束通话" : "实时通话";
     b.setAttribute("aria-pressed", on ? "true" : "false");
     b.classList.toggle("live-on", on);
-    b.title = on ? "结束和幕僚长的实时通话" : "开始和幕僚长实时通话";
+    b.title = on ? "结束通话并释放麦克风" : "开始实时通话。识别走本地 Moonshine，不打开 Nova-3。";
   }
   function dropMic(p, tell) {
     if (!p || !p.then) return;
@@ -2148,6 +2330,7 @@
     }
     if (window.SBVoiceEntry) SBVoiceEntry.writeMode(localStorage, "live");
     applyVoiceMode("live");
+    voiceTurns.setArmed(true);
     const o = own();
     if (o) postJSON("/api/owner/voice/settings", { mode: "live" }, o.token).then((j) => {
       if (j && j.ok === false) toast("这台设备已记住，服务器没同步：" + (j.error || ""));
@@ -2307,12 +2490,7 @@
     });
     beginEntry();
   }
-  function renderTtsBtn() {
-    const b = $("#btn-tts"); if (!b) return;
-    const on = pref("tts"); b.textContent = on ? "朗读 开" : "朗读 关"; b.setAttribute("aria-pressed", on ? "true" : "false");
-    b.classList.toggle("chip-gold", on);
-    if (!("speechSynthesis" in window)) { b.disabled = true; b.title = "此浏览器不支持朗读"; }
-  }
+  function renderTtsBtn() { renderSpeakState(); }
 
   /* ---------- 项目（地基）：完成度 = 已验收且已核实阶段 / 全部阶段；未核实单列 ---------- */
   const PH = { pending: "未开始", in_progress: "进行中", blocked: "阻塞", accepted: "已验收" };
@@ -2925,10 +3103,29 @@
     else if (m === "stream") micBtn.title = "点一下开始流式听写，再说一次结束。可随时打断";
     else micBtn.title = "点一下开始和幕僚长实时说话，再说一次结束";
   }
+  function paintVoiceSlots(kind) {
+    const text = window.SBVoiceTurn.slotBadgeText(kind);
+    $$("[data-slot-state]").forEach((badge) => {
+      badge.textContent = text;
+      badge.dataset.state = kind;
+      if (kind === "configured") badge.dataset.on = "1";
+      else delete badge.dataset.on;
+    });
+  }
+  function setVoicePanelCollapsed(collapsed) {
+    const panel = $("#voice-panel");
+    const btn = $("#btn-voice-collapse");
+    if (panel) panel.classList.toggle("is-collapsed", !!collapsed);
+    if (btn) {
+      btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      btn.textContent = collapsed ? "展开" : "收起";
+    }
+  }
   async function loadVoiceStatus() {
     try {
       const j = await api("/api/voice/status");
       voiceStatus = j || voiceStatus;
+      renderSpeakState();
       if (j.mode && window.SBVoiceEntry && !talking) {
         SBVoiceEntry.writeMode(localStorage, j.mode);
         applyVoiceMode(j.mode);
@@ -2939,16 +3136,20 @@
         const badge = form.querySelector("[data-slot-state]");
         if (!badge) return;
         const on = !!(slot && slot.configured);
-        badge.textContent = on ? "已配置" : "未配置";
-        badge.dataset.on = on ? "1" : "0";
+        const kind = on ? "configured" : "absent";
+        badge.textContent = window.SBVoiceTurn.slotBadgeText(kind);
+        badge.dataset.state = kind;
+        if (on) badge.dataset.on = "1";
+        else delete badge.dataset.on;
       });
       const label = $("#voice-voice-label");
       if (label && j.voice) label.textContent = "音色 " + (j.voice.name || "文静") + " · " + (j.voice.model || "flux-wenjing-zh");
     } catch (e) {
       applyVoiceMode(voiceMode());
       if (isAuthErr(e)) {
+        paintVoiceSlots("unauthorized");
         const label = $("#voice-voice-label");
-        if (label) label.textContent = "未授权，语音状态未读取";
+        if (label) label.textContent = "未认证，语音状态未读取";
       }
     }
   }
@@ -2958,6 +3159,7 @@
     if (!own() && !(await askUnlock())) { applyVoiceMode(prev); return; }
     if (window.SBVoiceEntry) SBVoiceEntry.writeMode(localStorage, mode);
     applyVoiceMode(mode);
+    if (mic) { const held = mic; held.released = true; micCleanup(held); }
     stopConversation();
     const j = await postJSON("/api/owner/voice/settings", { mode: mode }, (own() || {}).token);
     if (!j.ok) toast("这台设备已记住，服务器没同步：" + (j.error || ""));
@@ -2985,7 +3187,14 @@
     if (jump) jump.addEventListener("click", () => {
       if (mobile.matches) setTab("chat");
       const panel = $("#voice-panel");
-      if (panel && panel.scrollIntoView) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+      const collapsed = !!(panel && panel.classList.contains("is-collapsed"));
+      setVoicePanelCollapsed(!collapsed && !!panel);
+      if (panel && collapsed && panel.scrollIntoView) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    const collapse = $("#btn-voice-collapse");
+    if (collapse) collapse.addEventListener("click", () => {
+      const panel = $("#voice-panel");
+      setVoicePanelCollapsed(!(panel && panel.classList.contains("is-collapsed")));
     });
     loadVoiceStatus();
   }
@@ -2996,10 +3205,47 @@
     ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !mobile.matches) { e.preventDefault(); sendChat(); } });
     $("#chat").addEventListener("click", (e) => {
       const r = e.target.closest("[data-chat-reply]"); if (r) { setChatReply(r.dataset.chatReply); return; }
-      const s2 = e.target.closest("[data-chat-say]"); if (s2) { const m = S.chat.find((x) => x.msg_id === s2.dataset.chatSay); if (m) say(isQuick(m) ? chatBody(m) : m.text); }
+      const s2 = e.target.closest("[data-chat-say]"); if (s2) { const m = S.chat.find((x) => x.msg_id === s2.dataset.chatSay); if (m) say(isQuick(m) ? chatBody(m) : m.text, voiceTurns.generation(), { explicit: true }); }
     });
     $("#btn-chat-more").addEventListener("click", () => loadChat(S.chat.length ? S.chat[0].created_at : undefined));
-    $("#btn-tts").addEventListener("click", () => { setPref("tts", !pref("tts")); if (pref("tts")) sayBrowser("朗读已打开"); });
+    $("#btn-tts").addEventListener("click", () => {
+      setPref("tts", !pref("tts"));
+      renderSpeakState();
+      if (!pref("tts")) showVoiceLive("朗读已关闭。");
+      else {
+        const plan = voiceTurns.ttsPlan({ deepgramConfigured: !!(voiceStatus && voiceStatus.deepgram), voices: speakVoices() });
+        showVoiceLive(plan.speak ? (plan.mode === "server-wenjing" ? "朗读已打开：使用服务器已有文静。" : "朗读已打开：使用已确认的本地音色。") : (plan.reason || "朗读不可用。"));
+      }
+    });
+    const capBtn = $("#btn-capture");
+    if (capBtn) capBtn.addEventListener("click", (e) => {
+      if (e && e.preventDefault) e.preventDefault();
+      if (voiceTurns.armed()) {
+        if (mic) { const held = mic; held.released = true; micCleanup(held); }
+        stopConversation();
+        stopSpeaking();
+        showVoiceLive("语音采集已关闭，麦克风已释放。");
+        return;
+      }
+      voiceTurns.setArmed(true);
+      renderCaptureBtn();
+      const mode = voiceMode();
+      if (mode === "hold") {
+        showVoiceLive("语音采集已打开。请按住麦克风说话，松手后只填入文字，不自动发送。");
+        return;
+      }
+      startConversation(e, mode === "live" ? "live" : "stream");
+    });
+    window.addEventListener("pagehide", () => {
+      if (mic) { const held = mic; held.released = true; micCleanup(held); }
+      stopConversation();
+    });
+    if ("speechSynthesis" in window && speechSynthesis.addEventListener) {
+      speechSynthesis.addEventListener("voiceschanged", () => renderSpeakState());
+    }
+    voiceTurns.setReadAloud(pref("tts"));
+    renderCaptureBtn();
+    renderSpeakState();
     const liveBtn = $("#btn-live-call");
     if (liveBtn) liveBtn.addEventListener("click", onLiveCall);
     renderLiveCall();
@@ -3008,10 +3254,13 @@
     bindVoice();
     const micBtn = $("#btn-mic");
     if (!canRecord()) { micBtn.classList.add("off"); micBtn.title = "这个浏览器不能录音（键盘输入不受影响）"; }
-    micBtn.addEventListener("pointerdown", (e) => { if (voiceMode() === "hold") micStart(e); else startConversation(e, voiceMode()); });
+    micBtn.addEventListener("pointerdown", (e) => {
+      if (!voiceTurns.armed()) { toast("语音采集是关的，不会打开麦克风。请先点「语音采集」。键盘不受影响。"); return; }
+      if (voiceMode() === "hold") micStart(e); else startConversation(e, voiceMode());
+    });
     ["pointerup", "pointercancel"].forEach((ev) => micBtn.addEventListener(ev, () => { if (voiceMode() === "hold") micStop(); }));
     micBtn.addEventListener("contextmenu", (e) => e.preventDefault());
-    micBtn.addEventListener("keydown", (e) => { if ((e.key === " " || e.key === "Enter") && !e.repeat) { e.preventDefault(); if (voiceMode() === "hold") { if (mic) micStop(); else micStart(); } else startConversation(e, voiceMode()); } });
+    micBtn.addEventListener("keydown", (e) => { if ((e.key === " " || e.key === "Enter") && !e.repeat) { e.preventDefault(); if (!voiceTurns.armed()) { toast("语音采集是关的，不会打开麦克风。请先点「语音采集」。键盘不受影响。"); return; } if (voiceMode() === "hold") { if (mic) micStop(); else micStart(); } else startConversation(e, voiceMode()); } });
     $("#projects").addEventListener("click", (e) => { const b = e.target.closest("[data-pj]"); if (b) openProject(b.dataset.pj); });
     $("#btn-new-project").addEventListener("click", newProject);
     $("#agents").addEventListener("click", (e) => {

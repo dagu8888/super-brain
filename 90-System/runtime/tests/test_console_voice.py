@@ -223,6 +223,13 @@ def test_http():
         check("审计不含密钥", SECRET not in audit)
         code, granted = req(port, "POST", "/api/owner/voice/grant", {}, {"Authorization": "Bearer " + token})
         check("短时令牌接口不泄露永久密钥", code == 200 and granted.get("access_token") == "short-lived" and SECRET not in json.dumps(granted))
+        before = dict(seen)
+        code, blocked = req(port, "POST", "/api/owner/voice/live/open", {}, {"Authorization": "Bearer " + token})
+        check("默认不打开 Nova-3 听写", code == 200 and blocked.get("skipped") is True and blocked.get("reason") == "disabled" and seen.get("ws") == before.get("ws") and "v1/listen" not in json.dumps(blocked))
+        code, anon_live = req(port, "POST", "/api/owner/voice/live/open", {})
+        check("匿名打开听写 401", anon_live.get("need_unlock") and code == 401)
+        code, anon_partial = req(port, "POST", "/api/owner/voice/partial", {})
+        check("匿名局部识别 401", code == 401 and anon_partial.get("need_unlock"))
     finally:
         httpd.shutdown()
         deepgram_proxy.set_test_hooks(None, None)
@@ -345,6 +352,57 @@ def test_speak_stream_latency():
         os.environ.pop("DEEPGRAM_API_KEY", None)
 
 
+def test_partial_simulated():
+    """用本地 WAV 夹具打到假 Moonshine。不加载模型，不访问 Deepgram。"""
+    import struct
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    pcm = b"\x00\x10" * 1600
+    wav = struct.pack("<4sI4s4sIHHIIHH4sI", b"RIFF", 36 + len(pcm), b"WAVE", b"fmt ", 16, 1, 1, 16000, 32000, 2, 16, b"data", len(pcm)) + pcm
+    seen = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(n)
+            seen["wav"] = body[:4] == b"RIFF"
+            raw = json.dumps({"ok": True, "text": "服务器健康", "seconds": 0.1}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def log_message(self, *args):
+            return
+
+    stt = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=stt.serve_forever, daemon=True).start()
+    prev = os.environ.get("SB_STT_URL")
+    os.environ["SB_STT_URL"] = "http://127.0.0.1:%s/stt" % stt.server_address[1]
+    conn = fresh_db()
+    token = owner_ops.unlock(conn, "语音测试口令", "夹具机")["token"]
+    conn.close()
+    httpd = serve(str(TMP / "db" / "state.db"))
+    port = httpd.server_address[1]
+    try:
+        code, anon = req(port, "POST", "/api/owner/voice/partial", wav, {"Content-Type": "audio/wav"})
+        check("夹具匿名识别 401", code == 401 and anon.get("need_unlock") and "服务器健康" not in json.dumps(anon))
+        code, body = req(port, "POST", "/api/owner/voice/partial", wav, {"Content-Type": "audio/wav", "Authorization": "Bearer " + token})
+        check("夹具识别返回最终文本", code == 200 and body.get("ok") and body.get("text") == "服务器健康" and seen.get("wav") is True, body)
+        code, server = req(port, "GET", "/api/server")
+        check("匿名健康查询 401", code == 401 and server.get("need_auth") and "mem_total_mb" not in json.dumps(server))
+        code, server = req(port, "GET", "/api/server", headers={"Authorization": "Bearer " + token})
+        data = server.get("data") or {}
+        check("主人会话能读到只读健康", code == 200 and server.get("ok") and "mem_total_mb" in data and SECRET not in json.dumps(server), code)
+    finally:
+        httpd.shutdown()
+        stt.shutdown()
+        if prev is None:
+            os.environ.pop("SB_STT_URL", None)
+        else:
+            os.environ["SB_STT_URL"] = prev
+
+
 def test_pages():
     html = (ROOT / "70-Console/design/prototype/index.html").read_text(encoding="utf-8")
     js = (ROOT / "70-Console/design/prototype/v2/app.js").read_text(encoding="utf-8")
@@ -366,7 +424,19 @@ def test_pages():
     err = js.split("function micErrorText", 1)[1].split("async function micStart", 1)[0]
     check("拒绝麦克风时提示改地址栏并覆盖 iPhone", "NotAllowedError" in err and "SecurityError" in err and "地址栏" in err and "锁" in err and "麦克风图标" in err and "实时通话" in err and "设置 › Safari › 麦克风" in err and "键盘输入不受影响" in err)
     check("页面缓存仍是 no-store", 'Cache-Control" content="no-store' in html)
-    check("静态脚本样式版本是 2.8.4", "v2/app.js?v=2.8.4" in html and "v2/app.css?v=2.8.4" in html and "v2/voice-entry.js?v=2.8.4" in html and "v2/speak-queue.js?v=2.8.4" in html and "v2/roster.js?v=2.8.4" in html)
+    check("静态脚本样式版本是 2.8.5", "v2/app.js?v=2.8.5" in html and "v2/app.css?v=2.8.5" in html and "v2/voice-turn.js?v=2.8.5" in html and "v2/voice-entry.js?v=2.8.4" in html and "v2/speak-queue.js?v=2.8.4" in html and "v2/roster.js?v=2.8.4" in html)
+    check("按住说话仍是默认选中", 'name="voice-mode" value="hold" checked' in html and 'value="live" checked' not in html)
+    check("语音面板有标题和收起", 'id="voice-panel-title"' in html and 'id="btn-voice-collapse"' in html and ">收起<" in html and 'id="voice-panel-body"' in html)
+    mobile_css = css.split("@media (max-width: 760px)", 1)[1]
+    check("手机语音面板可滚动且标题粘住", "#sec-chat .voice-panel" in mobile_css and "overflow: auto" in mobile_css and "max-height: min(46dvh, 420px)" in mobile_css and "#sec-chat .sec-head" in mobile_css and "position: sticky" in mobile_css)
+    check("收起只藏正文", ".voice-panel.is-collapsed #voice-panel-body" in css)
+    check("供应商占位不是未配置", html.count('data-state="pending">读取中<') == 4)
+    check("401 时供应商改画未认证", 'paintVoiceSlots("unauthorized")' in js and "未认证，语音状态未读取" in js)
+    check("手机上健康徽标不参与顶栏重复", "#health-pill { display: none" in mobile_css)
+    turn = (ROOT / "70-Console/design/prototype/v2/voice-turn.js").read_text(encoding="utf-8")
+    check("连接徽标不再重复未授权", 'conn: "未连接"' in turn and 'owner: "未授权"' in turn and 'setConn("down", "未授权")' not in js and "authPills().conn" in js)
+    check("页面不调用 Nova-3 听写", "/api/owner/voice/live/open" not in js and "/api/owner/voice/partial" in js and "/api/owner/stt" in js)
+    check("浏览器朗读只出现一次且要求 localService", js.count("speechSynthesis.speak") == 1 and "localService === true" in js)
     queue = (ROOT / "70-Console/design/prototype/v2/speak-queue.js").read_text(encoding="utf-8")
     proxy = (VOICE / "deepgram_proxy.py").read_text(encoding="utf-8")
     voice = js.split("function stopSpeaking", 1)[1].split("async function commitUtterance", 1)[0]
@@ -376,12 +446,12 @@ def test_pages():
     say = js.split("async function say", 1)[1].split("async function commitUtterance", 1)[0]
     say_head = say.split("await ", 1)[0]
     check("按句排队且新朗读会先停掉上一段", "splitSpeakText" in queue and "createSession" in js and "stopSpeaking()" in say_head and "speakSession.begin" in say_head)
-    check("快速回复念正文，正式回复仍走 say", "say(chatBody(m))" in js and "say(m.text)" in js)
+    check("快速回复念正文，正式回复仍走 say", "say(chatBody(m), S.voiceGen)" in js and "say(m.text, S.voiceGen)" in js)
     live = js.split("if (rms > 0.02)", 1)[1].split("else t.quiet", 1)[0]
     check("开口仍打断当前播放", "stopSpeaking()" in live)
     call = js.split("function startConversation", 1)[1].split("if (!canRecord", 1)[0]
     check("进入实时通话会先停朗读", "stopSpeaking()" in call)
-    check("实时定稿仍走 sendChat", "await sendChat()" in js.split("async function commitUtterance", 1)[1].split("function pcm16", 1)[0])
+    check("实时定稿仍走 sendChat", "await sendChat({ voiceGen: sttGen })" in js.split("async function commitUtterance", 1)[1].split("function pcm16", 1)[0])
     check("音色常量仍是文静", 'TTS_MODEL = "flux-wenjing-zh"' in proxy and "flux-wenjing-zh" in js)
     check("前端不出现 Deepgram 主机和密钥名", "api.deepgram.com" not in js and "DEEPGRAM_API_KEY" not in js and "token=" not in js)
     begin = js[js.index("async function beginEntry"):js.index("function bindBgm")]
@@ -406,6 +476,7 @@ def test_node():
 if __name__ == "__main__":
     test_logic()
     test_http()
+    test_partial_simulated()
     test_speak_stream_latency()
     proc = subprocess.run(
         ["node", "-e", r"""
@@ -445,6 +516,9 @@ if (E.WELCOME_TEXT !== "大古，欢迎回来") fail("welcome text");
     check("模式切换、欢迎语顺序和名字圈列数", proc.returncode == 0, (proc.stdout + proc.stderr)[-500:])
     queued = subprocess.run(["node", "--check", str(ROOT / "70-Console/design/prototype/v2/app.js")], capture_output=True, text=True)
     check("app.js 语法", queued.returncode == 0, queued.stderr[-300:])
+    queued = subprocess.run(["node", str(ROOT / "90-System/runtime/tests/test_voice_turn.mjs")], capture_output=True, text=True)
+    print(queued.stdout.strip())
+    check("语音轮次、回授和白名单", queued.returncode == 0 and "ALL PASS" in queued.stdout, (queued.stdout + queued.stderr)[-800:])
     queued = subprocess.run(["node", str(ROOT / "90-System/runtime/tests/test_speak_queue.mjs")], capture_output=True, text=True)
     print(queued.stdout.strip())
     check("按句排队与首段时钟", queued.returncode == 0 and "SPEAK_LATENCY_MODEL" in queued.stdout, (queued.stdout + queued.stderr)[-800:])

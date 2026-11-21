@@ -195,10 +195,10 @@ def public_status():
             "file": WELCOME_FILE,
         },
         "local_tts": False,
-        "stream_tts_fallback": "deepgram-wenjing",
-        "stream_tts_note": "本机没有现成的本地 TTS（不安装 ZipVoice / Kokoro）。流式朗读用 Deepgram 文静；没配密钥时改用浏览器语音。",
+        "stream_tts_fallback": "none",
+        "stream_tts_note": "朗读默认关闭。打开后，已配置的文静仍走服务器已有接口。没有 localService=true 的中文本地音色时，不用浏览器语音，避免外传。操作台本次不打开 Nova-3。",
         "chief": CHIEF_ID,
-        "listen": {"model": LISTEN_MODEL, "language": LISTEN_LANGUAGE, "version": "v1"},
+        "listen": {"model": LISTEN_MODEL, "language": LISTEN_LANGUAGE, "version": "v1", "enabled": live_listen_enabled()},
         "providers": providers,
         "deepgram": deepgram["configured"],
     }
@@ -439,7 +439,14 @@ class ListenSession:
             pass
 
 
+def live_listen_enabled():
+    """Nova-3 听写会连 wss://api.deepgram.com/v1/listen。默认关闭，避免操作台选中实时模式就打开付费连接。"""
+    return (os.environ.get("SB_VOICE_ALLOW_LIVE_LISTEN") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def open_listen(key):
+    if not live_listen_enabled():
+        return None, "disabled"
     if not key:
         return None, "unconfigured"
     url = listen_url()
